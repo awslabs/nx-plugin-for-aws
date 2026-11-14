@@ -1,0 +1,2529 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`addContainerServiceCdkConstructs > should match the vended files snapshot (http-api cognito) > ecs-service.ts 1`] = `
+"import { CfnOutput, Duration, Stack } from 'aws-cdk-lib';
+import {
+  CfnApi,
+  CorsHttpMethod,
+  CorsPreflightOptions,
+  HttpApi,
+  HttpStage,
+  IHttpRouteAuthorizer,
+  LogGroupLogDestination,
+  ThrottleSettings,
+  VpcLink,
+} from 'aws-cdk-lib/aws-apigatewayv2';
+import {
+  HttpIamAuthorizer,
+  HttpUserPoolAuthorizer,
+} from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import { HttpAlbIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
+import {
+  Connections,
+  IConnectable,
+  ISecurityGroup,
+  IVpc,
+  Peer,
+  Port,
+  SecurityGroup,
+  SubnetSelection,
+  SubnetType,
+} from 'aws-cdk-lib/aws-ec2';
+import { Repository } from 'aws-cdk-lib/aws-ecr';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import {
+  Cluster,
+  ContainerImage,
+  ContainerInsights,
+  CpuArchitecture,
+  FargatePlatformVersion,
+  FargateService,
+  FargateTaskDefinition,
+  ICluster,
+  LogDrivers,
+  OperatingSystemFamily,
+  Secret,
+} from 'aws-cdk-lib/aws-ecs';
+import {
+  ApplicationLoadBalancer,
+  ApplicationProtocol,
+} from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import { Grant, IGrantable, IRole, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { Construct } from 'constructs';
+import { suppressRules } from '../checkov.js';
+import { RuntimeConfig } from '../runtime-config.js';
+
+/**
+ * Where the service's container image comes from.
+ */
+export type EcsServiceImage =
+  | {
+      /**
+       * Directory holding a Dockerfile, built as a linux/arm64 CDK image asset
+       * at deploy time.
+       */
+      readonly directory: string;
+    }
+  | {
+      /**
+       * Prebuilt image URI (a public registry or ECR). Nothing is built
+       * locally. For an ECR image the execution role is granted pull on it.
+       */
+      readonly imageUri: string;
+    };
+
+/**
+ * How callers reach the service when it has a load balancer.
+ *
+ * \`http-api\`: an API Gateway HTTP API reaches the internal load balancer
+ * through a VPC link. Requests time out after 30 seconds.
+ * \`private\`: the internal load balancer only, for callers inside the VPC.
+ */
+export type EcsServiceIngress = 'http-api' | 'private';
+
+/**
+ * How the HTTP API in front of the service authenticates (\`http-api\` only).
+ */
+export type EcsServiceAuth =
+  | { readonly type: 'iam' }
+  | {
+      readonly type: 'cognito';
+      readonly userPool: IUserPool;
+      readonly userPoolClient: IUserPoolClient;
+    }
+  | { readonly type: 'none' };
+
+/**
+ * Internal Application Load Balancer settings.
+ */
+export interface EcsServiceLoadBalancerOptions {
+  /**
+   * Path the target group health check calls.
+   *
+   * @default '/health'
+   */
+  readonly healthCheckPath?: string;
+  /**
+   * Time the target group waits before it removes a draining task.
+   *
+   * @default Duration.seconds(30)
+   */
+  readonly deregistrationDelay?: Duration;
+}
+
+/**
+ * Properties for an ECS service on AWS Fargate (linux/arm64) in an existing VPC.
+ */
+export interface EcsServiceProps {
+  /**
+   * Name of the service. Its URL is written to runtime config as
+   * \`connection.services.<serviceName>\`.
+   */
+  readonly serviceName: string;
+  /**
+   * VPC the service runs in. The construct never creates a VPC.
+   */
+  readonly vpc: IVpc;
+  /**
+   * Subnets for the tasks and the internal load balancer. Tasks never get a
+   * public IP.
+   *
+   * @default { subnetType: SubnetType.PRIVATE_WITH_EGRESS }
+   */
+  readonly vpcSubnets?: SubnetSelection;
+  /**
+   * Cluster to run in. Pass the same cluster to several services to run them
+   * in one cluster.
+   *
+   * @default a new cluster with Container Insights on
+   */
+  readonly cluster?: ICluster;
+  /**
+   * The container image to run.
+   */
+  readonly image: EcsServiceImage;
+  /**
+   * Port the server listens on inside the container, passed as \`PORT\`.
+   *
+   * @default 8080
+   */
+  readonly containerPort?: number;
+  /**
+   * Task CPU units.
+   *
+   * @default 256
+   */
+  readonly cpu?: number;
+  /**
+   * Task memory in MiB.
+   *
+   * @default 512
+   */
+  readonly memoryLimitMiB?: number;
+  /**
+   * Number of tasks to start with.
+   *
+   * @default 1
+   */
+  readonly desiredCount?: number;
+  /**
+   * Fewest tasks autoscaling keeps.
+   *
+   * @default 1
+   */
+  readonly minCapacity?: number;
+  /**
+   * Most tasks autoscaling starts.
+   *
+   * @default 2
+   */
+  readonly maxCapacity?: number;
+  /**
+   * Average CPU utilisation autoscaling keeps the service at, in percent.
+   *
+   * @default 70
+   */
+  readonly targetCpuUtilizationPercent?: number;
+  /**
+   * Plain environment variables. Never put secret values here; use \`secrets\`.
+   *
+   * @default {}
+   */
+  readonly environment?: Record<string, string>;
+  /**
+   * Secrets passed to the container as environment variables, read from
+   * Secrets Manager or SSM Parameter Store (\`Secret.fromSecretsManager\`,
+   * \`Secret.fromSsmParameter\`). The execution role may read only these.
+   *
+   * @default {}
+   */
+  readonly secrets?: Record<string, Secret>;
+  /**
+   * Internal load balancer settings, or \`false\` for a service with no load
+   * balancer and no URL (a worker).
+   *
+   * @default {}
+   */
+  readonly loadBalancer?: EcsServiceLoadBalancerOptions | false;
+  /**
+   * How callers reach the service. Only valid with a load balancer.
+   *
+   * @default 'http-api'
+   */
+  readonly ingress?: EcsServiceIngress;
+  /**
+   * How the HTTP API authenticates. Only valid with \`ingress: 'http-api'\`.
+   *
+   * @default { type: 'iam' }
+   */
+  readonly auth?: EcsServiceAuth;
+  /**
+   * Retention of the container log group.
+   *
+   * @default RetentionDays.ONE_YEAR
+   */
+  readonly logRetention?: RetentionDays;
+  /**
+   * Called once with the task role, to add grants the service needs. The task
+   * role has no permissions otherwise; connections add theirs here or through
+   * \`taskRole\`.
+   */
+  readonly grantTaskRole?: (taskRole: IRole) => void;
+  /**
+   * User the container runs as. The vended image's \`node\` user is uid 1000.
+   *
+   * @default '1000'
+   */
+  readonly user?: string;
+  /**
+   * CORS settings of the HTTP API (\`ingress: 'http-api'\` only).
+   *
+   * @default any origin, any method, and the authorization and SigV4 headers
+   */
+  readonly corsPreflight?: CorsPreflightOptions;
+  /**
+   * Throttling of the HTTP API's default stage (\`ingress: 'http-api'\` only).
+   *
+   * @default { rateLimit: 10000, burstLimit: 5000 }
+   */
+  readonly throttle?: ThrottleSettings;
+}
+
+const DEFAULT_CORS_PREFLIGHT: CorsPreflightOptions = {
+  allowOrigins: ['*'],
+  allowMethods: [CorsHttpMethod.ANY],
+  allowHeaders: [
+    'authorization',
+    'content-type',
+    'x-amz-content-sha256',
+    'x-amz-date',
+    'x-amz-security-token',
+  ],
+};
+
+const ECR_IMAGE_URI =
+  /^(\\d{12})\\.dkr\\.ecr\\.([a-z0-9-]+)\\.amazonaws\\.com(?:\\.cn)?\\/([^:@]+)(?:[:@](.+))?$/;
+
+const LOAD_BALANCER_PORT = 80;
+
+/**
+ * An ECS service on AWS Fargate with an optional internal Application Load
+ * Balancer and an optional API Gateway HTTP API in front of it.
+ *
+ * Members other connections and stacks rely on: \`service\`, \`taskDefinition\`,
+ * \`taskRole\`, \`securityGroup\`, \`connections\`, \`loadBalancer\`, \`httpApi\`, \`url\`
+ * and \`grantInvoke\`.
+ */
+export class EcsService extends Construct implements IConnectable {
+  /** The cluster the service runs in. */
+  public readonly cluster: ICluster;
+  /** The Fargate service. */
+  public readonly service: FargateService;
+  /** The Fargate task definition (linux/arm64). */
+  public readonly taskDefinition: FargateTaskDefinition;
+  /** Role the container's code runs as. No permissions unless granted. */
+  public readonly taskRole: IRole;
+  /** Security group of the tasks. */
+  public readonly securityGroup: ISecurityGroup;
+  /** Connections of the tasks' security group, for database and other rules. */
+  public readonly connections: Connections;
+  /** The internal load balancer, unless \`loadBalancer\` is \`false\`. */
+  public readonly loadBalancer?: ApplicationLoadBalancer;
+  /** The HTTP API, when \`ingress\` is \`http-api\`. */
+  public readonly httpApi?: HttpApi;
+  /** URL callers use: the HTTP API URL, or the internal load balancer URL. */
+  public readonly url?: string;
+
+  private readonly serviceName: string;
+  private readonly authType?: EcsServiceAuth['type'];
+  private readonly corsPreflight?: CorsPreflightOptions;
+
+  constructor(scope: Construct, id: string, props: EcsServiceProps) {
+    super(scope, id);
+    const { serviceName, vpc } = props;
+    this.serviceName = serviceName;
+
+    if (props.loadBalancer === false && (props.ingress || props.auth)) {
+      throw new Error(
+        \`ingress and auth need a load balancer (service \${serviceName})\`,
+      );
+    }
+    if (props.ingress === 'private' && props.auth) {
+      throw new Error(\`auth needs ingress 'http-api' (service \${serviceName})\`);
+    }
+
+    const containerPort = props.containerPort ?? 8080;
+    const vpcSubnets = props.vpcSubnets ?? {
+      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+    };
+    const logRetention = props.logRetention ?? RetentionDays.ONE_YEAR;
+
+    this.cluster =
+      props.cluster ??
+      new Cluster(this, 'Cluster', {
+        vpc,
+        containerInsightsV2: ContainerInsights.ENABLED,
+      });
+
+    this.taskDefinition = new FargateTaskDefinition(this, 'TaskDefinition', {
+      cpu: props.cpu ?? 256,
+      memoryLimitMiB: props.memoryLimitMiB ?? 512,
+      runtimePlatform: {
+        cpuArchitecture: CpuArchitecture.ARM64,
+        operatingSystemFamily: OperatingSystemFamily.LINUX,
+      },
+    });
+    this.taskRole = this.taskDefinition.taskRole;
+    props.grantTaskRole?.(this.taskRole);
+
+    const logsKey = new Key(this, 'LogsKey', { enableKeyRotation: true });
+    logsKey.grantEncryptDecrypt(
+      new ServicePrincipal(\`logs.\${Stack.of(this).region}.amazonaws.com\`),
+    );
+    const logGroup = new LogGroup(this, 'Logs', {
+      encryptionKey: logsKey,
+      retention: logRetention,
+    });
+
+    this.taskDefinition.addContainer('Container', {
+      image: this.containerImage(props.image),
+      readonlyRootFilesystem: true,
+      user: props.user ?? '1000',
+      environment: {
+        ...props.environment,
+        PORT: String(containerPort),
+      },
+      secrets: props.secrets,
+      portMappings: [{ containerPort }],
+      logging: LogDrivers.awsLogs({ logGroup, streamPrefix: serviceName }),
+    });
+
+    this.securityGroup = new SecurityGroup(this, 'ServiceSecurityGroup', {
+      vpc,
+      allowAllOutbound: false,
+    });
+    this.securityGroup.addEgressRule(
+      Peer.anyIpv4(),
+      Port.tcp(443),
+      'HTTPS egress',
+    );
+
+    this.service = new FargateService(this, 'Service', {
+      cluster: this.cluster,
+      taskDefinition: this.taskDefinition,
+      vpcSubnets,
+      assignPublicIp: false,
+      securityGroups: [this.securityGroup],
+      circuitBreaker: { enable: true, rollback: true },
+      enableExecuteCommand: false,
+      platformVersion: FargatePlatformVersion.LATEST,
+      desiredCount: props.desiredCount ?? 1,
+      minHealthyPercent: 100,
+      maxHealthyPercent: 200,
+    });
+    this.connections = this.service.connections;
+
+    this.service
+      .autoScaleTaskCount({
+        minCapacity: props.minCapacity ?? 1,
+        maxCapacity: props.maxCapacity ?? 2,
+      })
+      .scaleOnCpuUtilization('CpuScaling', {
+        targetUtilizationPercent: props.targetCpuUtilizationPercent ?? 70,
+      });
+
+    if (props.loadBalancer === false) {
+      return;
+    }
+
+    const loadBalancerSecurityGroup = new SecurityGroup(
+      this,
+      'LoadBalancerSecurityGroup',
+      { vpc, allowAllOutbound: false },
+    );
+    this.loadBalancer = new ApplicationLoadBalancer(this, 'LoadBalancer', {
+      vpc,
+      vpcSubnets,
+      internetFacing: false,
+      securityGroup: loadBalancerSecurityGroup,
+      dropInvalidHeaderFields: true,
+    });
+    suppressRules(
+      this.loadBalancer,
+      ['CKV_AWS_91'],
+      'Internal load balancer; requests are logged by the HTTP API access logs or the service',
+    );
+
+    const listener = this.loadBalancer.addListener('Listener', {
+      port: LOAD_BALANCER_PORT,
+      protocol: ApplicationProtocol.HTTP,
+      open: false,
+    });
+    listener.addTargets('Service', {
+      port: containerPort,
+      protocol: ApplicationProtocol.HTTP,
+      targets: [this.service],
+      healthCheck: {
+        path: props.loadBalancer?.healthCheckPath ?? '/health',
+        healthyHttpCodes: '200',
+      },
+      deregistrationDelay:
+        props.loadBalancer?.deregistrationDelay ?? Duration.seconds(30),
+    });
+    suppressRules(
+      listener,
+      ['CKV_AWS_2', 'CKV_AWS_103'],
+      'Internal load balancer reached only from inside the VPC; there is no certificate for an HTTP listener',
+    );
+
+    if ((props.ingress ?? 'http-api') === 'private') {
+      loadBalancerSecurityGroup.addIngressRule(
+        Peer.ipv4(vpc.vpcCidrBlock),
+        Port.tcp(LOAD_BALANCER_PORT),
+        'HTTP from inside the VPC',
+      );
+      this.url = \`http://\${this.loadBalancer.loadBalancerDnsName}\`;
+    } else {
+      const auth = props.auth ?? { type: 'iam' };
+      this.authType = auth.type;
+      this.corsPreflight = props.corsPreflight ?? DEFAULT_CORS_PREFLIGHT;
+
+      const vpcLinkSecurityGroup = new SecurityGroup(
+        this,
+        'VpcLinkSecurityGroup',
+        { vpc, allowAllOutbound: false },
+      );
+      this.loadBalancer.connections.allowFrom(
+        vpcLinkSecurityGroup,
+        Port.tcp(LOAD_BALANCER_PORT),
+        'HTTP from the VPC link',
+      );
+      const vpcLink = new VpcLink(this, 'VpcLink', {
+        vpc,
+        subnets: vpcSubnets,
+        securityGroups: [vpcLinkSecurityGroup],
+      });
+
+      this.httpApi = new HttpApi(this, 'Api', {
+        createDefaultStage: false,
+        corsPreflight: this.corsPreflight,
+        defaultIntegration: new HttpAlbIntegration('AlbIntegration', listener, {
+          vpcLink,
+        }),
+        defaultAuthorizer: this.authorizer(auth),
+      });
+
+      const accessLogGroup = new LogGroup(this, 'AccessLogs', {
+        encryptionKey: logsKey,
+        retention: logRetention,
+      });
+      const stage = new HttpStage(this, 'DefaultStage', {
+        httpApi: this.httpApi,
+        autoDeploy: true,
+        throttle: props.throttle ?? { rateLimit: 10000, burstLimit: 5000 },
+        accessLogSettings: {
+          destination: new LogGroupLogDestination(accessLogGroup),
+        },
+      });
+      this.url = stage.url;
+    }
+
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('connection', 'services', {
+      ...rc.get('connection').services,
+      [serviceName]: this.url,
+    });
+    new CfnOutput(this, \`\${serviceName}Url\`, { value: this.url });
+  }
+
+  /**
+   * Lets \`grantee\` call the HTTP API (\`execute-api:Invoke\`) when \`auth\` is IAM.
+   */
+  public grantInvoke(grantee: IGrantable): Grant {
+    if (!this.httpApi || this.authType !== 'iam') {
+      throw new Error(
+        \`grantInvoke needs an HTTP API with IAM auth (service \${this.serviceName})\`,
+      );
+    }
+    return Grant.addToPrincipal({
+      grantee,
+      actions: ['execute-api:Invoke'],
+      resourceArns: [this.httpApi.arnForExecuteApi('*', '/*', '*')],
+    });
+  }
+
+  /**
+   * Allows CORS requests to the HTTP API from the given origins only.
+   */
+  public restrictCorsTo(...origins: string[]) {
+    const cfnApi = this.httpApi?.node.defaultChild;
+    if (!(cfnApi instanceof CfnApi) || !this.corsPreflight) {
+      throw new Error(
+        \`restrictCorsTo needs an HTTP API (service \${this.serviceName})\`,
+      );
+    }
+    cfnApi.corsConfiguration = {
+      allowCredentials: this.corsPreflight.allowCredentials,
+      allowHeaders: this.corsPreflight.allowHeaders,
+      allowMethods: this.corsPreflight.allowMethods,
+      allowOrigins: origins,
+      exposeHeaders: this.corsPreflight.exposeHeaders,
+      maxAge: this.corsPreflight.maxAge?.toSeconds(),
+    };
+  }
+
+  private containerImage(image: EcsServiceImage): ContainerImage {
+    if ('directory' in image) {
+      return ContainerImage.fromAsset(image.directory, {
+        platform: Platform.LINUX_ARM64,
+      });
+    }
+    const ecr = ECR_IMAGE_URI.exec(image.imageUri);
+    if (!ecr) {
+      return ContainerImage.fromRegistry(image.imageUri);
+    }
+    const [, account, region, repositoryName, tagOrDigest] = ecr;
+    const repository = Repository.fromRepositoryAttributes(
+      this,
+      'ImageRepository',
+      {
+        repositoryName,
+        repositoryArn: Stack.of(this).formatArn({
+          service: 'ecr',
+          account,
+          region,
+          resource: 'repository',
+          resourceName: repositoryName,
+        }),
+      },
+    );
+    return ContainerImage.fromEcrRepository(repository, tagOrDigest ?? 'latest');
+  }
+
+  private authorizer(auth: EcsServiceAuth): IHttpRouteAuthorizer | undefined {
+    switch (auth.type) {
+      case 'iam':
+        return new HttpIamAuthorizer();
+      case 'cognito':
+        return new HttpUserPoolAuthorizer('Authorizer', auth.userPool, {
+          userPoolClients: [auth.userPoolClient],
+        });
+      case 'none':
+        return undefined;
+    }
+  }
+}
+"
+`;
+
+exports[`addContainerServiceCdkConstructs > should match the vended files snapshot (http-api cognito) > orders.ts 1`] = `
+"import * as path from 'path';
+import * as url from 'url';
+import { Construct } from 'constructs';
+import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
+import {
+  EcsService,
+  EcsServiceImage,
+  EcsServiceProps,
+} from '../../core/container/ecs-service.js';
+import { findWorkspaceRoot } from '../../core/workspace.js';
+
+const dockerBuildContextDir = path.join(
+  findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+  'dist/apps/shop/bundle/container/orders',
+);
+
+export type OrdersProps = Omit<
+  EcsServiceProps,
+  'serviceName' | 'image' | 'ingress' | 'auth'
+> & {
+  /**
+   * The image to run.
+   *
+   * @default the image built from dist/apps/shop/bundle/container/orders
+   */
+  readonly image?: EcsServiceImage;
+  /**
+   * Identity details for Cognito authentication
+   */
+  readonly identity: {
+    readonly userPool: IUserPool;
+    readonly userPoolClient: IUserPoolClient;
+  };
+};
+
+/**
+ * The Orders container service on Amazon ECS.
+ */
+export class Orders extends EcsService {
+  constructor(scope: Construct, id: string, props: OrdersProps) {
+    const { identity, ...rest } = props;
+    super(scope, id, {
+      containerPort: 8080,
+      ...rest,
+      serviceName: 'Orders',
+      image: props.image ?? { directory: dockerBuildContextDir },
+      ...(props.loadBalancer === false
+        ? {}
+        : {
+            ingress: 'http-api',
+            auth: {
+              type: 'cognito',
+              userPool: identity.userPool,
+              userPoolClient: identity.userPoolClient,
+            },
+          }),
+    });
+  }
+}
+"
+`;
+
+exports[`addContainerServiceCdkConstructs > should match the vended files snapshot (http-api iam) > ecs-service.ts 1`] = `
+"import { CfnOutput, Duration, Stack } from 'aws-cdk-lib';
+import {
+  CfnApi,
+  CorsHttpMethod,
+  CorsPreflightOptions,
+  HttpApi,
+  HttpStage,
+  IHttpRouteAuthorizer,
+  LogGroupLogDestination,
+  ThrottleSettings,
+  VpcLink,
+} from 'aws-cdk-lib/aws-apigatewayv2';
+import {
+  HttpIamAuthorizer,
+  HttpUserPoolAuthorizer,
+} from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import { HttpAlbIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
+import {
+  Connections,
+  IConnectable,
+  ISecurityGroup,
+  IVpc,
+  Peer,
+  Port,
+  SecurityGroup,
+  SubnetSelection,
+  SubnetType,
+} from 'aws-cdk-lib/aws-ec2';
+import { Repository } from 'aws-cdk-lib/aws-ecr';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import {
+  Cluster,
+  ContainerImage,
+  ContainerInsights,
+  CpuArchitecture,
+  FargatePlatformVersion,
+  FargateService,
+  FargateTaskDefinition,
+  ICluster,
+  LogDrivers,
+  OperatingSystemFamily,
+  Secret,
+} from 'aws-cdk-lib/aws-ecs';
+import {
+  ApplicationLoadBalancer,
+  ApplicationProtocol,
+} from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import { Grant, IGrantable, IRole, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { Construct } from 'constructs';
+import { suppressRules } from '../checkov.js';
+import { RuntimeConfig } from '../runtime-config.js';
+
+/**
+ * Where the service's container image comes from.
+ */
+export type EcsServiceImage =
+  | {
+      /**
+       * Directory holding a Dockerfile, built as a linux/arm64 CDK image asset
+       * at deploy time.
+       */
+      readonly directory: string;
+    }
+  | {
+      /**
+       * Prebuilt image URI (a public registry or ECR). Nothing is built
+       * locally. For an ECR image the execution role is granted pull on it.
+       */
+      readonly imageUri: string;
+    };
+
+/**
+ * How callers reach the service when it has a load balancer.
+ *
+ * \`http-api\`: an API Gateway HTTP API reaches the internal load balancer
+ * through a VPC link. Requests time out after 30 seconds.
+ * \`private\`: the internal load balancer only, for callers inside the VPC.
+ */
+export type EcsServiceIngress = 'http-api' | 'private';
+
+/**
+ * How the HTTP API in front of the service authenticates (\`http-api\` only).
+ */
+export type EcsServiceAuth =
+  | { readonly type: 'iam' }
+  | {
+      readonly type: 'cognito';
+      readonly userPool: IUserPool;
+      readonly userPoolClient: IUserPoolClient;
+    }
+  | { readonly type: 'none' };
+
+/**
+ * Internal Application Load Balancer settings.
+ */
+export interface EcsServiceLoadBalancerOptions {
+  /**
+   * Path the target group health check calls.
+   *
+   * @default '/health'
+   */
+  readonly healthCheckPath?: string;
+  /**
+   * Time the target group waits before it removes a draining task.
+   *
+   * @default Duration.seconds(30)
+   */
+  readonly deregistrationDelay?: Duration;
+}
+
+/**
+ * Properties for an ECS service on AWS Fargate (linux/arm64) in an existing VPC.
+ */
+export interface EcsServiceProps {
+  /**
+   * Name of the service. Its URL is written to runtime config as
+   * \`connection.services.<serviceName>\`.
+   */
+  readonly serviceName: string;
+  /**
+   * VPC the service runs in. The construct never creates a VPC.
+   */
+  readonly vpc: IVpc;
+  /**
+   * Subnets for the tasks and the internal load balancer. Tasks never get a
+   * public IP.
+   *
+   * @default { subnetType: SubnetType.PRIVATE_WITH_EGRESS }
+   */
+  readonly vpcSubnets?: SubnetSelection;
+  /**
+   * Cluster to run in. Pass the same cluster to several services to run them
+   * in one cluster.
+   *
+   * @default a new cluster with Container Insights on
+   */
+  readonly cluster?: ICluster;
+  /**
+   * The container image to run.
+   */
+  readonly image: EcsServiceImage;
+  /**
+   * Port the server listens on inside the container, passed as \`PORT\`.
+   *
+   * @default 8080
+   */
+  readonly containerPort?: number;
+  /**
+   * Task CPU units.
+   *
+   * @default 256
+   */
+  readonly cpu?: number;
+  /**
+   * Task memory in MiB.
+   *
+   * @default 512
+   */
+  readonly memoryLimitMiB?: number;
+  /**
+   * Number of tasks to start with.
+   *
+   * @default 1
+   */
+  readonly desiredCount?: number;
+  /**
+   * Fewest tasks autoscaling keeps.
+   *
+   * @default 1
+   */
+  readonly minCapacity?: number;
+  /**
+   * Most tasks autoscaling starts.
+   *
+   * @default 2
+   */
+  readonly maxCapacity?: number;
+  /**
+   * Average CPU utilisation autoscaling keeps the service at, in percent.
+   *
+   * @default 70
+   */
+  readonly targetCpuUtilizationPercent?: number;
+  /**
+   * Plain environment variables. Never put secret values here; use \`secrets\`.
+   *
+   * @default {}
+   */
+  readonly environment?: Record<string, string>;
+  /**
+   * Secrets passed to the container as environment variables, read from
+   * Secrets Manager or SSM Parameter Store (\`Secret.fromSecretsManager\`,
+   * \`Secret.fromSsmParameter\`). The execution role may read only these.
+   *
+   * @default {}
+   */
+  readonly secrets?: Record<string, Secret>;
+  /**
+   * Internal load balancer settings, or \`false\` for a service with no load
+   * balancer and no URL (a worker).
+   *
+   * @default {}
+   */
+  readonly loadBalancer?: EcsServiceLoadBalancerOptions | false;
+  /**
+   * How callers reach the service. Only valid with a load balancer.
+   *
+   * @default 'http-api'
+   */
+  readonly ingress?: EcsServiceIngress;
+  /**
+   * How the HTTP API authenticates. Only valid with \`ingress: 'http-api'\`.
+   *
+   * @default { type: 'iam' }
+   */
+  readonly auth?: EcsServiceAuth;
+  /**
+   * Retention of the container log group.
+   *
+   * @default RetentionDays.ONE_YEAR
+   */
+  readonly logRetention?: RetentionDays;
+  /**
+   * Called once with the task role, to add grants the service needs. The task
+   * role has no permissions otherwise; connections add theirs here or through
+   * \`taskRole\`.
+   */
+  readonly grantTaskRole?: (taskRole: IRole) => void;
+  /**
+   * User the container runs as. The vended image's \`node\` user is uid 1000.
+   *
+   * @default '1000'
+   */
+  readonly user?: string;
+  /**
+   * CORS settings of the HTTP API (\`ingress: 'http-api'\` only).
+   *
+   * @default any origin, any method, and the authorization and SigV4 headers
+   */
+  readonly corsPreflight?: CorsPreflightOptions;
+  /**
+   * Throttling of the HTTP API's default stage (\`ingress: 'http-api'\` only).
+   *
+   * @default { rateLimit: 10000, burstLimit: 5000 }
+   */
+  readonly throttle?: ThrottleSettings;
+}
+
+const DEFAULT_CORS_PREFLIGHT: CorsPreflightOptions = {
+  allowOrigins: ['*'],
+  allowMethods: [CorsHttpMethod.ANY],
+  allowHeaders: [
+    'authorization',
+    'content-type',
+    'x-amz-content-sha256',
+    'x-amz-date',
+    'x-amz-security-token',
+  ],
+};
+
+const ECR_IMAGE_URI =
+  /^(\\d{12})\\.dkr\\.ecr\\.([a-z0-9-]+)\\.amazonaws\\.com(?:\\.cn)?\\/([^:@]+)(?:[:@](.+))?$/;
+
+const LOAD_BALANCER_PORT = 80;
+
+/**
+ * An ECS service on AWS Fargate with an optional internal Application Load
+ * Balancer and an optional API Gateway HTTP API in front of it.
+ *
+ * Members other connections and stacks rely on: \`service\`, \`taskDefinition\`,
+ * \`taskRole\`, \`securityGroup\`, \`connections\`, \`loadBalancer\`, \`httpApi\`, \`url\`
+ * and \`grantInvoke\`.
+ */
+export class EcsService extends Construct implements IConnectable {
+  /** The cluster the service runs in. */
+  public readonly cluster: ICluster;
+  /** The Fargate service. */
+  public readonly service: FargateService;
+  /** The Fargate task definition (linux/arm64). */
+  public readonly taskDefinition: FargateTaskDefinition;
+  /** Role the container's code runs as. No permissions unless granted. */
+  public readonly taskRole: IRole;
+  /** Security group of the tasks. */
+  public readonly securityGroup: ISecurityGroup;
+  /** Connections of the tasks' security group, for database and other rules. */
+  public readonly connections: Connections;
+  /** The internal load balancer, unless \`loadBalancer\` is \`false\`. */
+  public readonly loadBalancer?: ApplicationLoadBalancer;
+  /** The HTTP API, when \`ingress\` is \`http-api\`. */
+  public readonly httpApi?: HttpApi;
+  /** URL callers use: the HTTP API URL, or the internal load balancer URL. */
+  public readonly url?: string;
+
+  private readonly serviceName: string;
+  private readonly authType?: EcsServiceAuth['type'];
+  private readonly corsPreflight?: CorsPreflightOptions;
+
+  constructor(scope: Construct, id: string, props: EcsServiceProps) {
+    super(scope, id);
+    const { serviceName, vpc } = props;
+    this.serviceName = serviceName;
+
+    if (props.loadBalancer === false && (props.ingress || props.auth)) {
+      throw new Error(
+        \`ingress and auth need a load balancer (service \${serviceName})\`,
+      );
+    }
+    if (props.ingress === 'private' && props.auth) {
+      throw new Error(\`auth needs ingress 'http-api' (service \${serviceName})\`);
+    }
+
+    const containerPort = props.containerPort ?? 8080;
+    const vpcSubnets = props.vpcSubnets ?? {
+      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+    };
+    const logRetention = props.logRetention ?? RetentionDays.ONE_YEAR;
+
+    this.cluster =
+      props.cluster ??
+      new Cluster(this, 'Cluster', {
+        vpc,
+        containerInsightsV2: ContainerInsights.ENABLED,
+      });
+
+    this.taskDefinition = new FargateTaskDefinition(this, 'TaskDefinition', {
+      cpu: props.cpu ?? 256,
+      memoryLimitMiB: props.memoryLimitMiB ?? 512,
+      runtimePlatform: {
+        cpuArchitecture: CpuArchitecture.ARM64,
+        operatingSystemFamily: OperatingSystemFamily.LINUX,
+      },
+    });
+    this.taskRole = this.taskDefinition.taskRole;
+    props.grantTaskRole?.(this.taskRole);
+
+    const logsKey = new Key(this, 'LogsKey', { enableKeyRotation: true });
+    logsKey.grantEncryptDecrypt(
+      new ServicePrincipal(\`logs.\${Stack.of(this).region}.amazonaws.com\`),
+    );
+    const logGroup = new LogGroup(this, 'Logs', {
+      encryptionKey: logsKey,
+      retention: logRetention,
+    });
+
+    this.taskDefinition.addContainer('Container', {
+      image: this.containerImage(props.image),
+      readonlyRootFilesystem: true,
+      user: props.user ?? '1000',
+      environment: {
+        ...props.environment,
+        PORT: String(containerPort),
+      },
+      secrets: props.secrets,
+      portMappings: [{ containerPort }],
+      logging: LogDrivers.awsLogs({ logGroup, streamPrefix: serviceName }),
+    });
+
+    this.securityGroup = new SecurityGroup(this, 'ServiceSecurityGroup', {
+      vpc,
+      allowAllOutbound: false,
+    });
+    this.securityGroup.addEgressRule(
+      Peer.anyIpv4(),
+      Port.tcp(443),
+      'HTTPS egress',
+    );
+
+    this.service = new FargateService(this, 'Service', {
+      cluster: this.cluster,
+      taskDefinition: this.taskDefinition,
+      vpcSubnets,
+      assignPublicIp: false,
+      securityGroups: [this.securityGroup],
+      circuitBreaker: { enable: true, rollback: true },
+      enableExecuteCommand: false,
+      platformVersion: FargatePlatformVersion.LATEST,
+      desiredCount: props.desiredCount ?? 1,
+      minHealthyPercent: 100,
+      maxHealthyPercent: 200,
+    });
+    this.connections = this.service.connections;
+
+    this.service
+      .autoScaleTaskCount({
+        minCapacity: props.minCapacity ?? 1,
+        maxCapacity: props.maxCapacity ?? 2,
+      })
+      .scaleOnCpuUtilization('CpuScaling', {
+        targetUtilizationPercent: props.targetCpuUtilizationPercent ?? 70,
+      });
+
+    if (props.loadBalancer === false) {
+      return;
+    }
+
+    const loadBalancerSecurityGroup = new SecurityGroup(
+      this,
+      'LoadBalancerSecurityGroup',
+      { vpc, allowAllOutbound: false },
+    );
+    this.loadBalancer = new ApplicationLoadBalancer(this, 'LoadBalancer', {
+      vpc,
+      vpcSubnets,
+      internetFacing: false,
+      securityGroup: loadBalancerSecurityGroup,
+      dropInvalidHeaderFields: true,
+    });
+    suppressRules(
+      this.loadBalancer,
+      ['CKV_AWS_91'],
+      'Internal load balancer; requests are logged by the HTTP API access logs or the service',
+    );
+
+    const listener = this.loadBalancer.addListener('Listener', {
+      port: LOAD_BALANCER_PORT,
+      protocol: ApplicationProtocol.HTTP,
+      open: false,
+    });
+    listener.addTargets('Service', {
+      port: containerPort,
+      protocol: ApplicationProtocol.HTTP,
+      targets: [this.service],
+      healthCheck: {
+        path: props.loadBalancer?.healthCheckPath ?? '/health',
+        healthyHttpCodes: '200',
+      },
+      deregistrationDelay:
+        props.loadBalancer?.deregistrationDelay ?? Duration.seconds(30),
+    });
+    suppressRules(
+      listener,
+      ['CKV_AWS_2', 'CKV_AWS_103'],
+      'Internal load balancer reached only from inside the VPC; there is no certificate for an HTTP listener',
+    );
+
+    if ((props.ingress ?? 'http-api') === 'private') {
+      loadBalancerSecurityGroup.addIngressRule(
+        Peer.ipv4(vpc.vpcCidrBlock),
+        Port.tcp(LOAD_BALANCER_PORT),
+        'HTTP from inside the VPC',
+      );
+      this.url = \`http://\${this.loadBalancer.loadBalancerDnsName}\`;
+    } else {
+      const auth = props.auth ?? { type: 'iam' };
+      this.authType = auth.type;
+      this.corsPreflight = props.corsPreflight ?? DEFAULT_CORS_PREFLIGHT;
+
+      const vpcLinkSecurityGroup = new SecurityGroup(
+        this,
+        'VpcLinkSecurityGroup',
+        { vpc, allowAllOutbound: false },
+      );
+      this.loadBalancer.connections.allowFrom(
+        vpcLinkSecurityGroup,
+        Port.tcp(LOAD_BALANCER_PORT),
+        'HTTP from the VPC link',
+      );
+      const vpcLink = new VpcLink(this, 'VpcLink', {
+        vpc,
+        subnets: vpcSubnets,
+        securityGroups: [vpcLinkSecurityGroup],
+      });
+
+      this.httpApi = new HttpApi(this, 'Api', {
+        createDefaultStage: false,
+        corsPreflight: this.corsPreflight,
+        defaultIntegration: new HttpAlbIntegration('AlbIntegration', listener, {
+          vpcLink,
+        }),
+        defaultAuthorizer: this.authorizer(auth),
+      });
+
+      const accessLogGroup = new LogGroup(this, 'AccessLogs', {
+        encryptionKey: logsKey,
+        retention: logRetention,
+      });
+      const stage = new HttpStage(this, 'DefaultStage', {
+        httpApi: this.httpApi,
+        autoDeploy: true,
+        throttle: props.throttle ?? { rateLimit: 10000, burstLimit: 5000 },
+        accessLogSettings: {
+          destination: new LogGroupLogDestination(accessLogGroup),
+        },
+      });
+      this.url = stage.url;
+    }
+
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('connection', 'services', {
+      ...rc.get('connection').services,
+      [serviceName]: this.url,
+    });
+    new CfnOutput(this, \`\${serviceName}Url\`, { value: this.url });
+  }
+
+  /**
+   * Lets \`grantee\` call the HTTP API (\`execute-api:Invoke\`) when \`auth\` is IAM.
+   */
+  public grantInvoke(grantee: IGrantable): Grant {
+    if (!this.httpApi || this.authType !== 'iam') {
+      throw new Error(
+        \`grantInvoke needs an HTTP API with IAM auth (service \${this.serviceName})\`,
+      );
+    }
+    return Grant.addToPrincipal({
+      grantee,
+      actions: ['execute-api:Invoke'],
+      resourceArns: [this.httpApi.arnForExecuteApi('*', '/*', '*')],
+    });
+  }
+
+  /**
+   * Allows CORS requests to the HTTP API from the given origins only.
+   */
+  public restrictCorsTo(...origins: string[]) {
+    const cfnApi = this.httpApi?.node.defaultChild;
+    if (!(cfnApi instanceof CfnApi) || !this.corsPreflight) {
+      throw new Error(
+        \`restrictCorsTo needs an HTTP API (service \${this.serviceName})\`,
+      );
+    }
+    cfnApi.corsConfiguration = {
+      allowCredentials: this.corsPreflight.allowCredentials,
+      allowHeaders: this.corsPreflight.allowHeaders,
+      allowMethods: this.corsPreflight.allowMethods,
+      allowOrigins: origins,
+      exposeHeaders: this.corsPreflight.exposeHeaders,
+      maxAge: this.corsPreflight.maxAge?.toSeconds(),
+    };
+  }
+
+  private containerImage(image: EcsServiceImage): ContainerImage {
+    if ('directory' in image) {
+      return ContainerImage.fromAsset(image.directory, {
+        platform: Platform.LINUX_ARM64,
+      });
+    }
+    const ecr = ECR_IMAGE_URI.exec(image.imageUri);
+    if (!ecr) {
+      return ContainerImage.fromRegistry(image.imageUri);
+    }
+    const [, account, region, repositoryName, tagOrDigest] = ecr;
+    const repository = Repository.fromRepositoryAttributes(
+      this,
+      'ImageRepository',
+      {
+        repositoryName,
+        repositoryArn: Stack.of(this).formatArn({
+          service: 'ecr',
+          account,
+          region,
+          resource: 'repository',
+          resourceName: repositoryName,
+        }),
+      },
+    );
+    return ContainerImage.fromEcrRepository(repository, tagOrDigest ?? 'latest');
+  }
+
+  private authorizer(auth: EcsServiceAuth): IHttpRouteAuthorizer | undefined {
+    switch (auth.type) {
+      case 'iam':
+        return new HttpIamAuthorizer();
+      case 'cognito':
+        return new HttpUserPoolAuthorizer('Authorizer', auth.userPool, {
+          userPoolClients: [auth.userPoolClient],
+        });
+      case 'none':
+        return undefined;
+    }
+  }
+}
+"
+`;
+
+exports[`addContainerServiceCdkConstructs > should match the vended files snapshot (http-api iam) > orders.ts 1`] = `
+"import * as path from 'path';
+import * as url from 'url';
+import { Construct } from 'constructs';
+import {
+  EcsService,
+  EcsServiceImage,
+  EcsServiceProps,
+} from '../../core/container/ecs-service.js';
+import { findWorkspaceRoot } from '../../core/workspace.js';
+
+const dockerBuildContextDir = path.join(
+  findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+  'dist/apps/shop/bundle/container/orders',
+);
+
+export type OrdersProps = Omit<
+  EcsServiceProps,
+  'serviceName' | 'image' | 'ingress' | 'auth'
+> & {
+  /**
+   * The image to run.
+   *
+   * @default the image built from dist/apps/shop/bundle/container/orders
+   */
+  readonly image?: EcsServiceImage;
+};
+
+/**
+ * The Orders container service on Amazon ECS.
+ */
+export class Orders extends EcsService {
+  constructor(scope: Construct, id: string, props: OrdersProps) {
+    super(scope, id, {
+      containerPort: 8080,
+      ...props,
+      serviceName: 'Orders',
+      image: props.image ?? { directory: dockerBuildContextDir },
+      ...(props.loadBalancer === false
+        ? {}
+        : {
+            ingress: 'http-api',
+            auth: { type: 'iam' },
+          }),
+    });
+  }
+}
+"
+`;
+
+exports[`addContainerServiceCdkConstructs > should match the vended files snapshot (http-api none) > ecs-service.ts 1`] = `
+"import { CfnOutput, Duration, Stack } from 'aws-cdk-lib';
+import {
+  CfnApi,
+  CorsHttpMethod,
+  CorsPreflightOptions,
+  HttpApi,
+  HttpStage,
+  IHttpRouteAuthorizer,
+  LogGroupLogDestination,
+  ThrottleSettings,
+  VpcLink,
+} from 'aws-cdk-lib/aws-apigatewayv2';
+import {
+  HttpIamAuthorizer,
+  HttpUserPoolAuthorizer,
+} from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import { HttpAlbIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
+import {
+  Connections,
+  IConnectable,
+  ISecurityGroup,
+  IVpc,
+  Peer,
+  Port,
+  SecurityGroup,
+  SubnetSelection,
+  SubnetType,
+} from 'aws-cdk-lib/aws-ec2';
+import { Repository } from 'aws-cdk-lib/aws-ecr';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import {
+  Cluster,
+  ContainerImage,
+  ContainerInsights,
+  CpuArchitecture,
+  FargatePlatformVersion,
+  FargateService,
+  FargateTaskDefinition,
+  ICluster,
+  LogDrivers,
+  OperatingSystemFamily,
+  Secret,
+} from 'aws-cdk-lib/aws-ecs';
+import {
+  ApplicationLoadBalancer,
+  ApplicationProtocol,
+} from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import { Grant, IGrantable, IRole, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { Construct } from 'constructs';
+import { suppressRules } from '../checkov.js';
+import { RuntimeConfig } from '../runtime-config.js';
+
+/**
+ * Where the service's container image comes from.
+ */
+export type EcsServiceImage =
+  | {
+      /**
+       * Directory holding a Dockerfile, built as a linux/arm64 CDK image asset
+       * at deploy time.
+       */
+      readonly directory: string;
+    }
+  | {
+      /**
+       * Prebuilt image URI (a public registry or ECR). Nothing is built
+       * locally. For an ECR image the execution role is granted pull on it.
+       */
+      readonly imageUri: string;
+    };
+
+/**
+ * How callers reach the service when it has a load balancer.
+ *
+ * \`http-api\`: an API Gateway HTTP API reaches the internal load balancer
+ * through a VPC link. Requests time out after 30 seconds.
+ * \`private\`: the internal load balancer only, for callers inside the VPC.
+ */
+export type EcsServiceIngress = 'http-api' | 'private';
+
+/**
+ * How the HTTP API in front of the service authenticates (\`http-api\` only).
+ */
+export type EcsServiceAuth =
+  | { readonly type: 'iam' }
+  | {
+      readonly type: 'cognito';
+      readonly userPool: IUserPool;
+      readonly userPoolClient: IUserPoolClient;
+    }
+  | { readonly type: 'none' };
+
+/**
+ * Internal Application Load Balancer settings.
+ */
+export interface EcsServiceLoadBalancerOptions {
+  /**
+   * Path the target group health check calls.
+   *
+   * @default '/health'
+   */
+  readonly healthCheckPath?: string;
+  /**
+   * Time the target group waits before it removes a draining task.
+   *
+   * @default Duration.seconds(30)
+   */
+  readonly deregistrationDelay?: Duration;
+}
+
+/**
+ * Properties for an ECS service on AWS Fargate (linux/arm64) in an existing VPC.
+ */
+export interface EcsServiceProps {
+  /**
+   * Name of the service. Its URL is written to runtime config as
+   * \`connection.services.<serviceName>\`.
+   */
+  readonly serviceName: string;
+  /**
+   * VPC the service runs in. The construct never creates a VPC.
+   */
+  readonly vpc: IVpc;
+  /**
+   * Subnets for the tasks and the internal load balancer. Tasks never get a
+   * public IP.
+   *
+   * @default { subnetType: SubnetType.PRIVATE_WITH_EGRESS }
+   */
+  readonly vpcSubnets?: SubnetSelection;
+  /**
+   * Cluster to run in. Pass the same cluster to several services to run them
+   * in one cluster.
+   *
+   * @default a new cluster with Container Insights on
+   */
+  readonly cluster?: ICluster;
+  /**
+   * The container image to run.
+   */
+  readonly image: EcsServiceImage;
+  /**
+   * Port the server listens on inside the container, passed as \`PORT\`.
+   *
+   * @default 8080
+   */
+  readonly containerPort?: number;
+  /**
+   * Task CPU units.
+   *
+   * @default 256
+   */
+  readonly cpu?: number;
+  /**
+   * Task memory in MiB.
+   *
+   * @default 512
+   */
+  readonly memoryLimitMiB?: number;
+  /**
+   * Number of tasks to start with.
+   *
+   * @default 1
+   */
+  readonly desiredCount?: number;
+  /**
+   * Fewest tasks autoscaling keeps.
+   *
+   * @default 1
+   */
+  readonly minCapacity?: number;
+  /**
+   * Most tasks autoscaling starts.
+   *
+   * @default 2
+   */
+  readonly maxCapacity?: number;
+  /**
+   * Average CPU utilisation autoscaling keeps the service at, in percent.
+   *
+   * @default 70
+   */
+  readonly targetCpuUtilizationPercent?: number;
+  /**
+   * Plain environment variables. Never put secret values here; use \`secrets\`.
+   *
+   * @default {}
+   */
+  readonly environment?: Record<string, string>;
+  /**
+   * Secrets passed to the container as environment variables, read from
+   * Secrets Manager or SSM Parameter Store (\`Secret.fromSecretsManager\`,
+   * \`Secret.fromSsmParameter\`). The execution role may read only these.
+   *
+   * @default {}
+   */
+  readonly secrets?: Record<string, Secret>;
+  /**
+   * Internal load balancer settings, or \`false\` for a service with no load
+   * balancer and no URL (a worker).
+   *
+   * @default {}
+   */
+  readonly loadBalancer?: EcsServiceLoadBalancerOptions | false;
+  /**
+   * How callers reach the service. Only valid with a load balancer.
+   *
+   * @default 'http-api'
+   */
+  readonly ingress?: EcsServiceIngress;
+  /**
+   * How the HTTP API authenticates. Only valid with \`ingress: 'http-api'\`.
+   *
+   * @default { type: 'iam' }
+   */
+  readonly auth?: EcsServiceAuth;
+  /**
+   * Retention of the container log group.
+   *
+   * @default RetentionDays.ONE_YEAR
+   */
+  readonly logRetention?: RetentionDays;
+  /**
+   * Called once with the task role, to add grants the service needs. The task
+   * role has no permissions otherwise; connections add theirs here or through
+   * \`taskRole\`.
+   */
+  readonly grantTaskRole?: (taskRole: IRole) => void;
+  /**
+   * User the container runs as. The vended image's \`node\` user is uid 1000.
+   *
+   * @default '1000'
+   */
+  readonly user?: string;
+  /**
+   * CORS settings of the HTTP API (\`ingress: 'http-api'\` only).
+   *
+   * @default any origin, any method, and the authorization and SigV4 headers
+   */
+  readonly corsPreflight?: CorsPreflightOptions;
+  /**
+   * Throttling of the HTTP API's default stage (\`ingress: 'http-api'\` only).
+   *
+   * @default { rateLimit: 10000, burstLimit: 5000 }
+   */
+  readonly throttle?: ThrottleSettings;
+}
+
+const DEFAULT_CORS_PREFLIGHT: CorsPreflightOptions = {
+  allowOrigins: ['*'],
+  allowMethods: [CorsHttpMethod.ANY],
+  allowHeaders: [
+    'authorization',
+    'content-type',
+    'x-amz-content-sha256',
+    'x-amz-date',
+    'x-amz-security-token',
+  ],
+};
+
+const ECR_IMAGE_URI =
+  /^(\\d{12})\\.dkr\\.ecr\\.([a-z0-9-]+)\\.amazonaws\\.com(?:\\.cn)?\\/([^:@]+)(?:[:@](.+))?$/;
+
+const LOAD_BALANCER_PORT = 80;
+
+/**
+ * An ECS service on AWS Fargate with an optional internal Application Load
+ * Balancer and an optional API Gateway HTTP API in front of it.
+ *
+ * Members other connections and stacks rely on: \`service\`, \`taskDefinition\`,
+ * \`taskRole\`, \`securityGroup\`, \`connections\`, \`loadBalancer\`, \`httpApi\`, \`url\`
+ * and \`grantInvoke\`.
+ */
+export class EcsService extends Construct implements IConnectable {
+  /** The cluster the service runs in. */
+  public readonly cluster: ICluster;
+  /** The Fargate service. */
+  public readonly service: FargateService;
+  /** The Fargate task definition (linux/arm64). */
+  public readonly taskDefinition: FargateTaskDefinition;
+  /** Role the container's code runs as. No permissions unless granted. */
+  public readonly taskRole: IRole;
+  /** Security group of the tasks. */
+  public readonly securityGroup: ISecurityGroup;
+  /** Connections of the tasks' security group, for database and other rules. */
+  public readonly connections: Connections;
+  /** The internal load balancer, unless \`loadBalancer\` is \`false\`. */
+  public readonly loadBalancer?: ApplicationLoadBalancer;
+  /** The HTTP API, when \`ingress\` is \`http-api\`. */
+  public readonly httpApi?: HttpApi;
+  /** URL callers use: the HTTP API URL, or the internal load balancer URL. */
+  public readonly url?: string;
+
+  private readonly serviceName: string;
+  private readonly authType?: EcsServiceAuth['type'];
+  private readonly corsPreflight?: CorsPreflightOptions;
+
+  constructor(scope: Construct, id: string, props: EcsServiceProps) {
+    super(scope, id);
+    const { serviceName, vpc } = props;
+    this.serviceName = serviceName;
+
+    if (props.loadBalancer === false && (props.ingress || props.auth)) {
+      throw new Error(
+        \`ingress and auth need a load balancer (service \${serviceName})\`,
+      );
+    }
+    if (props.ingress === 'private' && props.auth) {
+      throw new Error(\`auth needs ingress 'http-api' (service \${serviceName})\`);
+    }
+
+    const containerPort = props.containerPort ?? 8080;
+    const vpcSubnets = props.vpcSubnets ?? {
+      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+    };
+    const logRetention = props.logRetention ?? RetentionDays.ONE_YEAR;
+
+    this.cluster =
+      props.cluster ??
+      new Cluster(this, 'Cluster', {
+        vpc,
+        containerInsightsV2: ContainerInsights.ENABLED,
+      });
+
+    this.taskDefinition = new FargateTaskDefinition(this, 'TaskDefinition', {
+      cpu: props.cpu ?? 256,
+      memoryLimitMiB: props.memoryLimitMiB ?? 512,
+      runtimePlatform: {
+        cpuArchitecture: CpuArchitecture.ARM64,
+        operatingSystemFamily: OperatingSystemFamily.LINUX,
+      },
+    });
+    this.taskRole = this.taskDefinition.taskRole;
+    props.grantTaskRole?.(this.taskRole);
+
+    const logsKey = new Key(this, 'LogsKey', { enableKeyRotation: true });
+    logsKey.grantEncryptDecrypt(
+      new ServicePrincipal(\`logs.\${Stack.of(this).region}.amazonaws.com\`),
+    );
+    const logGroup = new LogGroup(this, 'Logs', {
+      encryptionKey: logsKey,
+      retention: logRetention,
+    });
+
+    this.taskDefinition.addContainer('Container', {
+      image: this.containerImage(props.image),
+      readonlyRootFilesystem: true,
+      user: props.user ?? '1000',
+      environment: {
+        ...props.environment,
+        PORT: String(containerPort),
+      },
+      secrets: props.secrets,
+      portMappings: [{ containerPort }],
+      logging: LogDrivers.awsLogs({ logGroup, streamPrefix: serviceName }),
+    });
+
+    this.securityGroup = new SecurityGroup(this, 'ServiceSecurityGroup', {
+      vpc,
+      allowAllOutbound: false,
+    });
+    this.securityGroup.addEgressRule(
+      Peer.anyIpv4(),
+      Port.tcp(443),
+      'HTTPS egress',
+    );
+
+    this.service = new FargateService(this, 'Service', {
+      cluster: this.cluster,
+      taskDefinition: this.taskDefinition,
+      vpcSubnets,
+      assignPublicIp: false,
+      securityGroups: [this.securityGroup],
+      circuitBreaker: { enable: true, rollback: true },
+      enableExecuteCommand: false,
+      platformVersion: FargatePlatformVersion.LATEST,
+      desiredCount: props.desiredCount ?? 1,
+      minHealthyPercent: 100,
+      maxHealthyPercent: 200,
+    });
+    this.connections = this.service.connections;
+
+    this.service
+      .autoScaleTaskCount({
+        minCapacity: props.minCapacity ?? 1,
+        maxCapacity: props.maxCapacity ?? 2,
+      })
+      .scaleOnCpuUtilization('CpuScaling', {
+        targetUtilizationPercent: props.targetCpuUtilizationPercent ?? 70,
+      });
+
+    if (props.loadBalancer === false) {
+      return;
+    }
+
+    const loadBalancerSecurityGroup = new SecurityGroup(
+      this,
+      'LoadBalancerSecurityGroup',
+      { vpc, allowAllOutbound: false },
+    );
+    this.loadBalancer = new ApplicationLoadBalancer(this, 'LoadBalancer', {
+      vpc,
+      vpcSubnets,
+      internetFacing: false,
+      securityGroup: loadBalancerSecurityGroup,
+      dropInvalidHeaderFields: true,
+    });
+    suppressRules(
+      this.loadBalancer,
+      ['CKV_AWS_91'],
+      'Internal load balancer; requests are logged by the HTTP API access logs or the service',
+    );
+
+    const listener = this.loadBalancer.addListener('Listener', {
+      port: LOAD_BALANCER_PORT,
+      protocol: ApplicationProtocol.HTTP,
+      open: false,
+    });
+    listener.addTargets('Service', {
+      port: containerPort,
+      protocol: ApplicationProtocol.HTTP,
+      targets: [this.service],
+      healthCheck: {
+        path: props.loadBalancer?.healthCheckPath ?? '/health',
+        healthyHttpCodes: '200',
+      },
+      deregistrationDelay:
+        props.loadBalancer?.deregistrationDelay ?? Duration.seconds(30),
+    });
+    suppressRules(
+      listener,
+      ['CKV_AWS_2', 'CKV_AWS_103'],
+      'Internal load balancer reached only from inside the VPC; there is no certificate for an HTTP listener',
+    );
+
+    if ((props.ingress ?? 'http-api') === 'private') {
+      loadBalancerSecurityGroup.addIngressRule(
+        Peer.ipv4(vpc.vpcCidrBlock),
+        Port.tcp(LOAD_BALANCER_PORT),
+        'HTTP from inside the VPC',
+      );
+      this.url = \`http://\${this.loadBalancer.loadBalancerDnsName}\`;
+    } else {
+      const auth = props.auth ?? { type: 'iam' };
+      this.authType = auth.type;
+      this.corsPreflight = props.corsPreflight ?? DEFAULT_CORS_PREFLIGHT;
+
+      const vpcLinkSecurityGroup = new SecurityGroup(
+        this,
+        'VpcLinkSecurityGroup',
+        { vpc, allowAllOutbound: false },
+      );
+      this.loadBalancer.connections.allowFrom(
+        vpcLinkSecurityGroup,
+        Port.tcp(LOAD_BALANCER_PORT),
+        'HTTP from the VPC link',
+      );
+      const vpcLink = new VpcLink(this, 'VpcLink', {
+        vpc,
+        subnets: vpcSubnets,
+        securityGroups: [vpcLinkSecurityGroup],
+      });
+
+      this.httpApi = new HttpApi(this, 'Api', {
+        createDefaultStage: false,
+        corsPreflight: this.corsPreflight,
+        defaultIntegration: new HttpAlbIntegration('AlbIntegration', listener, {
+          vpcLink,
+        }),
+        defaultAuthorizer: this.authorizer(auth),
+      });
+
+      const accessLogGroup = new LogGroup(this, 'AccessLogs', {
+        encryptionKey: logsKey,
+        retention: logRetention,
+      });
+      const stage = new HttpStage(this, 'DefaultStage', {
+        httpApi: this.httpApi,
+        autoDeploy: true,
+        throttle: props.throttle ?? { rateLimit: 10000, burstLimit: 5000 },
+        accessLogSettings: {
+          destination: new LogGroupLogDestination(accessLogGroup),
+        },
+      });
+      this.url = stage.url;
+    }
+
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('connection', 'services', {
+      ...rc.get('connection').services,
+      [serviceName]: this.url,
+    });
+    new CfnOutput(this, \`\${serviceName}Url\`, { value: this.url });
+  }
+
+  /**
+   * Lets \`grantee\` call the HTTP API (\`execute-api:Invoke\`) when \`auth\` is IAM.
+   */
+  public grantInvoke(grantee: IGrantable): Grant {
+    if (!this.httpApi || this.authType !== 'iam') {
+      throw new Error(
+        \`grantInvoke needs an HTTP API with IAM auth (service \${this.serviceName})\`,
+      );
+    }
+    return Grant.addToPrincipal({
+      grantee,
+      actions: ['execute-api:Invoke'],
+      resourceArns: [this.httpApi.arnForExecuteApi('*', '/*', '*')],
+    });
+  }
+
+  /**
+   * Allows CORS requests to the HTTP API from the given origins only.
+   */
+  public restrictCorsTo(...origins: string[]) {
+    const cfnApi = this.httpApi?.node.defaultChild;
+    if (!(cfnApi instanceof CfnApi) || !this.corsPreflight) {
+      throw new Error(
+        \`restrictCorsTo needs an HTTP API (service \${this.serviceName})\`,
+      );
+    }
+    cfnApi.corsConfiguration = {
+      allowCredentials: this.corsPreflight.allowCredentials,
+      allowHeaders: this.corsPreflight.allowHeaders,
+      allowMethods: this.corsPreflight.allowMethods,
+      allowOrigins: origins,
+      exposeHeaders: this.corsPreflight.exposeHeaders,
+      maxAge: this.corsPreflight.maxAge?.toSeconds(),
+    };
+  }
+
+  private containerImage(image: EcsServiceImage): ContainerImage {
+    if ('directory' in image) {
+      return ContainerImage.fromAsset(image.directory, {
+        platform: Platform.LINUX_ARM64,
+      });
+    }
+    const ecr = ECR_IMAGE_URI.exec(image.imageUri);
+    if (!ecr) {
+      return ContainerImage.fromRegistry(image.imageUri);
+    }
+    const [, account, region, repositoryName, tagOrDigest] = ecr;
+    const repository = Repository.fromRepositoryAttributes(
+      this,
+      'ImageRepository',
+      {
+        repositoryName,
+        repositoryArn: Stack.of(this).formatArn({
+          service: 'ecr',
+          account,
+          region,
+          resource: 'repository',
+          resourceName: repositoryName,
+        }),
+      },
+    );
+    return ContainerImage.fromEcrRepository(repository, tagOrDigest ?? 'latest');
+  }
+
+  private authorizer(auth: EcsServiceAuth): IHttpRouteAuthorizer | undefined {
+    switch (auth.type) {
+      case 'iam':
+        return new HttpIamAuthorizer();
+      case 'cognito':
+        return new HttpUserPoolAuthorizer('Authorizer', auth.userPool, {
+          userPoolClients: [auth.userPoolClient],
+        });
+      case 'none':
+        return undefined;
+    }
+  }
+}
+"
+`;
+
+exports[`addContainerServiceCdkConstructs > should match the vended files snapshot (http-api none) > orders.ts 1`] = `
+"import * as path from 'path';
+import * as url from 'url';
+import { Construct } from 'constructs';
+import {
+  EcsService,
+  EcsServiceImage,
+  EcsServiceProps,
+} from '../../core/container/ecs-service.js';
+import { findWorkspaceRoot } from '../../core/workspace.js';
+
+const dockerBuildContextDir = path.join(
+  findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+  'dist/apps/shop/bundle/container/orders',
+);
+
+export type OrdersProps = Omit<
+  EcsServiceProps,
+  'serviceName' | 'image' | 'ingress' | 'auth'
+> & {
+  /**
+   * The image to run.
+   *
+   * @default the image built from dist/apps/shop/bundle/container/orders
+   */
+  readonly image?: EcsServiceImage;
+};
+
+/**
+ * The Orders container service on Amazon ECS.
+ */
+export class Orders extends EcsService {
+  constructor(scope: Construct, id: string, props: OrdersProps) {
+    super(scope, id, {
+      containerPort: 8080,
+      ...props,
+      serviceName: 'Orders',
+      image: props.image ?? { directory: dockerBuildContextDir },
+      ...(props.loadBalancer === false
+        ? {}
+        : {
+            ingress: 'http-api',
+            auth: { type: 'none' },
+          }),
+    });
+  }
+}
+"
+`;
+
+exports[`addContainerServiceCdkConstructs > should match the vended files snapshot (private) > ecs-service.ts 1`] = `
+"import { CfnOutput, Duration, Stack } from 'aws-cdk-lib';
+import {
+  CfnApi,
+  CorsHttpMethod,
+  CorsPreflightOptions,
+  HttpApi,
+  HttpStage,
+  IHttpRouteAuthorizer,
+  LogGroupLogDestination,
+  ThrottleSettings,
+  VpcLink,
+} from 'aws-cdk-lib/aws-apigatewayv2';
+import {
+  HttpIamAuthorizer,
+  HttpUserPoolAuthorizer,
+} from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import { HttpAlbIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
+import {
+  Connections,
+  IConnectable,
+  ISecurityGroup,
+  IVpc,
+  Peer,
+  Port,
+  SecurityGroup,
+  SubnetSelection,
+  SubnetType,
+} from 'aws-cdk-lib/aws-ec2';
+import { Repository } from 'aws-cdk-lib/aws-ecr';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import {
+  Cluster,
+  ContainerImage,
+  ContainerInsights,
+  CpuArchitecture,
+  FargatePlatformVersion,
+  FargateService,
+  FargateTaskDefinition,
+  ICluster,
+  LogDrivers,
+  OperatingSystemFamily,
+  Secret,
+} from 'aws-cdk-lib/aws-ecs';
+import {
+  ApplicationLoadBalancer,
+  ApplicationProtocol,
+} from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import { Grant, IGrantable, IRole, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { Construct } from 'constructs';
+import { suppressRules } from '../checkov.js';
+import { RuntimeConfig } from '../runtime-config.js';
+
+/**
+ * Where the service's container image comes from.
+ */
+export type EcsServiceImage =
+  | {
+      /**
+       * Directory holding a Dockerfile, built as a linux/arm64 CDK image asset
+       * at deploy time.
+       */
+      readonly directory: string;
+    }
+  | {
+      /**
+       * Prebuilt image URI (a public registry or ECR). Nothing is built
+       * locally. For an ECR image the execution role is granted pull on it.
+       */
+      readonly imageUri: string;
+    };
+
+/**
+ * How callers reach the service when it has a load balancer.
+ *
+ * \`http-api\`: an API Gateway HTTP API reaches the internal load balancer
+ * through a VPC link. Requests time out after 30 seconds.
+ * \`private\`: the internal load balancer only, for callers inside the VPC.
+ */
+export type EcsServiceIngress = 'http-api' | 'private';
+
+/**
+ * How the HTTP API in front of the service authenticates (\`http-api\` only).
+ */
+export type EcsServiceAuth =
+  | { readonly type: 'iam' }
+  | {
+      readonly type: 'cognito';
+      readonly userPool: IUserPool;
+      readonly userPoolClient: IUserPoolClient;
+    }
+  | { readonly type: 'none' };
+
+/**
+ * Internal Application Load Balancer settings.
+ */
+export interface EcsServiceLoadBalancerOptions {
+  /**
+   * Path the target group health check calls.
+   *
+   * @default '/health'
+   */
+  readonly healthCheckPath?: string;
+  /**
+   * Time the target group waits before it removes a draining task.
+   *
+   * @default Duration.seconds(30)
+   */
+  readonly deregistrationDelay?: Duration;
+}
+
+/**
+ * Properties for an ECS service on AWS Fargate (linux/arm64) in an existing VPC.
+ */
+export interface EcsServiceProps {
+  /**
+   * Name of the service. Its URL is written to runtime config as
+   * \`connection.services.<serviceName>\`.
+   */
+  readonly serviceName: string;
+  /**
+   * VPC the service runs in. The construct never creates a VPC.
+   */
+  readonly vpc: IVpc;
+  /**
+   * Subnets for the tasks and the internal load balancer. Tasks never get a
+   * public IP.
+   *
+   * @default { subnetType: SubnetType.PRIVATE_WITH_EGRESS }
+   */
+  readonly vpcSubnets?: SubnetSelection;
+  /**
+   * Cluster to run in. Pass the same cluster to several services to run them
+   * in one cluster.
+   *
+   * @default a new cluster with Container Insights on
+   */
+  readonly cluster?: ICluster;
+  /**
+   * The container image to run.
+   */
+  readonly image: EcsServiceImage;
+  /**
+   * Port the server listens on inside the container, passed as \`PORT\`.
+   *
+   * @default 8080
+   */
+  readonly containerPort?: number;
+  /**
+   * Task CPU units.
+   *
+   * @default 256
+   */
+  readonly cpu?: number;
+  /**
+   * Task memory in MiB.
+   *
+   * @default 512
+   */
+  readonly memoryLimitMiB?: number;
+  /**
+   * Number of tasks to start with.
+   *
+   * @default 1
+   */
+  readonly desiredCount?: number;
+  /**
+   * Fewest tasks autoscaling keeps.
+   *
+   * @default 1
+   */
+  readonly minCapacity?: number;
+  /**
+   * Most tasks autoscaling starts.
+   *
+   * @default 2
+   */
+  readonly maxCapacity?: number;
+  /**
+   * Average CPU utilisation autoscaling keeps the service at, in percent.
+   *
+   * @default 70
+   */
+  readonly targetCpuUtilizationPercent?: number;
+  /**
+   * Plain environment variables. Never put secret values here; use \`secrets\`.
+   *
+   * @default {}
+   */
+  readonly environment?: Record<string, string>;
+  /**
+   * Secrets passed to the container as environment variables, read from
+   * Secrets Manager or SSM Parameter Store (\`Secret.fromSecretsManager\`,
+   * \`Secret.fromSsmParameter\`). The execution role may read only these.
+   *
+   * @default {}
+   */
+  readonly secrets?: Record<string, Secret>;
+  /**
+   * Internal load balancer settings, or \`false\` for a service with no load
+   * balancer and no URL (a worker).
+   *
+   * @default {}
+   */
+  readonly loadBalancer?: EcsServiceLoadBalancerOptions | false;
+  /**
+   * How callers reach the service. Only valid with a load balancer.
+   *
+   * @default 'http-api'
+   */
+  readonly ingress?: EcsServiceIngress;
+  /**
+   * How the HTTP API authenticates. Only valid with \`ingress: 'http-api'\`.
+   *
+   * @default { type: 'iam' }
+   */
+  readonly auth?: EcsServiceAuth;
+  /**
+   * Retention of the container log group.
+   *
+   * @default RetentionDays.ONE_YEAR
+   */
+  readonly logRetention?: RetentionDays;
+  /**
+   * Called once with the task role, to add grants the service needs. The task
+   * role has no permissions otherwise; connections add theirs here or through
+   * \`taskRole\`.
+   */
+  readonly grantTaskRole?: (taskRole: IRole) => void;
+  /**
+   * User the container runs as. The vended image's \`node\` user is uid 1000.
+   *
+   * @default '1000'
+   */
+  readonly user?: string;
+  /**
+   * CORS settings of the HTTP API (\`ingress: 'http-api'\` only).
+   *
+   * @default any origin, any method, and the authorization and SigV4 headers
+   */
+  readonly corsPreflight?: CorsPreflightOptions;
+  /**
+   * Throttling of the HTTP API's default stage (\`ingress: 'http-api'\` only).
+   *
+   * @default { rateLimit: 10000, burstLimit: 5000 }
+   */
+  readonly throttle?: ThrottleSettings;
+}
+
+const DEFAULT_CORS_PREFLIGHT: CorsPreflightOptions = {
+  allowOrigins: ['*'],
+  allowMethods: [CorsHttpMethod.ANY],
+  allowHeaders: [
+    'authorization',
+    'content-type',
+    'x-amz-content-sha256',
+    'x-amz-date',
+    'x-amz-security-token',
+  ],
+};
+
+const ECR_IMAGE_URI =
+  /^(\\d{12})\\.dkr\\.ecr\\.([a-z0-9-]+)\\.amazonaws\\.com(?:\\.cn)?\\/([^:@]+)(?:[:@](.+))?$/;
+
+const LOAD_BALANCER_PORT = 80;
+
+/**
+ * An ECS service on AWS Fargate with an optional internal Application Load
+ * Balancer and an optional API Gateway HTTP API in front of it.
+ *
+ * Members other connections and stacks rely on: \`service\`, \`taskDefinition\`,
+ * \`taskRole\`, \`securityGroup\`, \`connections\`, \`loadBalancer\`, \`httpApi\`, \`url\`
+ * and \`grantInvoke\`.
+ */
+export class EcsService extends Construct implements IConnectable {
+  /** The cluster the service runs in. */
+  public readonly cluster: ICluster;
+  /** The Fargate service. */
+  public readonly service: FargateService;
+  /** The Fargate task definition (linux/arm64). */
+  public readonly taskDefinition: FargateTaskDefinition;
+  /** Role the container's code runs as. No permissions unless granted. */
+  public readonly taskRole: IRole;
+  /** Security group of the tasks. */
+  public readonly securityGroup: ISecurityGroup;
+  /** Connections of the tasks' security group, for database and other rules. */
+  public readonly connections: Connections;
+  /** The internal load balancer, unless \`loadBalancer\` is \`false\`. */
+  public readonly loadBalancer?: ApplicationLoadBalancer;
+  /** The HTTP API, when \`ingress\` is \`http-api\`. */
+  public readonly httpApi?: HttpApi;
+  /** URL callers use: the HTTP API URL, or the internal load balancer URL. */
+  public readonly url?: string;
+
+  private readonly serviceName: string;
+  private readonly authType?: EcsServiceAuth['type'];
+  private readonly corsPreflight?: CorsPreflightOptions;
+
+  constructor(scope: Construct, id: string, props: EcsServiceProps) {
+    super(scope, id);
+    const { serviceName, vpc } = props;
+    this.serviceName = serviceName;
+
+    if (props.loadBalancer === false && (props.ingress || props.auth)) {
+      throw new Error(
+        \`ingress and auth need a load balancer (service \${serviceName})\`,
+      );
+    }
+    if (props.ingress === 'private' && props.auth) {
+      throw new Error(\`auth needs ingress 'http-api' (service \${serviceName})\`);
+    }
+
+    const containerPort = props.containerPort ?? 8080;
+    const vpcSubnets = props.vpcSubnets ?? {
+      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+    };
+    const logRetention = props.logRetention ?? RetentionDays.ONE_YEAR;
+
+    this.cluster =
+      props.cluster ??
+      new Cluster(this, 'Cluster', {
+        vpc,
+        containerInsightsV2: ContainerInsights.ENABLED,
+      });
+
+    this.taskDefinition = new FargateTaskDefinition(this, 'TaskDefinition', {
+      cpu: props.cpu ?? 256,
+      memoryLimitMiB: props.memoryLimitMiB ?? 512,
+      runtimePlatform: {
+        cpuArchitecture: CpuArchitecture.ARM64,
+        operatingSystemFamily: OperatingSystemFamily.LINUX,
+      },
+    });
+    this.taskRole = this.taskDefinition.taskRole;
+    props.grantTaskRole?.(this.taskRole);
+
+    const logsKey = new Key(this, 'LogsKey', { enableKeyRotation: true });
+    logsKey.grantEncryptDecrypt(
+      new ServicePrincipal(\`logs.\${Stack.of(this).region}.amazonaws.com\`),
+    );
+    const logGroup = new LogGroup(this, 'Logs', {
+      encryptionKey: logsKey,
+      retention: logRetention,
+    });
+
+    this.taskDefinition.addContainer('Container', {
+      image: this.containerImage(props.image),
+      readonlyRootFilesystem: true,
+      user: props.user ?? '1000',
+      environment: {
+        ...props.environment,
+        PORT: String(containerPort),
+      },
+      secrets: props.secrets,
+      portMappings: [{ containerPort }],
+      logging: LogDrivers.awsLogs({ logGroup, streamPrefix: serviceName }),
+    });
+
+    this.securityGroup = new SecurityGroup(this, 'ServiceSecurityGroup', {
+      vpc,
+      allowAllOutbound: false,
+    });
+    this.securityGroup.addEgressRule(
+      Peer.anyIpv4(),
+      Port.tcp(443),
+      'HTTPS egress',
+    );
+
+    this.service = new FargateService(this, 'Service', {
+      cluster: this.cluster,
+      taskDefinition: this.taskDefinition,
+      vpcSubnets,
+      assignPublicIp: false,
+      securityGroups: [this.securityGroup],
+      circuitBreaker: { enable: true, rollback: true },
+      enableExecuteCommand: false,
+      platformVersion: FargatePlatformVersion.LATEST,
+      desiredCount: props.desiredCount ?? 1,
+      minHealthyPercent: 100,
+      maxHealthyPercent: 200,
+    });
+    this.connections = this.service.connections;
+
+    this.service
+      .autoScaleTaskCount({
+        minCapacity: props.minCapacity ?? 1,
+        maxCapacity: props.maxCapacity ?? 2,
+      })
+      .scaleOnCpuUtilization('CpuScaling', {
+        targetUtilizationPercent: props.targetCpuUtilizationPercent ?? 70,
+      });
+
+    if (props.loadBalancer === false) {
+      return;
+    }
+
+    const loadBalancerSecurityGroup = new SecurityGroup(
+      this,
+      'LoadBalancerSecurityGroup',
+      { vpc, allowAllOutbound: false },
+    );
+    this.loadBalancer = new ApplicationLoadBalancer(this, 'LoadBalancer', {
+      vpc,
+      vpcSubnets,
+      internetFacing: false,
+      securityGroup: loadBalancerSecurityGroup,
+      dropInvalidHeaderFields: true,
+    });
+    suppressRules(
+      this.loadBalancer,
+      ['CKV_AWS_91'],
+      'Internal load balancer; requests are logged by the HTTP API access logs or the service',
+    );
+
+    const listener = this.loadBalancer.addListener('Listener', {
+      port: LOAD_BALANCER_PORT,
+      protocol: ApplicationProtocol.HTTP,
+      open: false,
+    });
+    listener.addTargets('Service', {
+      port: containerPort,
+      protocol: ApplicationProtocol.HTTP,
+      targets: [this.service],
+      healthCheck: {
+        path: props.loadBalancer?.healthCheckPath ?? '/health',
+        healthyHttpCodes: '200',
+      },
+      deregistrationDelay:
+        props.loadBalancer?.deregistrationDelay ?? Duration.seconds(30),
+    });
+    suppressRules(
+      listener,
+      ['CKV_AWS_2', 'CKV_AWS_103'],
+      'Internal load balancer reached only from inside the VPC; there is no certificate for an HTTP listener',
+    );
+
+    if ((props.ingress ?? 'http-api') === 'private') {
+      loadBalancerSecurityGroup.addIngressRule(
+        Peer.ipv4(vpc.vpcCidrBlock),
+        Port.tcp(LOAD_BALANCER_PORT),
+        'HTTP from inside the VPC',
+      );
+      this.url = \`http://\${this.loadBalancer.loadBalancerDnsName}\`;
+    } else {
+      const auth = props.auth ?? { type: 'iam' };
+      this.authType = auth.type;
+      this.corsPreflight = props.corsPreflight ?? DEFAULT_CORS_PREFLIGHT;
+
+      const vpcLinkSecurityGroup = new SecurityGroup(
+        this,
+        'VpcLinkSecurityGroup',
+        { vpc, allowAllOutbound: false },
+      );
+      this.loadBalancer.connections.allowFrom(
+        vpcLinkSecurityGroup,
+        Port.tcp(LOAD_BALANCER_PORT),
+        'HTTP from the VPC link',
+      );
+      const vpcLink = new VpcLink(this, 'VpcLink', {
+        vpc,
+        subnets: vpcSubnets,
+        securityGroups: [vpcLinkSecurityGroup],
+      });
+
+      this.httpApi = new HttpApi(this, 'Api', {
+        createDefaultStage: false,
+        corsPreflight: this.corsPreflight,
+        defaultIntegration: new HttpAlbIntegration('AlbIntegration', listener, {
+          vpcLink,
+        }),
+        defaultAuthorizer: this.authorizer(auth),
+      });
+
+      const accessLogGroup = new LogGroup(this, 'AccessLogs', {
+        encryptionKey: logsKey,
+        retention: logRetention,
+      });
+      const stage = new HttpStage(this, 'DefaultStage', {
+        httpApi: this.httpApi,
+        autoDeploy: true,
+        throttle: props.throttle ?? { rateLimit: 10000, burstLimit: 5000 },
+        accessLogSettings: {
+          destination: new LogGroupLogDestination(accessLogGroup),
+        },
+      });
+      this.url = stage.url;
+    }
+
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('connection', 'services', {
+      ...rc.get('connection').services,
+      [serviceName]: this.url,
+    });
+    new CfnOutput(this, \`\${serviceName}Url\`, { value: this.url });
+  }
+
+  /**
+   * Lets \`grantee\` call the HTTP API (\`execute-api:Invoke\`) when \`auth\` is IAM.
+   */
+  public grantInvoke(grantee: IGrantable): Grant {
+    if (!this.httpApi || this.authType !== 'iam') {
+      throw new Error(
+        \`grantInvoke needs an HTTP API with IAM auth (service \${this.serviceName})\`,
+      );
+    }
+    return Grant.addToPrincipal({
+      grantee,
+      actions: ['execute-api:Invoke'],
+      resourceArns: [this.httpApi.arnForExecuteApi('*', '/*', '*')],
+    });
+  }
+
+  /**
+   * Allows CORS requests to the HTTP API from the given origins only.
+   */
+  public restrictCorsTo(...origins: string[]) {
+    const cfnApi = this.httpApi?.node.defaultChild;
+    if (!(cfnApi instanceof CfnApi) || !this.corsPreflight) {
+      throw new Error(
+        \`restrictCorsTo needs an HTTP API (service \${this.serviceName})\`,
+      );
+    }
+    cfnApi.corsConfiguration = {
+      allowCredentials: this.corsPreflight.allowCredentials,
+      allowHeaders: this.corsPreflight.allowHeaders,
+      allowMethods: this.corsPreflight.allowMethods,
+      allowOrigins: origins,
+      exposeHeaders: this.corsPreflight.exposeHeaders,
+      maxAge: this.corsPreflight.maxAge?.toSeconds(),
+    };
+  }
+
+  private containerImage(image: EcsServiceImage): ContainerImage {
+    if ('directory' in image) {
+      return ContainerImage.fromAsset(image.directory, {
+        platform: Platform.LINUX_ARM64,
+      });
+    }
+    const ecr = ECR_IMAGE_URI.exec(image.imageUri);
+    if (!ecr) {
+      return ContainerImage.fromRegistry(image.imageUri);
+    }
+    const [, account, region, repositoryName, tagOrDigest] = ecr;
+    const repository = Repository.fromRepositoryAttributes(
+      this,
+      'ImageRepository',
+      {
+        repositoryName,
+        repositoryArn: Stack.of(this).formatArn({
+          service: 'ecr',
+          account,
+          region,
+          resource: 'repository',
+          resourceName: repositoryName,
+        }),
+      },
+    );
+    return ContainerImage.fromEcrRepository(repository, tagOrDigest ?? 'latest');
+  }
+
+  private authorizer(auth: EcsServiceAuth): IHttpRouteAuthorizer | undefined {
+    switch (auth.type) {
+      case 'iam':
+        return new HttpIamAuthorizer();
+      case 'cognito':
+        return new HttpUserPoolAuthorizer('Authorizer', auth.userPool, {
+          userPoolClients: [auth.userPoolClient],
+        });
+      case 'none':
+        return undefined;
+    }
+  }
+}
+"
+`;
+
+exports[`addContainerServiceCdkConstructs > should match the vended files snapshot (private) > orders.ts 1`] = `
+"import * as path from 'path';
+import * as url from 'url';
+import { Construct } from 'constructs';
+import {
+  EcsService,
+  EcsServiceImage,
+  EcsServiceProps,
+} from '../../core/container/ecs-service.js';
+import { findWorkspaceRoot } from '../../core/workspace.js';
+
+const dockerBuildContextDir = path.join(
+  findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+  'dist/apps/shop/bundle/container/orders',
+);
+
+export type OrdersProps = Omit<
+  EcsServiceProps,
+  'serviceName' | 'image' | 'ingress' | 'auth'
+> & {
+  /**
+   * The image to run.
+   *
+   * @default the image built from dist/apps/shop/bundle/container/orders
+   */
+  readonly image?: EcsServiceImage;
+};
+
+/**
+ * The Orders container service on Amazon ECS.
+ */
+export class Orders extends EcsService {
+  constructor(scope: Construct, id: string, props: OrdersProps) {
+    super(scope, id, {
+      containerPort: 8080,
+      ...props,
+      serviceName: 'Orders',
+      image: props.image ?? { directory: dockerBuildContextDir },
+      ...(props.loadBalancer === false
+        ? {}
+        : {
+            ingress: 'private',
+          }),
+    });
+  }
+}
+"
+`;

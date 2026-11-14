@@ -162,6 +162,8 @@ Add capabilities to existing projects:
 | `ts#dynamodb`          | Create a TypeScript DynamoDB project                                                                               |
 | `py#dynamodb`          | Create a Python DynamoDB project                                                                                   |
 | `py#rdb`               | Create a Python relational database project                                                                        |
+| `ts#container`         | Add a containerised HTTP service to a TypeScript project, hosted on Amazon ECS (experimental)                      |
+| `py#container`         | Add a containerised HTTP service to a Python project, hosted on Amazon ECS (experimental)                          |
 
 ## Best Practices
 

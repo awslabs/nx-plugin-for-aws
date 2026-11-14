@@ -1,0 +1,76 @@
+import * as path from 'path';
+import * as url from 'url';
+import { Construct } from 'constructs';
+<%_ if (ingress === 'http-api' && auth === 'cognito') { _%>
+import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
+<%_ } _%>
+<%_ /* Alias the core imports only when this service's name would shadow them. */ _%>
+<%_ const collides = ['EcsService', 'EcsServiceImage', 'EcsServiceProps'].includes(nameClassName); _%>
+<%_ const coreService = collides ? 'CoreEcsService' : 'EcsService'; _%>
+<%_ const coreImage = collides ? 'CoreEcsServiceImage' : 'EcsServiceImage'; _%>
+<%_ const coreProps = collides ? 'CoreEcsServiceProps' : 'EcsServiceProps'; _%>
+import {
+  EcsService<% if (collides) { %> as <%= coreService %><% } %>,
+  EcsServiceImage<% if (collides) { %> as <%= coreImage %><% } %>,
+  EcsServiceProps<% if (collides) { %> as <%= coreProps %><% } %>,
+} from '../../core/container/ecs-service<% if (esm) { %>.js<% } %>';
+import { findWorkspaceRoot } from '../../core/workspace<% if (esm) { %>.js<% } %>';
+
+const dockerBuildContextDir = path.join(
+  findWorkspaceRoot(url.fileURLToPath(new URL(<% if (esm) { %>import.meta.url<% } else { %>require('url').pathToFileURL(__filename).href<% } %>))),
+  '<%- dockerBuildContextDir %>',
+);
+
+export type <%= nameClassName %>Props = Omit<
+  <%= coreProps %>,
+  'serviceName' | 'image' | 'ingress' | 'auth'
+> & {
+  /**
+   * The image to run.
+   *
+   * @default the image built from <%- dockerBuildContextDir %>
+   */
+  readonly image?: <%= coreImage %>;
+<%_ if (ingress === 'http-api' && auth === 'cognito') { _%>
+  /**
+   * Identity details for Cognito authentication
+   */
+  readonly identity: {
+    readonly userPool: IUserPool;
+    readonly userPoolClient: IUserPoolClient;
+  };
+<%_ } _%>
+};
+
+/**
+ * The <%= nameClassName %> container service on Amazon ECS.
+ */
+export class <%= nameClassName %> extends <%= coreService %> {
+  constructor(scope: Construct, id: string, props: <%= nameClassName %>Props) {
+<%_ if (ingress === 'http-api' && auth === 'cognito') { _%>
+    const { identity, ...rest } = props;
+<%_ } _%>
+    super(scope, id, {
+      containerPort: <%= containerPort %>,
+      ...<% if (ingress === 'http-api' && auth === 'cognito') { %>rest<% } else { %>props<% } %>,
+      serviceName: '<%= nameClassName %>',
+      image: props.image ?? { directory: dockerBuildContextDir },
+      ...(props.loadBalancer === false
+        ? {}
+        : {
+            ingress: '<%= ingress %>',
+<%_ if (ingress === 'http-api') { _%>
+<%_ if (auth === 'cognito') { _%>
+            auth: {
+              type: 'cognito',
+              userPool: identity.userPool,
+              userPoolClient: identity.userPoolClient,
+            },
+<%_ } else { _%>
+            auth: { type: '<%= auth %>' },
+<%_ } _%>
+<%_ } _%>
+          }),
+    });
+  }
+}
