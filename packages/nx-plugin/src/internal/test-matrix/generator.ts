@@ -134,6 +134,7 @@ export const internalTestMatrixGenerator = async (
     cognitoDomain: 'test-no-router',
     allowSignup: true,
     iac: 'inherit',
+    federation: 'oidc',
     ...defaults,
   });
 
