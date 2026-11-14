@@ -1,0 +1,206 @@
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "<%- awsProviderVersion %>"
+    }
+    external = {
+      source  = "hashicorp/external"
+      version = "<%- externalProviderVersion %>"
+    }
+    null = {
+      source  = "hashicorp/null"
+      version = "<%- nullProviderVersion %>"
+    }
+  }
+}
+
+variable "vpc_id" {
+  description = "VPC the service runs in."
+  type        = string
+}
+
+variable "subnet_ids" {
+  description = "Private subnets with egress for the tasks and the internal load balancer."
+  type        = list(string)
+}
+
+variable "asset_ecr_repository_url" {
+  description = "URL of the shared asset ECR repository the service's image is published to (module.asset_ecr.repository_url)."
+  type        = string
+}
+
+variable "asset_ecr_repository_arn" {
+  description = "ARN of the shared asset ECR repository the service's image is published to (module.asset_ecr.repository_arn)."
+  type        = string
+}
+
+<%_ if (ingress === 'http-api' && auth === 'cognito') { _%>
+variable "user_pool_id" {
+  description = "Cognito User Pool ID for authentication"
+  type        = string
+}
+
+variable "user_pool_client_ids" {
+  description = "List of Cognito User Pool Client IDs"
+  type        = list(string)
+}
+
+<%_ } _%>
+variable "cluster_arn" {
+  description = "ARN of an existing ECS cluster to run in. Null creates a cluster for this service."
+  type        = string
+  default     = null
+}
+
+variable "environment" {
+  description = "Plain environment variables. Never put secret values here; use secrets."
+  type        = map(string)
+  default     = {}
+}
+
+variable "secrets" {
+  description = "Environment variables read from Secrets Manager or SSM Parameter Store, as a map of variable name to secret or parameter ARN."
+  type        = map(string)
+  default     = {}
+}
+
+variable "task_role_policy_statements" {
+  description = "IAM policy statements added to the task role."
+  type        = list(any)
+  default     = []
+}
+
+variable "docker_image_tag" {
+  description = "Local image tag the service's docker target builds."
+  type        = string
+  default     = "<%= dockerImageTag %>"
+}
+
+variable "tags" {
+  description = "Tags to apply to all resources."
+  type        = map(string)
+  default     = {}
+}
+
+data "aws_region" "current" {}
+
+data "external" "docker_digest" {
+  program = ["sh", "-c", "echo '{\"digest\":\"'$(<%= containers %> inspect ${var.docker_image_tag} --format '{{.Id}}')'\"}' "]
+}
+
+locals {
+  image_tag = "service-<%= nameKebabCase.slice(0, 40) %>-${replace(data.external.docker_digest.result.digest, "sha256:", "")}"
+}
+
+resource "null_resource" "docker_publish" {
+  triggers = {
+    docker_digest    = data.external.docker_digest.result.digest
+    repository_url   = var.asset_ecr_repository_url
+    docker_image_tag = var.docker_image_tag
+    image_tag        = local.image_tag
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws ecr get-login-password --region "$AWS_REGION" | <%= containers %> login --username AWS --password-stdin "$REPOSITORY_URL"
+      <%= containers %> tag "$DOCKER_IMAGE_TAG" "$REPOSITORY_URL:$IMAGE_TAG"
+      <%= containers %> push "$REPOSITORY_URL:$IMAGE_TAG"
+    EOT
+    environment = {
+      AWS_REGION       = data.aws_region.current.region
+      REPOSITORY_URL   = self.triggers.repository_url
+      DOCKER_IMAGE_TAG = self.triggers.docker_image_tag
+      IMAGE_TAG        = self.triggers.image_tag
+    }
+  }
+}
+
+module "ecs_service" {
+  source = "../../../core/container/ecs-service"
+
+  service_name                = "<%= nameClassName %>"
+  vpc_id                      = var.vpc_id
+  subnet_ids                  = var.subnet_ids
+  cluster_arn                 = var.cluster_arn
+  image_uri                   = "${null_resource.docker_publish.triggers.repository_url}:${null_resource.docker_publish.triggers.image_tag}"
+  image_repository_arn        = var.asset_ecr_repository_arn
+  container_port              = <%= containerPort %>
+  environment                 = var.environment
+  secrets                     = var.secrets
+  task_role_policy_statements = var.task_role_policy_statements
+  ingress                     = "<%= ingress %>"
+<%_ if (ingress === 'http-api') { _%>
+  auth                        = "<%= auth %>"
+<%_ } _%>
+<%_ if (ingress === 'http-api' && auth === 'cognito') { _%>
+  user_pool_id                = var.user_pool_id
+  user_pool_client_ids        = var.user_pool_client_ids
+<%_ } _%>
+  tags                        = var.tags
+}
+
+module "add_url_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "connection"
+  key       = "services"
+  value     = { "<%= nameClassName %>" = module.ecs_service.url }
+}
+
+output "cluster_arn" {
+  description = "ARN of the cluster the service runs in."
+  value       = module.ecs_service.cluster_arn
+}
+
+output "service_name" {
+  description = "Name of the ECS service."
+  value       = module.ecs_service.service_name
+}
+
+output "service_arn" {
+  description = "ARN of the ECS service."
+  value       = module.ecs_service.service_arn
+}
+
+output "task_role_arn" {
+  description = "ARN of the role the container's code runs as."
+  value       = module.ecs_service.task_role_arn
+}
+
+output "task_role_name" {
+  description = "Name of the task role, for aws_iam_role_policy attachments from connections."
+  value       = module.ecs_service.task_role_name
+}
+
+output "security_group_id" {
+  description = "Security group of the tasks, for database and other ingress rules."
+  value       = module.ecs_service.security_group_id
+}
+
+output "load_balancer_arn" {
+  description = "ARN of the internal load balancer."
+  value       = module.ecs_service.load_balancer_arn
+}
+
+output "load_balancer_dns_name" {
+  description = "DNS name of the internal load balancer."
+  value       = module.ecs_service.load_balancer_dns_name
+}
+
+output "api_id" {
+  description = "Id of the HTTP API, or null unless ingress is http-api."
+  value       = module.ecs_service.api_id
+}
+
+output "api_execution_arn" {
+  description = "Execution ARN of the HTTP API, for execute-api:Invoke grants, or null unless ingress is http-api."
+  value       = module.ecs_service.api_execution_arn
+}
+
+output "url" {
+  description = "URL callers use: the HTTP API URL, or the internal load balancer URL for private."
+  value       = module.ecs_service.url
+}
