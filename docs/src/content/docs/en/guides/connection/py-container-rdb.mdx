@@ -1,0 +1,153 @@
+---
+title: Python Container Service to Relational Database
+description: Connect a Python container service to a Python Relational Database
+when:
+  sourceType: py#container
+  targetType: py#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+The `connection` generator lets a <Link path="guides/py-container">Python container service</Link> use a <Link path="guides/py-rdb">Python Relational Database</Link> project. It adds the database package as a dependency of the service's project, and prepares the service's Docker image for SSL connections to Amazon Aurora.
+
+## How this works
+
+A container service with `infra=ecs` runs as tasks on Amazon ECS (Elastic Container Service) in your VPC. Each task runs as the service's task role, an IAM role that has no permissions until you grant them, and sits in the service's security group, which allows outbound traffic on port 443 only. To use the database, the service needs two things that it does not have by default:
+
+- IAM permission for `rds-db:connect`, so it can sign in to the database with IAM authentication.
+- A security group rule pair on the database port: an inbound rule on the database's security group, and an outbound rule on the service's security group. Without the outbound rule the service cannot reach the database, because its security group allows only port 443 out.
+
+The generator rejects a service with `infra=none`, because such a service has no task role to grant access to.
+
+## Prerequisites
+
+Before using this generator, ensure you have:
+
+1. A container service with `infra=ecs` (generated using the <Link path="guides/py-container">`py#container`</Link> generator)
+2. A <Link path="guides/py-rdb">`py#rdb`</Link> project
+
+## Usage
+
+### Run the Generator
+
+<RunGenerator generator="connection" />
+
+Select the project containing your container service as the source and your relational database project as the target. If the source project holds several components, set `sourceComponent` to the service's name.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Generator Output
+
+<FileTree>
+
+- packages/my\_project
+  - project.json Adds a dependency from `my-service-serve` on the database's `dev` target
+  - pyproject.toml Adds the database package as a workspace dependency
+  - my\_project
+    - my\_service
+      - Dockerfile Installs the Amazon RDS CA bundle for SSL connections to Aurora
+
+</FileTree>
+
+## Using the Database in the Service
+
+Import `session_context` from your database package and use it where you handle a request:
+
+```python title="packages/my_project/my_project/my_service/orders.py"
+from sqlmodel import select
+from my_scope_my_database import session_context
+from my_scope_my_database.models.example import ExampleModel
+
+
+async def list_examples() -> list[dict]:
+    async with session_context() as session:
+        items = (await session.execute(select(ExampleModel))).scalars().all()
+        return [item.model_dump() for item in items]
+```
+
+The database package reads the database's connection details from <Link path="guides/runtime-config">runtime configuration</Link>, using the `RUNTIME_CONFIG_APP_ID` environment variable.
+
+{/* TODO(integration): confirm the py#container infrastructure sets RUNTIME_CONFIG_APP_ID and grants the task role read access to runtime configuration. */}
+
+## Infrastructure
+
+The generator does not change your stack or root Terraform module. Instead it prints the code to add, which is shown below for a service named `my-service` and a database named `my-database`. Until you add it, the service cannot reach the database port and the database refuses its IAM authentication.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+In the example, `myService` is your `MyService` construct and `myDatabase` is your `MyDatabase` construct:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myDatabase.allowDefaultPortFrom(myService);
+myDatabase.grantConnect(myService.taskRole);
+```
+
+`allowDefaultPortFrom` adds the inbound rule on the database's security group and the outbound rule on the service's security group. `grantConnect` grants `rds-db:connect` to the service's task role.
+
+</Fragment>
+<Fragment slot="terraform">
+
+In the example, `module "my_service"` deploys the service and `module "my_database"` deploys the database. The `data "aws_region" "current"` and `data "aws_caller_identity" "current"` data sources are declared in the generated `providers.tf`:
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_role_policy" "my_service_my_database_connect" {
+  name = "my-service-my-database-connect"
+  role = module.my_service.task_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["rds-db:connect"]
+        Resource = ["arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"]
+      },
+    ]
+  })
+}
+
+resource "aws_vpc_security_group_ingress_rule" "my_service_to_my_database" {
+  description                  = "Allow the my-service container service to connect to the database"
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_service.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "my_service_to_my_database" {
+  description                  = "Allow the my-service container service to reach the database"
+  security_group_id            = module.my_service.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+### SSL Requirements When Connecting Without RDS Proxy
+
+When the service connects to the Aurora cluster directly, without RDS Proxy, it must trust the Amazon RDS certificate authority. The generator adds these lines to the service's Dockerfile, before its `EXPOSE` line, to install the Amazon RDS CA bundle into the system trust store:
+
+```dockerfile
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt
+RUN update-ca-certificates
+```
+
+When using RDS Proxy, you do not need the RDS CA bundle.
+
+## Local Development
+
+<NxCommands commands={["<service-name>-serve <project-name>"]} />
+
+This starts the service and the database's local Docker database. With `LOCAL_DEV=true` set, the database client connects to the local database instead of Aurora.
