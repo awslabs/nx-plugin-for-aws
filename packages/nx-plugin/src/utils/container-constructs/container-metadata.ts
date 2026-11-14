@@ -32,9 +32,17 @@ export interface ResolvedContainerOptions {
   readonly auth?: ContainerAuth;
 }
 
+/** Option defaults, the same values the generator schemas declare. */
+const DEFAULT_INGRESS: ContainerIngress = 'http-api';
+const DEFAULT_AUTH: ContainerAuth = 'iam';
+
 /**
  * Applies the option defaults and drops the options that do not apply, so
  * `ingress` is only set with `infra=ecs` and `auth` only with `http-api`.
+ *
+ * Nx passes the schema defaults on every run, so a default value cannot be
+ * told apart from a user choice. The warnings fire only for a dropped value
+ * other than the default, which the user must have chosen.
  */
 export const resolveContainerOptions = (options: {
   infra?: ContainerInfra;
@@ -42,22 +50,26 @@ export const resolveContainerOptions = (options: {
   auth?: ContainerAuth;
 }): ResolvedContainerOptions => {
   const infra = options.infra ?? 'ecs';
+  const authChosen =
+    options.auth !== undefined && options.auth !== DEFAULT_AUTH;
   if (infra === 'none') {
-    if (options.ingress || options.auth) {
+    const ingressChosen =
+      options.ingress !== undefined && options.ingress !== DEFAULT_INGRESS;
+    if (ingressChosen || authChosen) {
       console.warn(
         'Warning: ingress and auth are ignored when infra is none (no infrastructure is generated)',
       );
     }
     return { infra };
   }
-  const ingress = options.ingress ?? 'http-api';
+  const ingress = options.ingress ?? DEFAULT_INGRESS;
   if (ingress === 'private') {
-    if (options.auth) {
+    if (authChosen) {
       console.warn(
         'Warning: auth is ignored when ingress is private (there is no HTTP API to authenticate)',
       );
     }
     return { infra, ingress };
   }
-  return { infra, ingress, auth: options.auth ?? 'iam' };
+  return { infra, ingress, auth: options.auth ?? DEFAULT_AUTH };
 };
