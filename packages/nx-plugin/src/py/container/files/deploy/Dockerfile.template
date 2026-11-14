@@ -1,0 +1,36 @@
+FROM <%- pythonBaseImage %>
+
+# Apply the distribution's security updates: base image tags lag behind the
+# security suite, so its OS packages carry fixed HIGH/CRITICAL vulnerabilities
+# flagged by the image scan.
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
+
+# Remove the base image's pip: the service runs from the bundled environment and
+# never needs it at runtime, and pip's vendored packages carry known
+# HIGH/CRITICAL vulnerabilities flagged by the image scan.
+RUN python -m pip uninstall -y pip && \
+    rm -rf /usr/local/lib/python*/site-packages/pip \
+           /usr/local/lib/python*/site-packages/pip-*.dist-info
+
+RUN groupadd --system --gid 10001 app && \
+    useradd --system --uid 10001 --gid app --no-create-home --shell /usr/sbin/nologin app
+
+WORKDIR /app
+
+# Copy bundled package
+COPY . /app
+
+ENV PYTHONPATH=/app
+ENV PATH="/app/bin:${PATH}"
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV HOST=0.0.0.0
+ENV PORT=<%- containerPort %>
+
+EXPOSE <%- containerPort %>
+
+USER 10001
+
+CMD ["python", "-m", "<%- moduleName %>.<%- nameSnakeCase %>.main"]
