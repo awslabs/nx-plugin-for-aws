@@ -6,8 +6,17 @@
 import type { Tree } from '@nx/devkit';
 import { agentcoreGatewayGenerator } from '../sdk/agentcore-gateway';
 import { connectionGenerator } from '../sdk/connection';
-import { pyAgentGenerator, pyProjectGenerator } from '../sdk/py';
-import { tsAgentGenerator, tsProjectGenerator } from '../sdk/ts';
+import {
+  pyAgentGenerator,
+  pyContainerGenerator,
+  pyProjectGenerator,
+} from '../sdk/py';
+import {
+  tsAgentGenerator,
+  tsContainerGenerator,
+  tsProjectGenerator,
+  tsWebsiteGenerator,
+} from '../sdk/ts';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
@@ -256,5 +265,169 @@ describe('catalog guard parity', () => {
         }),
       ).resolves.toBeDefined();
     });
+  });
+
+  // Container services: each connection guard reads its catalog entry, and
+  // these cases run the generators to show every constraint fires.
+  const containerProjects = async (tree: Tree) => {
+    await tsProjectGenerator(tree, {
+      name: 'ts-svc',
+      directory: 'packages',
+      preferInstallDependencies: false,
+    });
+    await pyProjectGenerator(tree, {
+      name: 'py-svc',
+      directory: 'packages',
+      type: 'application',
+      preferInstallDependencies: false,
+    });
+  };
+
+  const container = (
+    tree: Tree,
+    kind: 'ts' | 'py',
+    name: string,
+    options: { infra?: string; ingress?: string; auth?: string },
+  ) =>
+    (kind === 'ts' ? tsContainerGenerator : pyContainerGenerator)(tree, {
+      project: kind === 'ts' ? 'ts-svc' : 'py_svc',
+      name,
+      infra: options.infra as never,
+      ingress: options.ingress as never,
+      auth: options.auth as never,
+      iac: 'inherit',
+      preferInstallDependencies: false,
+    });
+
+  const connectTo = (
+    tree: Tree,
+    kind: 'ts' | 'py',
+    source: { sourceProject: string; sourceComponent?: string },
+  ) =>
+    connectionGenerator(tree, {
+      ...source,
+      targetProject: kind === 'ts' ? 'ts-svc' : 'py_svc',
+      targetComponent: 'orders',
+      preferInstallDependencies: false,
+    });
+
+  const reasonOf = (key: string, option: string) =>
+    constraintsFor(key).find((c) => c.option === option)?.reason as string;
+
+  describe('container callers', () => {
+    const CALLERS = [
+      ['ts#react-website -> ts#container', 'website', 'ts'],
+      ['ts#react-website -> py#container', 'website', 'py'],
+      ['ts#agent -> ts#container', 'ts-agent', 'ts'],
+      ['ts#agent -> py#container', 'ts-agent', 'py'],
+      ['py#agent -> ts#container', 'py-agent', 'ts'],
+      ['py#agent -> py#container', 'py-agent', 'py'],
+    ] as const;
+
+    const callerSetup = async (caller: (typeof CALLERS)[number][1]) => {
+      const tree = await setup();
+      await containerProjects(tree);
+      if (caller === 'website') {
+        await tsWebsiteGenerator(tree, {
+          name: 'website',
+          framework: 'react',
+          iac: 'inherit',
+          preferInstallDependencies: false,
+        });
+        return { tree, source: { sourceProject: 'website' } };
+      }
+      if (caller === 'ts-agent') {
+        await tsAgent(tree, 'caller', 'http', 'iam');
+        return {
+          tree,
+          source: { sourceProject: 'ts-host', sourceComponent: 'caller' },
+        };
+      }
+      await pyAgent(tree, 'caller', 'http', 'iam');
+      return {
+        tree,
+        source: { sourceProject: 'py_host', sourceComponent: 'caller' },
+      };
+    };
+
+    it.each(CALLERS)('declares the HTTP API constraints for %s', (key) => {
+      expect(constraintsFor(key)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            side: 'target',
+            option: 'infra',
+            equals: 'ecs',
+          }),
+          expect.objectContaining({
+            side: 'target',
+            option: 'ingress',
+            equals: 'http-api',
+          }),
+        ]),
+      );
+    });
+
+    it.each(CALLERS)(
+      'connects %s to an iam HTTP API service',
+      async (_key, caller, kind) => {
+        const { tree, source } = await callerSetup(caller);
+        await container(tree, kind, 'orders', {});
+
+        await expect(connectTo(tree, kind, source)).resolves.toBeDefined();
+      },
+    );
+
+    it.each(CALLERS)(
+      'rejects %s to a service with no infrastructure',
+      async (key, caller, kind) => {
+        const { tree, source } = await callerSetup(caller);
+        await container(tree, kind, 'orders', { infra: 'none' });
+
+        await expect(connectTo(tree, kind, source)).rejects.toThrow(
+          reasonOf(key, 'infra'),
+        );
+      },
+    );
+
+    it.each(CALLERS)(
+      'rejects %s to a private service',
+      async (key, caller, kind) => {
+        const { tree, source } = await callerSetup(caller);
+        await container(tree, kind, 'orders', { ingress: 'private' });
+
+        await expect(connectTo(tree, kind, source)).rejects.toThrow(
+          reasonOf(key, 'ingress'),
+        );
+      },
+    );
+
+    it.each(
+      CALLERS.filter(([, caller]) => caller !== 'website').flatMap(
+        ([key, caller, kind]) =>
+          (['cognito', 'none'] as const).map(
+            (auth) => [key, caller, kind, auth] as const,
+          ),
+      ),
+    )(
+      'rejects %s to a service with %s auth',
+      async (key, caller, kind, auth) => {
+        const { tree, source } = await callerSetup(caller);
+        await container(tree, kind, 'orders', { auth });
+
+        await expect(connectTo(tree, kind, source)).rejects.toThrow(
+          reasonOf(key, 'auth'),
+        );
+      },
+    );
+
+    it.each(['cognito', 'none'] as const)(
+      'connects a website to a service with %s auth',
+      async (auth) => {
+        const { tree, source } = await callerSetup('website');
+        await container(tree, 'ts', 'orders', { auth });
+
+        await expect(connectTo(tree, 'ts', source)).resolves.toBeDefined();
+      },
+    );
   });
 });

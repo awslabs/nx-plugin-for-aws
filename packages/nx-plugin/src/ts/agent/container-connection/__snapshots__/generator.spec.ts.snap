@@ -1,0 +1,64 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ts#agent#container-connection generator > should vend the client into the agent-connection project 1`] = `
+"import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { AwsClient } from 'aws4fetch';
+
+type ServiceFetch = (url: string, init?: RequestInit) => Promise<Response>;
+
+/**
+ * Client for the Orders container service. Requests are signed
+ * with SigV4 using the caller's own role.
+ */
+export class OrdersClient {
+  private constructor(
+    readonly url: string,
+    private readonly serviceFetch: ServiceFetch,
+  ) {}
+
+  static async create(): Promise<OrdersClient> {
+    if (process.env.LOCAL_DEV === 'true') {
+      return new OrdersClient('http://localhost:8083', (url, init) =>
+        fetch(url, init),
+      );
+    }
+    const application = process.env.RUNTIME_CONFIG_APP_ID;
+    if (!application) {
+      throw new Error(
+        'RUNTIME_CONFIG_APP_ID is not set, so the Orders service URL cannot be read from AppConfig.',
+      );
+    }
+    const config = (await getAppConfig('connection', {
+      application,
+      environment: 'default',
+      transform: 'json',
+    })) as { services?: Record<string, string> };
+    const url = config.services?.['Orders'];
+    if (!url) {
+      throw new Error(
+        "No container service named 'Orders' found in runtime configuration.",
+      );
+    }
+    const credentialProvider = fromNodeProviderChain();
+    const region = process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION;
+    return new OrdersClient(url, async (target, init) => {
+      const client = new AwsClient({
+        ...(await credentialProvider()),
+        service: 'execute-api',
+        region,
+      });
+      return client.fetch(target, init);
+    });
+  }
+
+  /** Calls \`path\` on the service, for example \`/health\`. */
+  fetch(path: string, init?: RequestInit): Promise<Response> {
+    return this.serviceFetch(
+      \`\${this.url.replace(/\\/$/, '')}/\${path.replace(/^\\//, '')}\`,
+      init,
+    );
+  }
+}
+"
+`;

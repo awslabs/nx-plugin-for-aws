@@ -1,0 +1,75 @@
+import hashlib
+import os
+from collections.abc import Generator
+from typing import Any, cast
+
+import boto3
+import httpx
+from aws_lambda_powertools.utilities import parameters
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
+from botocore.config import Config
+
+
+class _ExecuteApiSigV4Auth(httpx.Auth):
+    """Signs each request with AWS SigV4 for API Gateway (``execute-api``)."""
+
+    requires_request_body = True
+
+    def __init__(self, credentials: Any, region: str):
+        self.signer = SigV4Auth(credentials, "execute-api", region)
+
+    def auth_flow(
+        self, request: httpx.Request
+    ) -> Generator[httpx.Request, httpx.Response]:
+        headers = dict(request.headers)
+        headers.pop("connection", None)
+        headers["x-amz-content-sha256"] = hashlib.sha256(
+            request.content if request.content else b""
+        ).hexdigest()
+        aws_request = AWSRequest(
+            method=request.method,
+            url=str(request.url),
+            data=request.content,
+            headers=headers,
+        )
+        self.signer.add_auth(aws_request)
+        request.headers.clear()
+        request.headers.update(dict(aws_request.headers))
+        yield request
+
+
+def get_<%- nameSnakeCase %>_client() -> httpx.Client:
+    """An HTTP client for the <%- nameClassName %> container service.
+
+    Requests are signed with SigV4 using the caller's own role. Paths are
+    relative to the service URL, for example ``client.get("/health")``.
+    """
+    if os.environ.get("LOCAL_DEV") == "true":
+        return httpx.Client(base_url="http://localhost:<%- port %>")
+    application = os.environ.get("RUNTIME_CONFIG_APP_ID")
+    if not application:
+        raise RuntimeError(
+            "RUNTIME_CONFIG_APP_ID is not set, so the <%- nameClassName %> service URL cannot be read from AppConfig."
+        )
+    session = boto3.Session()
+    region = os.environ.get(
+        "AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", session.region_name)
+    )
+    if not region:
+        raise RuntimeError("AWS_REGION is not set, so requests cannot be signed.")
+    provider = parameters.AppConfigProvider(
+        environment="default",
+        application=application,
+        config=Config(region_name=region),
+    )
+    config = cast(dict[str, Any], provider.get("connection", transform="json"))
+    url = config.get("services", {}).get("<%- nameClassName %>")
+    if not url:
+        raise RuntimeError(
+            "No container service named '<%- nameClassName %>' found in runtime configuration."
+        )
+    credentials = session.get_credentials()
+    if credentials is None:
+        raise RuntimeError("No AWS credentials found to sign requests with.")
+    return httpx.Client(base_url=url, auth=_ExecuteApiSigV4Auth(credentials, region))

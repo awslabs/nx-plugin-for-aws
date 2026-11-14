@@ -1,0 +1,121 @@
+---
+title: Python Agent to Container Service
+description: Connect a Python Agent to a TypeScript or Python container service
+when:
+  sourceType: py#agent
+  targetType:
+    - ts#container
+    - py#container
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+The `connection` generator lets a <Link path="guides/py-agent">Python Agent</Link> call a container service made with <Link path="guides/ts-container">`ts#container`</Link> or <Link path="guides/py-container">`py#container`</Link>. It adds a client to the shared `agent_connection` project that reads the service's URL from runtime configuration and signs each request with the agent's own AWS credentials.
+
+## How this works
+
+A container service with `infra=ecs` runs on Amazon ECS (Elastic Container Service) behind an internal Application Load Balancer. With the default `ingress=http-api`, an Amazon API Gateway HTTP API (a managed HTTPS endpoint) reaches that load balancer through a VPC link, which is API Gateway's private connection into your VPC. The agent calls the HTTP API.
+
+The client signs each request with SigV4, the AWS request-signing process, using the credentials of the agent's role. The HTTP API accepts the request when that role may call `execute-api:Invoke` on it. The HTTP API ends any request that takes longer than 30 seconds, so a route that runs longer must return early and finish its work in the background.
+
+The generator rejects a service it cannot reach this way. The service must have `infra=ecs`, because `infra=none` creates no endpoint. It must have `ingress=http-api`, because a `private` service is reachable only from inside its VPC. It must have `auth=iam`, because the agent signs its requests with IAM credentials and has no Cognito token to send.
+
+## Prerequisites
+
+Before using this generator, ensure you have:
+
+1. A <Link path="guides/py-agent">`py#agent`</Link> project
+2. A container service with `infra=ecs`, `ingress=http-api` and `auth=iam` (generated using the <Link path="guides/ts-container">`ts#container`</Link> or <Link path="guides/py-container">`py#container`</Link> generator)
+
+## Usage
+
+### Run the Generator
+
+<RunGenerator generator="connection" />
+
+Select your agent's project as the source and the project containing your container service as the target. If either project holds several components, set `sourceComponent` to the agent's name and `targetComponent` to the service's name.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Generator Output
+
+The generator creates the following files in the shared `agent_connection` project:
+
+<FileTree>
+
+- packages/common/agent\_connection
+  - my\_scope\_agent\_connection
+    - app
+      - \<service\_name>\_client.py Client that reads the service's URL from runtime configuration and signs requests with SigV4
+    - \_\_init\_\_.py Exports `get_<service_name>_client`
+
+</FileTree>
+
+It adds `httpx` and `boto3` to the `agent_connection` project, adds the `agent_connection` project as a dependency of your agent's project, and makes the agent's `<agent-name>-dev` target start the service's `<service-name>-serve` target.
+
+## Using the Client
+
+`get_<service_name>_client()` reads the service's URL from the `connection` namespace of <Link path="guides/runtime-config">runtime configuration</Link>, under `services.<ServiceName>`. It returns an `httpx.Client` whose paths are relative to the service. The generator does not change your agent's code. To let the model call the service, wrap the client in a tool:
+
+```python title="packages/my_project/my_project/my_agent/agent.py"
+from my_scope_agent_connection import get_my_service_client
+from strands import tool
+
+
+@tool
+def check_my_service() -> int:
+    """Check whether the MyService container service is healthy."""
+    with get_my_service_client() as client:
+        return client.get("/health").status_code
+```
+
+Add `check_my_service` to the `tools` list of your agent. `get_my_service_client()` raises an error when `RUNTIME_CONFIG_APP_ID` is not set or when runtime configuration has no entry for the service.
+
+## Infrastructure
+
+The agent's role needs permission to call the service's HTTP API. The generator does not change your stack or root Terraform module. Instead it prints the code to add, which is shown below for an agent named `my-agent` and a service named `my-service`. Until you add it, the HTTP API rejects the agent's requests with 403 Forbidden.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+In the example, `myService` is your `MyService` construct and `myAgent` is your `MyAgent` construct:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myService.grantInvoke(myAgent);
+```
+
+`grantInvoke` allows the agent's role to call `execute-api:Invoke` on the service's HTTP API.
+
+</Fragment>
+<Fragment slot="terraform">
+
+Add the statement to the agent's `additional_iam_policy_statements`, next to any statements the block already lists. In the example, `module "my_service"` deploys the service:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+  # ...existing arguments...
+  additional_iam_policy_statements = [
+    {
+      Effect   = "Allow"
+      Action   = ["execute-api:Invoke"]
+      Resource = ["${module.my_service.api_execution_arn}/*"]
+    },
+  ]
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+## Local Development
+
+<NxCommands commands={["<agent-name>-dev <project-name>"]} />
+
+This starts the agent and the service's `<service-name>-serve` target. The agent's dev target sets `LOCAL_DEV=true`, so the client calls the service at `http://localhost:<port>` without signing. The port is the one the container generator assigned to the service.

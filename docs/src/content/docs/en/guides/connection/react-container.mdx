@@ -1,0 +1,142 @@
+---
+title: React to Container Service
+description: Connect a React website to a TypeScript or Python container service
+when:
+  sourceType: ts#react-website
+  targetType:
+    - ts#container
+    - py#container
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+The `connection` generator lets your React website call a container service made with <Link path="guides/ts-container">`ts#container`</Link> or <Link path="guides/py-container">`py#container`</Link>. It adds a React hook that reads the service's URL from runtime configuration and adds the authentication the service expects to each request.
+
+## How this works
+
+A container service with `infra=ecs` runs on Amazon ECS (Elastic Container Service) behind an internal Application Load Balancer. With the default `ingress=http-api`, an Amazon API Gateway HTTP API (a managed HTTPS endpoint) reaches that load balancer through a VPC link, which is API Gateway's private connection into your VPC. The website calls the HTTP API.
+
+The service's `auth` option decides how the HTTP API checks each request:
+
+- `iam` (default): the request must be signed with SigV4, the AWS request-signing process. The hook signs it with the temporary AWS credentials your website's Cognito identity pool gives a signed-in user.
+- `cognito`: the request must carry the signed-in user's Cognito access token as a bearer token.
+- `none`: the HTTP API accepts every request.
+
+The HTTP API ends any request that takes longer than 30 seconds, so a route that runs longer must return early and finish its work in the background.
+
+The generator rejects a service it cannot reach. The service must have `infra=ecs`, because `infra=none` creates no endpoint. It must also have `ingress=http-api`, because a `private` service is reachable only from inside its VPC.
+
+## Prerequisites
+
+Before using this generator, ensure you have:
+
+1. A React website (generated using the <Link path="guides/react-website">`ts#website` generator</Link>)
+2. A container service with `infra=ecs` and `ingress=http-api` (generated using the <Link path="guides/ts-container">`ts#container`</Link> or <Link path="guides/py-container">`py#container`</Link> generator)
+3. Cognito Auth added via the <Link path="guides/react-website-auth">`ts#website#auth` generator</Link>, if the service's `auth` is `iam` or `cognito`
+
+## Usage
+
+### Run the Generator
+
+<RunGenerator generator="connection" />
+
+Select your React website as the source project and the project containing your container service as the target project. If the target project holds several components, set `targetComponent` to the service's name.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Generator Output
+
+The generator creates the following files in your React website:
+
+<FileTree>
+
+- src
+  - hooks
+    - use\<ServiceName>.tsx Hook returning the service's URL and a `fetch` that adds the service's authentication
+    - useSigV4.tsx Hook for signing requests with SigV4 (`iam` only)
+  - components
+    - RuntimeConfig/index.tsx Points the hook at the local service in local development
+
+</FileTree>
+
+`<ServiceName>` is the service's class name, for example `useOrders` for a service named `orders`. The generator also adds these dependencies to the website:
+
+- `aws4fetch`, `oidc-client-ts`, `@aws-sdk/credential-provider-cognito-identity` and `react-oidc-context` (`iam`)
+- `react-oidc-context` (`cognito`)
+
+## Using the Hook
+
+The hook returns the service's `url` and a `fetch` function. `fetch` takes a path relative to the service and the usual `fetch` options:
+
+```tsx
+import { useEffect, useState } from 'react';
+import { useMyService } from './hooks/useMyService';
+
+export const ServiceStatus = () => {
+  const myService = useMyService();
+  const [status, setStatus] = useState<number>();
+
+  useEffect(() => {
+    myService.fetch('/health').then((response) => setStatus(response.status));
+  }, [myService.fetch]);
+
+  return <p>Service status: {status ?? 'loading'}</p>;
+};
+```
+
+The deployed service writes its URL to <Link path="guides/runtime-config">runtime configuration</Link> under `connection.services.<ServiceName>`, which the website reads from `runtime-config.json`.
+
+{/* TODO(integration): state how CORS is configured on the HTTP API once the ts#container and Terraform lanes are merged. */}
+
+## Infrastructure
+
+For `auth=iam`, the website's signed-in users need permission to call the service's HTTP API. The generator does not change your stack or root Terraform module. Instead it prints the code to add, which is shown below for a service named `my-service`. Until you add it, the HTTP API rejects the website's requests with 403 Forbidden. For `cognito` and `none` there is nothing to add.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+In the example, `myService` is your `MyService` construct and `identity` is your `UserIdentity` construct:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myService.grantInvoke(identity.identityPool.authenticatedRole);
+```
+
+`grantInvoke` allows the identity pool's authenticated role to call `execute-api:Invoke` on the service's HTTP API.
+
+</Fragment>
+<Fragment slot="terraform">
+
+In the example, `module "my_service"` deploys the service and `module "user_identity"` deploys your website's identity pool:
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_role_policy" "authenticated_my_service_invoke" {
+  name = "authenticated-my-service-invoke"
+  role = module.user_identity.authenticated_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["execute-api:Invoke"]
+        Resource = ["${module.my_service.api_execution_arn}/*"]
+      },
+    ]
+  })
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+## Local Development
+
+<NxCommands commands={["dev <website-project-name>"]} />
+
+The website's `dev` target also starts the service's `<service-name>-serve` target, and the hook calls the service at `http://localhost:<port>`. The port is the one the container generator assigned to the service. In local development the `useSigV4` hook does not sign requests when `runtime-config.json` has no Cognito settings.
