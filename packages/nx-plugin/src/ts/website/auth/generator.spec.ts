@@ -6,6 +6,7 @@ import { logger, type Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
 import { tsReactWebsiteGenerator } from '../../react-website/app/generator.js';
 import { tsReactWebsiteAuthGenerator } from '../../react-website/cognito-auth/generator.js';
+import { federationNextSteps } from './federation.js';
 import {
   TS_WEBSITE_AUTH_GENERATOR_INFO,
   tsWebsiteAuthGenerator,
@@ -232,13 +233,136 @@ describe('ts#website#auth generator federation', () => {
     warn.mockRestore();
   });
 
-  it('should refuse oidc for terraform before writing anything', async () => {
-    const tree = createWebsiteTree();
-    const before = files(tree);
+  const TF_DIR = 'packages/common/terraform/src/core/user-identity';
+  const TF_MAIN = `${TF_DIR}/main.tf`;
+  const TF_IDENTITY = `${TF_DIR}/identity/identity.tf`;
+  const TF_OUTER = `${TF_DIR}/oidc-identity-providers.tf`;
+  const TF_INNER = `${TF_DIR}/identity/oidc-identity-providers.tf`;
+  const TF_ARGUMENT = 'oidc_identity_providers = var.oidc_identity_providers';
+  const TF_CLIENT_PROVIDERS =
+    'supported_identity_providers = concat(["COGNITO"], [for p in aws_cognito_identity_provider.oidc : p.provider_name])';
 
-    await expect(
-      tsWebsiteAuthGenerator(tree, options('terraform', 'oidc')),
-    ).rejects.toThrow('--federation=oidc is not implemented yet for terraform');
-    expect(files(tree)).toEqual(before);
+  describe('oidc (terraform)', () => {
+    let tree: Tree;
+
+    beforeEach(async () => {
+      tree = createWebsiteTree();
+      await tsWebsiteAuthGenerator(tree, options('terraform', 'oidc'));
+    });
+
+    it('should vend the oidc_identity_providers variable and the identity provider resources', () => {
+      expect(tree.read(TF_OUTER, 'utf-8')).toMatchSnapshot();
+      expect(tree.read(TF_INNER, 'utf-8')).toMatchSnapshot();
+    });
+
+    it('should pass the variable to module "identity" and list the providers on the web client', () => {
+      const main = tree.read(TF_MAIN, 'utf-8');
+      expect(main).toMatch(
+        /module "identity" \{[^}]*mfa_second_factor_sms = var\.mfa_second_factor_sms\n {2}oidc_identity_providers = var\.oidc_identity_providers\n\}/,
+      );
+      expect(main).toMatchSnapshot();
+      const identity = tree.read(TF_IDENTITY, 'utf-8');
+      expect(identity).toContain(`  ${TF_CLIENT_PROVIDERS}\n`);
+      expect(identity).not.toContain(
+        'supported_identity_providers = ["COGNITO"]',
+      );
+    });
+
+    it('should write the same files as adding auth first and federation later', async () => {
+      const later = createWebsiteTree();
+      await tsWebsiteAuthGenerator(later, options('terraform'));
+      await tsWebsiteAuthGenerator(later, options('terraform', 'oidc'));
+
+      expect(files(later)).toEqual(files(tree));
+    });
+
+    it('should change nothing when re-run', async () => {
+      const before = files(tree);
+      await tsWebsiteAuthGenerator(tree, options('terraform', 'oidc'));
+
+      expect(files(tree)).toEqual(before);
+      expect(count(tree.read(TF_MAIN, 'utf-8'), TF_ARGUMENT)).toBe(1);
+      expect(count(tree.read(TF_IDENTITY, 'utf-8'), TF_CLIENT_PROVIDERS)).toBe(
+        1,
+      );
+    });
+
+    it('should keep federation when auth is re-run without it', async () => {
+      const before = files(tree);
+      await tsWebsiteAuthGenerator(tree, options('terraform', 'none'));
+
+      expect(files(tree)).toEqual(before);
+    });
+
+    it('should keep an edited variable file', async () => {
+      tree.write(TF_OUTER, '# edited\n');
+      await tsWebsiteAuthGenerator(tree, options('terraform', 'oidc'));
+
+      expect(tree.read(TF_OUTER, 'utf-8')).toBe('# edited\n');
+    });
   });
+
+  describe.each([
+    {
+      file: 'identity.tf',
+      diverge: (tree: Tree) =>
+        tree.write(
+          TF_IDENTITY,
+          tree
+            .read(TF_IDENTITY, 'utf-8')
+            .replace(
+              'supported_identity_providers = ["COGNITO"]',
+              'supported_identity_providers = ["COGNITO", "Other"]',
+            ),
+        ),
+    },
+    {
+      file: 'main.tf',
+      diverge: (tree: Tree) =>
+        tree.write(
+          TF_MAIN,
+          tree
+            .read(TF_MAIN, 'utf-8')
+            .replace(
+              '  mfa_second_factor_sms = var.mfa_second_factor_sms\n',
+              '',
+            ),
+        ),
+    },
+  ])('diverged $file (terraform)', ({ diverge }) => {
+    it('should leave main.tf and identity.tf untouched, warn with the lines to add, and still vend the new files', async () => {
+      const tree = createWebsiteTree();
+      await tsWebsiteAuthGenerator(tree, options('terraform'));
+      diverge(tree);
+      const main = tree.read(TF_MAIN, 'utf-8');
+      const identity = tree.read(TF_IDENTITY, 'utf-8');
+      const warn = vi.spyOn(logger, 'warn');
+
+      await tsWebsiteAuthGenerator(tree, options('terraform', 'oidc'));
+
+      // Both files are restored, even when the first edit applied.
+      expect(tree.read(TF_MAIN, 'utf-8')).toBe(main);
+      expect(tree.read(TF_IDENTITY, 'utf-8')).toBe(identity);
+      expect(tree.exists(TF_OUTER)).toBe(true);
+      expect(tree.exists(TF_INNER)).toBe(true);
+      const message = warn.mock.calls.map(([m]) => String(m)).join('\n');
+      expect(message).toContain(
+        'Could not add OpenID Connect identity providers to the user-identity Terraform module',
+      );
+      expect(message).toContain(`# In module "identity" in ${TF_MAIN}:`);
+      expect(message).toContain(`  ${TF_ARGUMENT}\n`);
+      expect(message).toContain(
+        `# In resource "aws_cognito_user_pool_client" "web_client" in ${TF_IDENTITY}:`,
+      );
+      expect(message).toContain(`  ${TF_CLIENT_PROVIDERS}`);
+      warn.mockRestore();
+    });
+  });
+
+  it.each(['cdk', 'terraform'] as const)(
+    'should print the %s next steps',
+    (iac) => {
+      expect(federationNextSteps(iac)).toMatchSnapshot();
+    },
+  );
 });
