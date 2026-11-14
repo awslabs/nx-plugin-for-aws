@@ -3,15 +3,34 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { execSync } from 'node:child_process';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { ensureDirSync } from 'fs-extra';
 
 import { runCLI, tmpProjPath } from '../utils';
 import { renderIdpPlaceholders, SAMPLE_IDP } from '../utils/idp-placeholders';
 import {
+  checkFederation,
+  createTestIdp,
+  deleteTestIdp,
+  federationPlanChanges,
+  newTestIdp,
+  registerIdpCallback,
+  sweepTestIdps,
+  type TerraformResourceChange,
+  type TestIdp,
+  testIdpPlaceholderValues,
+} from '../utils/test-idp';
+import {
   buildGatewayTargetUrl,
   DENIED_TOPIC_PROMPT,
+  getRegion,
   invokeAgentCoreA2a,
   invokeAgentCoreA2aUrl,
   invokeAgentCoreAgent,
@@ -41,6 +60,7 @@ import {
   type ApiSpec,
   createCognitoTestUser,
   installChromium,
+  runFederatedSignInTest,
   runWebsiteIntegrationTest,
   writeIntegrationTestPage,
 } from './website-integration';
@@ -81,6 +101,37 @@ function readTerraformOutputs(projectRoot: string): Record<string, string> {
   );
 }
 
+/**
+ * Runs a second `terraform plan` after apply and fails if it would change the
+ * main user pool, its app clients or its identity providers. Other modules
+ * plan changes on every run (for example the `timestamp()` triggers of
+ * runtime-config/read), so those are only logged.
+ */
+function checkSecondPlan(projectRoot: string): void {
+  const infraSrc = join(projectRoot, 'packages/infra/src');
+  const planDir = join(projectRoot, 'dist/e2e-second-plan');
+  mkdirSync(planDir, { recursive: true });
+  const planFile = join(planDir, 'second.tfplan');
+  execSync(
+    `terraform plan -var-file=env/dev.tfvars -input=false -no-color -out=${planFile}`,
+    { cwd: infraSrc, stdio: 'inherit' },
+  );
+  const plan = JSON.parse(
+    execSync(`terraform show -json ${planFile}`, {
+      cwd: infraSrc,
+      encoding: 'utf-8',
+      maxBuffer: 200 * 1024 * 1024,
+    }),
+  ) as { resource_changes?: TerraformResourceChange[] };
+  const { federation, other } = federationPlanChanges(
+    plan.resource_changes ?? [],
+  );
+  console.log(
+    `Second plan changes outside the user pool (${other.length}):\n${other.join('\n')}`,
+  );
+  expect(federation).toEqual([]);
+}
+
 interface TerraformDeployVariant {
   /** Suffix appended to the smoke-test name and target directory. */
   variant: 'terraform-deploy' | 'terraform-deploy-rdb';
@@ -104,6 +155,14 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
     });
 
     it('should generate, deploy, exercise and destroy', async () => {
+      // Only the application variant signs in through an external identity
+      // provider. Delete identity providers that killed runs left behind.
+      const withIdp = config.variant === 'terraform-deploy';
+      const region = getRegion();
+      if (withIdp) {
+        await sweepTestIdps(region);
+      }
+
       const { opts } = await runTerraformSmokeTest(
         targetDir,
         pkgMgr,
@@ -127,6 +186,20 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
       // don't share state.
       const testRunId = Math.random().toString(36).substring(2, 10);
 
+      // Create the external identity provider before main.tf, which needs its
+      // values. A failed create cleans up here, because the teardown below
+      // runs only once the deploy starts.
+      let idp: TestIdp | undefined;
+      if (withIdp) {
+        idp = newTestIdp(testRunId, region);
+        try {
+          await createTestIdp(idp);
+        } catch (e) {
+          await deleteTestIdp(idp);
+          throw e;
+        }
+      }
+
       // Overwrite the scaffolded main.tf with the wiring template (Terraform
       // analogue of the `application-stack.ts.template` cdk-deploy uses).
       const mainTfTemplate = readFileSync(
@@ -137,7 +210,7 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
         `${opts.cwd}/packages/infra/src/main.tf`,
         renderIdpPlaceholders(
           mainTfTemplate.replace(/<% TEST_RUN_ID %>/g, testRunId),
-          SAMPLE_IDP,
+          idp ? testIdpPlaceholderValues(idp) : SAMPLE_IDP,
         ),
       );
 
@@ -525,6 +598,26 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
             expectedAgents: WEBSITE_AGENTS,
             login,
           });
+
+          if (idp) {
+            // Federation: let the identity provider redirect to the main user
+            // pool, check how the pool registers it, then sign in through it.
+            await registerIdpCallback(idp, outputs.idp_redirect_uri);
+            await checkFederation({
+              region,
+              userPoolId: outputs.user_pool_id,
+              userPoolClientId: outputs.user_pool_client_id,
+              idp,
+            });
+            await runFederatedSignInTest(
+              `https://${outputs.website_distribution_domain_name}`,
+              idp,
+            );
+            // A second plan must not change the user pool, its app clients or
+            // its identity providers, for example because the provider details
+            // Cognito reads back differ from what the module sets.
+            checkSecondPlan(opts.cwd);
+          }
         }
       } finally {
         try {
@@ -534,6 +627,10 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
           );
         } catch (e) {
           console.warn(`terraform destroy failed (will still clean up): ${e}`);
+        }
+        // Destroy reads the client secret, so the identity provider goes last.
+        if (idp) {
+          await deleteTestIdp(idp);
         }
       }
     });
