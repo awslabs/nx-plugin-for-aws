@@ -1,0 +1,22 @@
+import * as cdk from 'aws-cdk-lib';
+import { Vpc } from 'aws-cdk-lib/aws-ec2';
+import { Construct } from 'constructs';
+import { PyService, TsService } from '@e2e-test/common-constructs';
+
+export class ApplicationStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    // One NAT gateway keeps the run under the default per-region EIP quota
+    // while the rdb deploy jobs run in parallel.
+    const vpc = new Vpc(this, 'Vpc', { natGateways: 1 });
+
+    // TODO(integration): per-service constructs from ts#container and
+    // py#container (lane A); props other than vpc keep their defaults.
+    const tsService = new TsService(this, 'TsService', { vpc });
+    const pyService = new PyService(this, 'PyService', { vpc });
+
+    new cdk.CfnOutput(this, 'TsServiceUrl', { value: tsService.url ?? '' });
+    new cdk.CfnOutput(this, 'PyServiceUrl', { value: pyService.url ?? '' });
+  }
+}

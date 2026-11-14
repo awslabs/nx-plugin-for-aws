@@ -1,0 +1,146 @@
+#
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+
+# Wiring for the container-deploy smoke test. Provisions a minimal VPC with
+# one NAT gateway, plus one ts#container and one py#container service
+# (http-api ingress, iam auth) running in its private subnets.
+
+# Shared asset registry, which hosts both services' images.
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
+
+  repository_name_prefix = "e2e-container-<% TEST_RUN_ID %>"
+}
+
+# Shared runtime-config AppConfig application.
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "e2e-container-runtime-config-<% TEST_RUN_ID %>"
+}
+
+# ---------------------------------------------------------------------------
+# VPC (shared by both services)
+# ---------------------------------------------------------------------------
+
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
+resource "aws_vpc" "container" {
+  #checkov:skip=CKV2_AWS_11:Flow logs are not required for ephemeral e2e test infrastructure
+  #checkov:skip=CKV2_AWS_12:Default security group restrictions are not required for ephemeral e2e test infrastructure
+  cidr_block           = "10.0.0.0/16"
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+  tags                 = { Name = "e2e-container-<% TEST_RUN_ID %>" }
+}
+
+resource "aws_subnet" "container_private_a" {
+  vpc_id            = aws_vpc.container.id
+  cidr_block        = "10.0.0.0/24"
+  availability_zone = data.aws_availability_zones.available.names[0]
+  tags              = { Name = "e2e-container-private-a-<% TEST_RUN_ID %>" }
+}
+
+resource "aws_subnet" "container_private_b" {
+  vpc_id            = aws_vpc.container.id
+  cidr_block        = "10.0.1.0/24"
+  availability_zone = data.aws_availability_zones.available.names[1]
+  tags              = { Name = "e2e-container-private-b-<% TEST_RUN_ID %>" }
+}
+
+resource "aws_internet_gateway" "container" {
+  vpc_id = aws_vpc.container.id
+  tags   = { Name = "e2e-container-igw-<% TEST_RUN_ID %>" }
+}
+
+resource "aws_subnet" "container_public_a" {
+  vpc_id            = aws_vpc.container.id
+  cidr_block        = "10.0.2.0/24"
+  availability_zone = data.aws_availability_zones.available.names[0]
+  tags              = { Name = "e2e-container-public-a-<% TEST_RUN_ID %>" }
+}
+
+# The NAT gateway reaches the internet through this route, so tasks in the
+# private subnets can pull images and send logs.
+resource "aws_route_table" "container_public" {
+  vpc_id = aws_vpc.container.id
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.container.id
+  }
+  tags = { Name = "e2e-container-public-rt-<% TEST_RUN_ID %>" }
+}
+
+resource "aws_route_table_association" "container_public_a" {
+  subnet_id      = aws_subnet.container_public_a.id
+  route_table_id = aws_route_table.container_public.id
+}
+
+resource "aws_eip" "container_nat" {
+  domain = "vpc"
+  tags   = { Name = "e2e-container-nat-eip-<% TEST_RUN_ID %>" }
+}
+
+resource "aws_nat_gateway" "container" {
+  allocation_id = aws_eip.container_nat.id
+  subnet_id     = aws_subnet.container_public_a.id
+  tags          = { Name = "e2e-container-nat-<% TEST_RUN_ID %>" }
+  depends_on    = [aws_internet_gateway.container]
+}
+
+resource "aws_route_table" "container_private" {
+  vpc_id = aws_vpc.container.id
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.container.id
+  }
+  tags = { Name = "e2e-container-private-rt-<% TEST_RUN_ID %>" }
+}
+
+resource "aws_route_table_association" "container_private_a" {
+  subnet_id      = aws_subnet.container_private_a.id
+  route_table_id = aws_route_table.container_private.id
+}
+
+resource "aws_route_table_association" "container_private_b" {
+  subnet_id      = aws_subnet.container_private_b.id
+  route_table_id = aws_route_table.container_private.id
+}
+
+# ---------------------------------------------------------------------------
+# Container services (TypeScript and Python)
+# ---------------------------------------------------------------------------
+
+# TODO(integration): confirm the app module's variables (lane B).
+module "ts_service" {
+  source = "../../common/terraform/src/app/services/ts-service"
+
+  vpc_id     = aws_vpc.container.id
+  subnet_ids = [aws_subnet.container_private_a.id, aws_subnet.container_private_b.id]
+
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+  asset_ecr_repository_arn = module.asset_ecr.repository_arn
+}
+
+# TODO(integration): confirm the app module's variables (lane B).
+module "py_service" {
+  source = "../../common/terraform/src/app/services/py-service"
+
+  vpc_id     = aws_vpc.container.id
+  subnet_ids = [aws_subnet.container_private_a.id, aws_subnet.container_private_b.id]
+
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+  asset_ecr_repository_arn = module.asset_ecr.repository_arn
+}
+
+output "ts_service_url" {
+  value = module.ts_service.url
+}
+
+output "py_service_url" {
+  value = module.py_service.url
+}
