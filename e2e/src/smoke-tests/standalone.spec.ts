@@ -102,6 +102,8 @@ const DOCKER_DEPENDENT = [
   'py#mcp-server',
   'ts#rdb',
   'py#rdb',
+  'ts#container',
+  'py#container',
 ];
 
 // The CodeBuild Windows runner lacks Docker and additionally can't run checkov
@@ -370,6 +372,30 @@ const pyMcp = async (opts: Opts, s: string): Promise<Side> => {
   );
   return { project: `py_mcp_host_${s}`, component: `mcp-${s}` };
 };
+// Container services keep the default ecs / http-api / iam options, which every
+// container connection's constraints require (see CONNECTION_CONSTRAINTS).
+const tsContainer = async (opts: Opts, s: string): Promise<Side> => {
+  await runCLI(
+    `generate @aws/nx-plugin:ts#project --name=ts-svc-host-${s} --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:ts#container --project=ts-svc-host-${s} --name=svc-${s} --no-interactive`,
+    opts,
+  );
+  return { project: `ts-svc-host-${s}`, component: `svc-${s}` };
+};
+const pyContainer = async (opts: Opts, s: string): Promise<Side> => {
+  await runCLI(
+    `generate @aws/nx-plugin:py#project --name=py-svc-host-${s} --type=application --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:py#container --project=py_svc_host_${s} --name=svc-${s} --no-interactive`,
+    opts,
+  );
+  return { project: `py_svc_host_${s}`, component: `svc-${s}` };
+};
 
 // Compose a factory from a source and target builder.
 const pair =
@@ -437,6 +463,16 @@ const CONNECTION_CASES = {
   'py#fast-api -> py#rdb': [pair(fastApi, pyRdb)],
   'py#agent -> py#rdb': [pair(pyAgent, pyRdb)],
   'py#mcp-server -> py#rdb': [pair(pyMcp, pyRdb)],
+  'ts#react-website -> ts#container': [pair(website, tsContainer)],
+  'ts#react-website -> py#container': [pair(website, pyContainer)],
+  'ts#agent -> ts#container': [pair(tsAgent, tsContainer)],
+  'ts#agent -> py#container': [pair(tsAgent, pyContainer)],
+  'py#agent -> ts#container': [pair(pyAgent, tsContainer)],
+  'py#agent -> py#container': [pair(pyAgent, pyContainer)],
+  'ts#container -> ts#rdb': [pair(tsContainer, rdb)],
+  'py#container -> py#rdb': [pair(pyContainer, pyRdb)],
+  'ts#container -> ts#dynamodb': [pair(tsContainer, tsDynamodb)],
+  'py#container -> py#dynamodb': [pair(pyContainer, pyDynamodb)],
 } satisfies Record<ConnectionKey, CaseFactory[]>;
 
 // Flatten to one case per factory, labelling variants when a connection has
