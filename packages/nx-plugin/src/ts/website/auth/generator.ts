@@ -4,6 +4,7 @@
  */
 import type { Tree } from '@nx/devkit';
 import { getGeneratorInfo, type NxGeneratorInfo } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { tsReactWebsiteAuthGenerator } from '../../react-website/cognito-auth/generator.js';
 import type { TsWebsiteAuthGeneratorSchema } from './schema';
 
@@ -15,6 +16,7 @@ export async function tsWebsiteAuthGenerator(
   tree: Tree,
   schema: TsWebsiteAuthGeneratorSchema,
 ) {
+  assertSupportedNxVersion(tree);
   return tsReactWebsiteAuthGenerator(tree, {
     project: schema.project,
     allowSignup: schema.allowSignup,

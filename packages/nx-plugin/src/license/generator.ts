@@ -12,6 +12,7 @@ import {
   mergeTargetDefault,
   type NxGeneratorInfo,
 } from '../utils/nx.js';
+import { assertSupportedNxVersion } from '../utils/nx-version.js';
 import {
   addLicenseCheckToAllLintTargets,
   defaultLicenseConfig,
@@ -33,6 +34,7 @@ export async function licenseGenerator(
   tree: Tree,
   options: LicenseGeneratorSchema,
 ) {
+  assertSupportedNxVersion(tree);
   const { license, copyrightHolder } = options;
   const dependencyCheckEnabled = options.dependencyCheck !== false;
 

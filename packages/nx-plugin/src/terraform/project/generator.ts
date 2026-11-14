@@ -34,6 +34,7 @@ import {
   type NxGeneratorInfo,
   projectExists,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { sortObjectKeys } from '../../utils/object.js';
 import { uvxCommand } from '../../utils/py.js';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs.js';
@@ -104,6 +105,7 @@ export async function terraformProjectGenerator(
   tree: Tree,
   schema: TerraformProjectGeneratorSchema,
 ): Promise<GeneratorCallback> {
+  assertSupportedNxVersion(tree);
   // Just use getTsLibDetails as it isn't specific to TS
   const lib = getTsLibDetails(tree, schema);
   const { fullyQualifiedName: sharedTfProjectName } = getTsLibDetails(tree, {

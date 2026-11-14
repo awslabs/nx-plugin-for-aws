@@ -2,7 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readJson, readNxJson, type Tree, writeJson } from '@nx/devkit';
+import {
+  readJson,
+  readNxJson,
+  type TargetDefaults,
+  type Tree,
+  writeJson,
+} from '@nx/devkit';
 import uniqBy from 'lodash.uniqby';
 import { matchGlobPaths } from 'nx/src/native';
 import {
@@ -22,6 +28,10 @@ import {
   TS_LIB_GENERATOR_INFO,
   tsProjectGenerator,
 } from './generator.js';
+
+/** The unfiltered entry of `targetDefaults.test`, in either the object or the array form. */
+const catchAllTestDefault = (targetDefaults: TargetDefaults) =>
+  [targetDefaults.test].flat().find((entry) => !('filter' in entry));
 
 const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
@@ -266,7 +276,34 @@ describe('ts lib generator', () => {
 
     expect(targetDefaults.build.inputs).toContain('default');
     expect(targetDefaults.compile.inputs).toContain('default');
-    expect(targetDefaults.test.inputs).toContain('default');
+    expect(catchAllTestDefault(targetDefaults).inputs).toContain('default');
+  });
+
+  it('should configure vitest test defaults on the test target the @nx/vitest plugin infers', async () => {
+    await tsProjectGenerator(tree, {
+      name: 'test-1',
+      preferInstallDependencies: false,
+    });
+
+    const targetDefaults = readNxJson(tree).targetDefaults;
+    expect(targetDefaults).not.toHaveProperty(['@nx/vitest:test']);
+    expect(
+      [targetDefaults.test]
+        .flat()
+        .find((entry) => entry.filter?.plugin === '@nx/vitest'),
+    ).toEqual({
+      filter: { plugin: '@nx/vitest' },
+      cache: true,
+      inputs: ['default', '^production'],
+      configurations: { 'update-snapshot': { args: '--update' } },
+    });
+
+    const nxJson = tree.read('nx.json', 'utf-8');
+    await tsProjectGenerator(tree, {
+      name: 'test-1',
+      preferInstallDependencies: false,
+    });
+    expect(tree.read('nx.json', 'utf-8')).toBe(nxJson);
   });
 
   it('should not configure duplicate inputs in nx.json target defaults', async () => {
@@ -288,8 +325,9 @@ describe('ts lib generator', () => {
     expect(targetDefaults.compile.inputs).toHaveLength(
       uniqBy(targetDefaults.compile.inputs, (x) => x).length,
     );
-    expect(targetDefaults.test.inputs).toHaveLength(
-      uniqBy(targetDefaults.test.inputs, (x) => x).length,
+    const testDefault = catchAllTestDefault(targetDefaults);
+    expect(testDefault.inputs).toHaveLength(
+      uniqBy(testDefault.inputs, (x) => x).length,
     );
   });
 

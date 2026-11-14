@@ -2,12 +2,11 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { transformWithEsbuild } from 'vite';
-import { defineConfig } from 'vitest/config';
-import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
-import { nxCopyAssetsPlugin } from '@nx/vite/plugins/nx-copy-assets.plugin';
+
 import * as fs from 'fs';
 import * as path from 'path';
+import { transformWithEsbuild } from 'vite';
+import { defineConfig } from 'vitest/config';
 
 /**
  * Plugin which allows e2e tests to import .ts.template files from generators as if it were typescript
@@ -49,13 +48,12 @@ const importTypeScriptTemplatesAsVirtualModule = () => {
 };
 
 export default defineConfig({
+  resolve: {
+    tsconfigPaths: true,
+  },
   root: __dirname,
   cacheDir: '../node_modules/.vite/e2e',
-  plugins: [
-    nxViteTsPaths(),
-    nxCopyAssetsPlugin(['*.md']),
-    importTypeScriptTemplatesAsVirtualModule(),
-  ],
+  plugins: [importTypeScriptTemplatesAsVirtualModule()],
   // Uncomment this if you are using workers.
   // worker: {
   //  plugins: [ nxViteTsPaths() ],

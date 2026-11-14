@@ -36,6 +36,7 @@ import {
   projectExists,
   readProjectConfigurationUnqualified,
 } from '../utils/nx.js';
+import { assertSupportedNxVersion } from '../utils/nx-version.js';
 import { assignPort } from '../utils/port.js';
 import { ensureProjectPackageJson } from '../utils/project-package-json.js';
 import { addScriptProjectTargets } from '../utils/script-project-targets.js';
@@ -68,6 +69,7 @@ export const agentcoreGatewayGenerator = async (
   tree: Tree,
   options: AgentcoreGatewayGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const name = kebabCase(options.name);
   const nameClassName = toClassName(name);
   const parentDir = options.directory ?? 'packages';

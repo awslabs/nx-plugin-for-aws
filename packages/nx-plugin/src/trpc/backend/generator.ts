@@ -39,6 +39,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { sortObjectKeys } from '../../utils/object.js';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager.js';
 import { assignPort } from '../../utils/port.js';
@@ -105,6 +106,7 @@ export async function tsTrpcApiGenerator(
   tree: Tree,
   options: TsTrpcApiGeneratorSchema,
 ) {
+  assertSupportedNxVersion(tree);
   // Recorded in the metadata below so the version sync can tell a CDK
   // project from a Terraform one; undefined when no infrastructure was
   // generated, in which case neither provider's packages were added.

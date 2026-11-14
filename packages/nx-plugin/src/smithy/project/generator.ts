@@ -28,6 +28,7 @@ import {
   type NxGeneratorInfo,
   projectExists,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { getRelativePathToRootByDirectory } from '../../utils/paths.js';
 import {
   smithyCliCommand,
@@ -210,6 +211,7 @@ export const smithyProjectGenerator = async (
   tree: Tree,
   options: SmithyProjectGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const cmd = new FsCommands(tree, DEPENDENCIES);
   const type = options.type ?? 'service';
 

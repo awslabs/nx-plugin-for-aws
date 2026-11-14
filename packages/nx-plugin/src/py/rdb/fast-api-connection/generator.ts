@@ -22,6 +22,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { addWorkspaceDependencyToPyProject } from '../../../utils/py.js';
 import type { PyRdbFastApiConnectionGeneratorSchema } from './schema';
 
@@ -32,6 +33,7 @@ export const pyRdbFastApiConnectionGenerator = async (
   tree: Tree,
   options: PyRdbFastApiConnectionGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const sourceProject = readProjectConfigurationUnqualified(
     tree,
     options.sourceProject,

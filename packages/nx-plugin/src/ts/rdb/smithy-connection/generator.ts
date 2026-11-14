@@ -23,6 +23,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { toProjectRelativePath } from '../../../utils/paths.js';
 import type { TsRdbSmithyConnectionGeneratorSchema } from './schema';
 
@@ -33,6 +34,7 @@ export const tsRdbSmithyConnectionGenerator = async (
   tree: Tree,
   options: TsRdbSmithyConnectionGeneratorSchema,
 ): Promise<void> => {
+  assertSupportedNxVersion(tree);
   const sourceProject = readProjectConfigurationUnqualified(
     tree,
     options.sourceProject,

@@ -36,6 +36,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { toProjectRelativePath } from '../../../utils/paths.js';
 import { getExistingProjectPort } from '../../../utils/port.js';
 import {
@@ -74,6 +75,7 @@ export async function tsReactWebsiteAuthGenerator(
   tree: Tree,
   options: TsReactWebsiteAuthGeneratorSchema,
 ) {
+  assertSupportedNxVersion(tree);
   const projectConfig = readProjectConfigurationUnqualified(
     tree,
     options.project,

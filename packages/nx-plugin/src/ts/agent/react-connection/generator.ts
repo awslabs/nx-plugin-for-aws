@@ -29,6 +29,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { toProjectRelativePath } from '../../../utils/paths.js';
 import {
   DEPENDENCIES as AGUI_DEPENDENCIES,
@@ -102,6 +103,7 @@ export async function tsAgentReactConnectionGenerator(
   tree: Tree,
   options: ResolvedConnectionOptions & { gatewayRoute?: AgentGatewayRoute },
 ) {
+  assertSupportedNxVersion(tree);
   const frontendProjectConfig = readProjectConfigurationUnqualified(
     tree,
     options.sourceProject,

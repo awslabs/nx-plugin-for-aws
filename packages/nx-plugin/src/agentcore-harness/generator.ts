@@ -31,6 +31,7 @@ import {
   projectExists,
   readProjectConfigurationUnqualified,
 } from '../utils/nx.js';
+import { assertSupportedNxVersion } from '../utils/nx-version.js';
 import { addScriptProjectTargets } from '../utils/script-project-targets.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
@@ -62,6 +63,7 @@ export const agentcoreHarnessGenerator = async (
   tree: Tree,
   options: AgentcoreHarnessGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const nameKebabCase = kebabCase(options.name);
   const nameClassName = toClassName(nameKebabCase);
   const parentDir = options.directory ?? 'packages';

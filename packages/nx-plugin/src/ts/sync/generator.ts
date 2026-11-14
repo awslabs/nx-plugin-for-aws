@@ -18,6 +18,7 @@ import { relative } from 'path';
 import PackageJson from '../../../package.json' with { type: 'json' };
 import { getLocalDependencySpecifier } from '../../utils/dependencies.js';
 import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 
 export const TS_SYNC_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -28,6 +29,7 @@ export const SYNC_GENERATOR_NAME = `${PackageJson.name}:${TS_SYNC_GENERATOR_INFO
 export const tsSyncGeneratorGenerator = async (
   tree: Tree,
 ): Promise<SyncGeneratorResult> => {
+  assertSupportedNxVersion(tree);
   const basePaths = readBaseTsConfigPaths(tree);
 
   if (!basePaths) {

@@ -8,6 +8,7 @@ import {
   onlyWhen,
 } from '../../utils/declared-dependencies.js';
 import type { GreengrassPlatformSelection } from '../../utils/greengrass/constants.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { normalizeComponent } from './common.js';
 import { PY_DEPENDENCIES, TYPESCRIPT_DEPENDENCIES } from './dependencies.js';
 import { pythonGreengrassComponentGenerator } from './python/generator.js';
@@ -54,6 +55,7 @@ export const greengrassComponentGenerator = async (
   tree: Tree,
   options: GreengrassComponentGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const component = await normalizeComponent(tree, options);
   return component.language === 'python'
     ? pythonGreengrassComponentGenerator(tree, component)

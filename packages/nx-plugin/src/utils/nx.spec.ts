@@ -2,7 +2,11 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import type { ProjectConfiguration, Tree } from '@nx/devkit';
+import type {
+  ProjectConfiguration,
+  TargetConfiguration,
+  Tree,
+} from '@nx/devkit';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   addArtifactDependencyToTargets,
@@ -11,6 +15,7 @@ import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
+  mergePluginTargetDefault,
   mergeTarget,
   mergeTargetDefault,
   type NxGeneratorInfo,
@@ -860,5 +865,77 @@ describe('mergeTargetDefault', () => {
     ];
     const once = mergeTargetDefault(seed, addCache);
     expect(mergeTargetDefault(once, addCache)).toEqual(once);
+  });
+});
+
+describe('mergePluginTargetDefault', () => {
+  const plugin = '@nx/vitest';
+  const addCache = (base: Partial<TargetConfiguration>) => ({
+    cache: true,
+    ...base,
+  });
+
+  it('should create a single plugin-filtered entry when the value is unset', () => {
+    expect(mergePluginTargetDefault(undefined, plugin, addCache)).toEqual([
+      { filter: { plugin }, cache: true },
+    ]);
+  });
+
+  it('should keep the object form unchanged as the catch-all entry', () => {
+    expect(
+      mergePluginTargetDefault({ dependsOn: ['^build'] }, plugin, addCache),
+    ).toEqual([{ dependsOn: ['^build'] }, { filter: { plugin }, cache: true }]);
+  });
+
+  it('should merge into an existing entry filtered to the plugin, keeping the filter first', () => {
+    const merged = mergePluginTargetDefault(
+      [
+        { dependsOn: ['^build'] },
+        { filter: { plugin }, inputs: ['default'], cache: false },
+      ],
+      plugin,
+      addCache,
+    );
+    expect(merged).toEqual([
+      { dependsOn: ['^build'] },
+      { filter: { plugin }, inputs: ['default'], cache: false },
+    ]);
+    expect(Object.keys(merged[1])[0]).toBe('filter');
+  });
+
+  it('should leave other filtered entries and their order untouched', () => {
+    const projects = { filter: { projects: ['tag:app'] }, inputs: ['custom'] };
+    const otherPlugin = { filter: { plugin: '@nx/vite' }, cache: false };
+    const narrower = { filter: { plugin, projects: ['a'] }, inputs: ['a'] };
+    expect(
+      mergePluginTargetDefault(
+        [projects, otherPlugin, narrower],
+        plugin,
+        addCache,
+      ),
+    ).toEqual([
+      projects,
+      otherPlugin,
+      narrower,
+      { filter: { plugin }, cache: true },
+    ]);
+  });
+
+  it('should be idempotent for the object form', () => {
+    const once = mergePluginTargetDefault(
+      { dependsOn: ['^build'] },
+      plugin,
+      addCache,
+    );
+    expect(mergePluginTargetDefault(once, plugin, addCache)).toEqual(once);
+  });
+
+  it('should be idempotent for the array form', () => {
+    const seed = [
+      { dependsOn: ['^build'] },
+      { filter: { plugin: '@nx/vite' } },
+    ];
+    const once = mergePluginTargetDefault(seed, plugin, addCache);
+    expect(mergePluginTargetDefault(once, plugin, addCache)).toEqual(once);
   });
 });

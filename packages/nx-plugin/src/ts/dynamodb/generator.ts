@@ -37,6 +37,7 @@ import {
   getGeneratorInfo,
   type NxGeneratorInfo,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { assignSharedPort } from '../../utils/port.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
@@ -77,6 +78,7 @@ export const tsDynamoDBGenerator = async (
   tree: Tree,
   options: TsDynamoDBGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const nameKebabCase = kebabCase(options.name);
   const nameClassName = toClassName(options.name);
   const localTableName = `${getNpmScope(tree)}-${kebabCase(options.tableName ?? options.name)}`;

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { joinPathFragments, type Tree } from '@nx/devkit';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { buildOpenApiCodeGenerationData } from '../ts-client/generator.js';
 import type { CodeGenData } from '../utils/codegen-data/types.js';
 import type { OpenApiJsonMetadataGeneratorSchema } from './schema';
@@ -21,6 +22,7 @@ export const openApiJsonMetadataGenerator = async (
   tree: Tree,
   options: OpenApiJsonMetadataGeneratorSchema,
 ) => {
+  assertSupportedNxVersion(tree);
   const data = await buildOpenApiCodeGenerationData(
     tree,
     options.openApiSpecPath,

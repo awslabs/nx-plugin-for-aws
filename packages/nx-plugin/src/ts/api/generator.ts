@@ -6,6 +6,7 @@ import type { Tree } from '@nx/devkit';
 import { tsSmithyApiGenerator } from '../../smithy/ts/api/generator.js';
 import { tsTrpcApiGenerator } from '../../trpc/backend/generator.js';
 import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import type { TsApiGeneratorSchema } from './schema';
 
 export const TS_API_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
@@ -16,6 +17,7 @@ export async function tsApiGenerator(
   tree: Tree,
   options: TsApiGeneratorSchema,
 ) {
+  assertSupportedNxVersion(tree);
   const framework = options.framework ?? 'trpc';
 
   switch (framework) {

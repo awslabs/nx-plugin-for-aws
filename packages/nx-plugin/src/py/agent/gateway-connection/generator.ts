@@ -40,6 +40,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { toProjectRelativePath } from '../../../utils/paths.js';
 import { addWorkspaceDependencyToPyProject } from '../../../utils/py.js';
 import type { PyAgentGatewayConnectionGeneratorSchema } from './schema';
@@ -72,6 +73,7 @@ export const pyAgentGatewayConnectionGenerator = async (
   tree: Tree,
   options: PyAgentGatewayConnectionGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const sourceProject = readProjectConfigurationUnqualified(
     tree,
     options.sourceProject,

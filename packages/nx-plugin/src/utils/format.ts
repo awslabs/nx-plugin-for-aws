@@ -250,6 +250,27 @@ export async function formatFilesInSubtree(
 }
 
 /**
+ * Format the given files with Biome, whether or not the tree holds a change
+ * for them. For a file another tool edited on disk without formatting it,
+ * which {@link formatFilesInSubtree} skips because the tree sees no change.
+ * Paths that do not exist or that Biome does not format are skipped.
+ */
+export function formatFilesWithBiome(
+  tree: Tree,
+  filePaths: readonly string[],
+): void {
+  const files = filePaths
+    .filter((filePath) =>
+      BIOME_FORMATTABLE_EXTENSIONS.has(path.extname(filePath)),
+    )
+    .filter((filePath) => tree.exists(filePath))
+    .map((filePath) => ({ path: filePath, content: tree.read(filePath) }));
+  if (files.length === 0) return;
+
+  formatWithBiome(tree, files);
+}
+
+/**
  * The Biome configuration to format with: the workspace's own `biome.json`, else
  * the config we vend.
  *

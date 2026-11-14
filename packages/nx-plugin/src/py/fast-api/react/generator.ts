@@ -18,6 +18,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { toProjectRelativePath } from '../../../utils/paths.js';
 import { addOpenApiGeneration } from './open-api.js';
 import type { FastApiReactGeneratorSchema } from './schema';
@@ -34,6 +35,7 @@ export const fastApiReactGenerator = async (
   tree: Tree,
   options: FastApiReactGeneratorSchema,
 ) => {
+  assertSupportedNxVersion(tree);
   const frontendProjectConfig = readProjectConfigurationUnqualified(
     tree,
     options.frontendProjectName,

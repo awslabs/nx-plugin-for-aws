@@ -6,6 +6,7 @@ import { generateFiles, logger, type Tree } from '@nx/devkit';
 import * as path from 'path';
 import { formatFilesInSubtree } from '../../utils/format.js';
 import { esmVars } from '../../utils/module-format.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import type { CodeGenData } from '../utils/codegen-data/types.js';
 import { buildOpenApiCodeGenData } from '../utils/codegen-data.js';
 import { parseOpenApiSpec } from '../utils/parse.js';
@@ -19,6 +20,7 @@ export const openApiTsClientGenerator = async (
   tree: Tree,
   options: OpenApiTsClientGeneratorSchema,
 ) => {
+  assertSupportedNxVersion(tree);
   const data = await buildOpenApiCodeGenerationData(
     tree,
     options.openApiSpecPath,

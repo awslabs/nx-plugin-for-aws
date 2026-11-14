@@ -17,6 +17,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { addWorkspaceDependencyToPyProject } from '../../../utils/py.js';
 import type { PyDynamoDBMcpServerConnectionGeneratorSchema } from './schema';
 
@@ -27,6 +28,7 @@ export const pyDynamoDBMcpServerConnectionGenerator = async (
   tree: Tree,
   options: PyDynamoDBMcpServerConnectionGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const sourceProject = readProjectConfigurationUnqualified(
     tree,
     options.sourceProject,

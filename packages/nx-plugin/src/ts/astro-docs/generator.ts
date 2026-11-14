@@ -26,6 +26,7 @@ import {
   type NxGeneratorInfo,
   projectExists,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager.js';
 import { ensureProjectPackageJson } from '../../utils/project-package-json.js';
 import type { TsAstroDocsGeneratorSchema } from './schema';
@@ -76,6 +77,7 @@ export const tsAstroDocsGenerator = async (
   tree: Tree,
   schema: TsAstroDocsGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const includeTranslation = !(schema.noTranslation ?? false);
   const includeBlog = !(schema.noBlog ?? false);
   const npmScopePrefix = getNpmScopePrefix(tree);

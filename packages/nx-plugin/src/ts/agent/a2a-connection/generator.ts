@@ -41,6 +41,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { toProjectRelativePath } from '../../../utils/paths.js';
 import type { TsAgentA2aConnectionGeneratorSchema } from './schema';
 
@@ -73,6 +74,7 @@ export const tsAgentA2aConnectionGenerator = async (
   tree: Tree,
   options: TsAgentA2aConnectionGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const sourceProject = readProjectConfigurationUnqualified(
     tree,
     options.sourceProject,

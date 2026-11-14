@@ -37,6 +37,7 @@ import {
   type NxGeneratorInfo,
   projectExists,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { sortObjectKeys } from '../../utils/object.js';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager.js';
 import { uvxCommand } from '../../utils/py.js';
@@ -81,6 +82,7 @@ export async function tsInfraGenerator(
   tree: Tree,
   schema: TsInfraGeneratorSchema,
 ): Promise<GeneratorCallback> {
+  assertSupportedNxVersion(tree);
   const lib = getTsLibDetails(tree, schema);
 
   const isNewProject = !projectExists(tree, lib.fullyQualifiedName);

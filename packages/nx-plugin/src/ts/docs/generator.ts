@@ -4,6 +4,7 @@
  */
 import type { GeneratorCallback, Tree } from '@nx/devkit';
 import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { tsAstroDocsGenerator } from '../astro-docs/generator.js';
 import type { TsDocsGeneratorSchema } from './schema';
 
@@ -15,6 +16,7 @@ export const tsDocsGenerator = async (
   tree: Tree,
   schema: TsDocsGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const { framework: _framework, ...rest } = schema;
   return tsAstroDocsGenerator(tree, rest);
 };

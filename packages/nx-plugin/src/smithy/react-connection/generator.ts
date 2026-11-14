@@ -25,6 +25,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { toProjectRelativePath } from '../../utils/paths.js';
 import { SMITHY_PROJECT_GENERATOR_INFO } from '../project/generator.js';
 import { TS_SMITHY_API_GENERATOR_INFO } from '../ts/api/generator.js';
@@ -44,6 +45,7 @@ export const smithyReactConnectionGenerator = async (
   tree: Tree,
   options: SmithyReactConnectionGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const frontendProjectConfig = readProjectConfigurationUnqualified(
     tree,
     options.frontendProjectName,

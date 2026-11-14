@@ -13,6 +13,7 @@ import { applyWorkspaceInit, INIT_DEPENDENCIES } from '../utils/init.js';
 import { installDependencies } from '../utils/install.js';
 import { addGeneratorMetricsIfApplicable } from '../utils/metrics.js';
 import { getGeneratorInfo, type NxGeneratorInfo } from '../utils/nx.js';
+import { assertSupportedNxVersion } from '../utils/nx-version.js';
 import type { InitGeneratorSchema } from './schema';
 
 // `husky` is owned here rather than by the preset: both mark the workspace by
@@ -43,6 +44,7 @@ export const initGenerator = async (
     preferInstallDependencies,
   }: InitGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   await applyWorkspaceInit(tree, { iac, containers, mcp }, DEPENDENCIES);
 
   if (gitSecrets !== false) {
