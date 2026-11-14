@@ -219,6 +219,7 @@ const BLUEPRINTS: Readonly<Record<string, Blueprint>> = {
 
   ...dynamodbBlueprints('ts#dynamodb', 'py#dynamodb'),
   ...rdbBlueprints('ts#rdb', 'py#rdb'),
+  ...containerServiceBlueprints('ts#container', 'py#container'),
 
   // Generators with no node type of their own: they add to a project rather than
   // taking part in a connection, so they are named here.
@@ -561,6 +562,89 @@ function rdbBlueprints(...types: string[]): Record<string, Blueprint> {
       { from: 'migrations', to: 'aurora-mysql' },
     ],
     caller: { label: 'Application', detail: 'Lambda, agent, …' },
+  };
+  return Object.fromEntries(types.map((type) => [type, blueprint]));
+}
+
+/**
+ * The container service blueprint: an ECS service on Fargate behind an internal
+ * ALB, fronted by an HTTP API unless the service is private.
+ */
+function containerServiceBlueprints(
+  ...types: string[]
+): Record<string, Blueprint> {
+  const blueprint: Blueprint = {
+    resources: [
+      {
+        id: 'apigw-http',
+        label: 'API Gateway',
+        detail: 'HTTP API',
+        icon: 'api-gateway',
+        column: 0,
+        row: 0,
+        when: { infra: 'ecs', ingress: 'http-api' },
+      },
+      {
+        id: 'iam',
+        label: 'IAM',
+        detail: 'SigV4 auth',
+        icon: 'iam',
+        column: 0,
+        row: 1,
+        when: { infra: 'ecs', ingress: 'http-api', auth: 'iam' },
+      },
+      {
+        id: 'cognito',
+        label: 'Cognito',
+        detail: 'Token auth',
+        icon: 'cognito',
+        column: 0,
+        row: 1,
+        when: { infra: 'ecs', ingress: 'http-api', auth: 'cognito' },
+      },
+      {
+        id: 'alb',
+        label: 'ALB',
+        detail: 'Internal',
+        icon: 'elb',
+        column: 1,
+        row: 0,
+        when: { infra: 'ecs' },
+      },
+      {
+        id: 'ecs',
+        label: 'ECS',
+        detail: 'Fargate service',
+        icon: 'ecs',
+        column: 2,
+        row: 0,
+        when: { infra: 'ecs' },
+      },
+      {
+        id: 'ecr',
+        label: 'ECR',
+        detail: 'Container image',
+        icon: 'ecr',
+        column: 2,
+        row: 1,
+        when: { infra: 'ecs' },
+      },
+      {
+        id: 'local',
+        label: 'Service',
+        detail: 'local process',
+        column: 0,
+        row: 0,
+        when: { infra: 'none' },
+      },
+    ],
+    path: ['apigw-http', 'alb', 'ecs', 'local'],
+    links: [
+      { from: 'iam', to: 'apigw-http' },
+      { from: 'cognito', to: 'apigw-http' },
+      { from: 'ecr', to: 'ecs' },
+    ],
+    caller: { label: 'Client' },
   };
   return Object.fromEntries(types.map((type) => [type, blueprint]));
 }

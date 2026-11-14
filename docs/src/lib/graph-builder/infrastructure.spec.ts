@@ -136,6 +136,56 @@ describe('infrastructure view', () => {
     );
   });
 
+  // The container guides' option filters switch between these variants, so the
+  // diagram follows the same infra, ingress and auth values.
+  it('should draw a container service behind an HTTP API', () => {
+    expect(labelsOf(single('ts#container'))).toEqual([
+      'Client',
+      'API Gateway (HTTP API)',
+      'IAM (SigV4 auth)',
+      'ALB (Internal)',
+      'ECS (Fargate service)',
+      'ECR (Container image)',
+    ]);
+  });
+
+  it('should draw Cognito in front of the HTTP API when it authenticates with tokens', () => {
+    const labels = labelsOf(single('ts#container', { auth: 'cognito' }));
+    expect(labels).toContain('Cognito (Token auth)');
+    expect(labels).not.toContain('IAM (SigV4 auth)');
+  });
+
+  it('should draw only the internal load balancer for a private service', () => {
+    expect(labelsOf(single('ts#container', { ingress: 'private' }))).toEqual([
+      'Client',
+      'ALB (Internal)',
+      'ECS (Fargate service)',
+      'ECR (Container image)',
+    ]);
+  });
+
+  it('should draw a container service as a local process when it deploys no infrastructure', () => {
+    const resources = buildInfrastructureLayout(
+      single('ts#container', { infra: 'none' }),
+    ).boxes.flatMap((box) => box.resources);
+    expect(
+      resources.map((resource) =>
+        resource.detail
+          ? `${resource.label} (${resource.detail})`
+          : resource.label,
+      ),
+    ).toEqual(['Client', 'Service (local process)']);
+    expect(
+      resources.find((resource) => resource.label === 'Service')?.icon,
+    ).toBe(undefined);
+  });
+
+  it('should draw the same infrastructure for both languages', () => {
+    const python = labelsOf(single('py#container'));
+    expect(python).toEqual(labelsOf(single('ts#container')));
+    expect(python).not.toContain('No infrastructure');
+  });
+
   // A project can be generated without infrastructure, which reads better as a
   // stated absence than as an empty box.
   it('should say so when a project deploys nothing', () => {
