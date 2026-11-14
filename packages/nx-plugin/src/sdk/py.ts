@@ -11,6 +11,9 @@ export type { PyAgentGeneratorSchema } from '../py/agent/schema';
 export { pyApiGenerator } from '../py/api/generator.js';
 export type { PyApiGeneratorSchema } from '../py/api/schema';
 
+export { pyContainerGenerator } from '../py/container/generator.js';
+export type { PyContainerGeneratorSchema } from '../py/container/schema';
+
 export { pyDynamoDBGenerator } from '../py/dynamodb/generator.js';
 export type { PyDynamoDBGeneratorSchema } from '../py/dynamodb/schema';
 

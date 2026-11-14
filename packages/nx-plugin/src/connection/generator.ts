@@ -13,15 +13,18 @@ import { AGENTCORE_GATEWAY_GENERATOR_INFO } from '../agentcore-gateway/generator
 import agentcoreGatewayMcpConnectionGenerator from '../agentcore-gateway/mcp-connection/generator.js';
 import agentcoreGatewayReactConnectionGenerator from '../agentcore-gateway/react-connection/generator.js';
 import pyAgentA2aConnectionGenerator from '../py/agent/a2a-connection/generator.js';
+import pyAgentContainerConnectionGenerator from '../py/agent/container-connection/generator.js';
 import pyAgentGatewayConnectionGenerator from '../py/agent/gateway-connection/generator.js';
 import pyAgentMcpConnectionGenerator from '../py/agent/mcp-connection/generator.js';
 import pyAgentReactConnectionGenerator from '../py/agent/react-connection/generator.js';
 import pyDynamoDBAgentConnectionGenerator from '../py/dynamodb/agent-connection/generator.js';
+import pyDynamoDBContainerConnectionGenerator from '../py/dynamodb/container-connection/generator.js';
 import pyDynamoDBFastApiConnectionGenerator from '../py/dynamodb/fast-api-connection/generator.js';
 import { PY_DYNAMODB_GENERATOR_INFO } from '../py/dynamodb/generator.js';
 import pyDynamoDBMcpServerConnectionGenerator from '../py/dynamodb/mcp-server-connection/generator.js';
 import fastApiReactGenerator from '../py/fast-api/react/generator.js';
 import pyRdbAgentConnectionGenerator from '../py/rdb/agent-connection/generator.js';
+import pyRdbContainerConnectionGenerator from '../py/rdb/container-connection/generator.js';
 import pyRdbFastApiConnectionGenerator from '../py/rdb/fast-api-connection/generator.js';
 import { PY_RDB_GENERATOR_INFO } from '../py/rdb/generator.js';
 import pyRdbMcpServerConnectionGenerator from '../py/rdb/mcp-server-connection/generator.js';
@@ -30,15 +33,19 @@ import smithyReactConnectionGenerator from '../smithy/react-connection/generator
 import { TS_SMITHY_API_GENERATOR_INFO } from '../smithy/ts/api/generator.js';
 import trpcReactGenerator from '../trpc/react/generator.js';
 import tsAgentA2aConnectionGenerator from '../ts/agent/a2a-connection/generator.js';
+import tsAgentContainerConnectionGenerator from '../ts/agent/container-connection/generator.js';
 import tsAgentGatewayConnectionGenerator from '../ts/agent/gateway-connection/generator.js';
 import tsAgentMcpConnectionGenerator from '../ts/agent/mcp-connection/generator.js';
 import tsAgentReactConnectionGenerator from '../ts/agent/react-connection/generator.js';
+import tsContainerReactConnectionGenerator from '../ts/container/react-connection/generator.js';
 import tsDynamoDBAgentConnectionGenerator from '../ts/dynamodb/agent-connection/generator.js';
+import tsDynamoDBContainerConnectionGenerator from '../ts/dynamodb/container-connection/generator.js';
 import { TS_DYNAMODB_GENERATOR_INFO } from '../ts/dynamodb/generator.js';
 import tsDynamoDBMcpServerConnectionGenerator from '../ts/dynamodb/mcp-server-connection/generator.js';
 import tsDynamoDBSmithyConnectionGenerator from '../ts/dynamodb/smithy-connection/generator.js';
 import tsDynamoDBTrpcConnectionGenerator from '../ts/dynamodb/trpc-connection/generator.js';
 import tsRdbAgentConnectionGenerator from '../ts/rdb/agent-connection/generator.js';
+import tsRdbContainerConnectionGenerator from '../ts/rdb/container-connection/generator.js';
 import { TS_RDB_GENERATOR_INFO } from '../ts/rdb/generator.js';
 import tsRdbMcpServerConnectionGenerator from '../ts/rdb/mcp-server-connection/generator.js';
 import tsRdbSmithyConnectionGenerator from '../ts/rdb/smithy-connection/generator.js';
@@ -175,6 +182,27 @@ const CONNECTION_GENERATORS = {
     pyRdbAgentConnectionGenerator(tree, options),
   'py#mcp-server -> py#rdb': (tree, options) =>
     pyRdbMcpServerConnectionGenerator(tree, options),
+  // Container services (ts#container / py#container)
+  'ts#react-website -> ts#container': (tree, options) =>
+    tsContainerReactConnectionGenerator(tree, options),
+  'ts#react-website -> py#container': (tree, options) =>
+    tsContainerReactConnectionGenerator(tree, options),
+  'ts#agent -> ts#container': (tree, options) =>
+    tsAgentContainerConnectionGenerator(tree, options),
+  'ts#agent -> py#container': (tree, options) =>
+    tsAgentContainerConnectionGenerator(tree, options),
+  'py#agent -> ts#container': (tree, options) =>
+    pyAgentContainerConnectionGenerator(tree, options),
+  'py#agent -> py#container': (tree, options) =>
+    pyAgentContainerConnectionGenerator(tree, options),
+  'ts#container -> ts#rdb': (tree, options) =>
+    tsRdbContainerConnectionGenerator(tree, options),
+  'py#container -> py#rdb': (tree, options) =>
+    pyRdbContainerConnectionGenerator(tree, options),
+  'ts#container -> ts#dynamodb': (tree, options) =>
+    tsDynamoDBContainerConnectionGenerator(tree, options),
+  'py#container -> py#dynamodb': (tree, options) =>
+    pyDynamoDBContainerConnectionGenerator(tree, options),
 } satisfies Record<
   ConnectionKey,
   (tree: Tree, options: ResolvedConnectionOptions) => Promise<any>

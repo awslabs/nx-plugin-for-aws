@@ -1,0 +1,242 @@
+import { Duration } from 'aws-cdk-lib';
+import { HttpApi } from 'aws-cdk-lib/aws-apigatewayv2';
+import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
+import {
+  Connections,
+  IConnectable,
+  ISecurityGroup,
+  IVpc,
+  SubnetSelection,
+} from 'aws-cdk-lib/aws-ec2';
+import {
+  FargateService,
+  FargateTaskDefinition,
+  ICluster,
+  Secret,
+} from 'aws-cdk-lib/aws-ecs';
+import { ApplicationLoadBalancer } from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import { Grant, IGrantable, IRole } from 'aws-cdk-lib/aws-iam';
+import { RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { Construct } from 'constructs';
+
+/**
+ * Where the service's container image comes from.
+ */
+export type EcsServiceImage =
+  | {
+      /**
+       * Directory holding a Dockerfile, built as a linux/arm64 CDK image asset
+       * at deploy time.
+       */
+      readonly directory: string;
+    }
+  | {
+      /**
+       * Prebuilt image URI (a public registry or ECR). Nothing is built
+       * locally. For an ECR image the execution role is granted pull on it.
+       */
+      readonly imageUri: string;
+    };
+
+/**
+ * How callers reach the service when it has a load balancer.
+ *
+ * `http-api`: an API Gateway HTTP API reaches the internal load balancer
+ * through a VPC link. Requests time out after 30 seconds.
+ * `private`: the internal load balancer only, for callers inside the VPC.
+ */
+export type EcsServiceIngress = 'http-api' | 'private';
+
+/**
+ * How the HTTP API in front of the service authenticates (`http-api` only).
+ */
+export type EcsServiceAuth =
+  | { readonly type: 'iam' }
+  | {
+      readonly type: 'cognito';
+      readonly userPool: IUserPool;
+      readonly userPoolClient: IUserPoolClient;
+    }
+  | { readonly type: 'none' };
+
+/**
+ * Internal Application Load Balancer settings.
+ */
+export interface EcsServiceLoadBalancerOptions {
+  /**
+   * Path the target group health check calls.
+   *
+   * @default '/health'
+   */
+  readonly healthCheckPath?: string;
+  /**
+   * Time the target group waits before it removes a draining task.
+   *
+   * @default Duration.seconds(30)
+   */
+  readonly deregistrationDelay?: Duration;
+}
+
+/**
+ * Properties for an ECS service on AWS Fargate (linux/arm64) in an existing VPC.
+ */
+export interface EcsServiceProps {
+  /**
+   * Name of the service. Its URL is written to runtime config as
+   * `connection.services.<serviceName>`.
+   */
+  readonly serviceName: string;
+  /**
+   * VPC the service runs in. The construct never creates a VPC.
+   */
+  readonly vpc: IVpc;
+  /**
+   * Subnets for the tasks and the internal load balancer. Tasks never get a
+   * public IP.
+   *
+   * @default { subnetType: SubnetType.PRIVATE_WITH_EGRESS }
+   */
+  readonly vpcSubnets?: SubnetSelection;
+  /**
+   * Cluster to run in. Pass the same cluster to several services to run them
+   * in one cluster.
+   *
+   * @default a new cluster with Container Insights on
+   */
+  readonly cluster?: ICluster;
+  /**
+   * The container image to run.
+   */
+  readonly image: EcsServiceImage;
+  /**
+   * Port the server listens on inside the container, passed as `PORT`.
+   *
+   * @default 8080
+   */
+  readonly containerPort?: number;
+  /**
+   * Task CPU units.
+   *
+   * @default 256
+   */
+  readonly cpu?: number;
+  /**
+   * Task memory in MiB.
+   *
+   * @default 512
+   */
+  readonly memoryLimitMiB?: number;
+  /**
+   * Number of tasks to start with.
+   *
+   * @default 1
+   */
+  readonly desiredCount?: number;
+  /**
+   * Fewest tasks autoscaling keeps.
+   *
+   * @default 1
+   */
+  readonly minCapacity?: number;
+  /**
+   * Most tasks autoscaling starts.
+   *
+   * @default 2
+   */
+  readonly maxCapacity?: number;
+  /**
+   * Average CPU utilisation autoscaling keeps the service at, in percent.
+   *
+   * @default 70
+   */
+  readonly targetCpuUtilizationPercent?: number;
+  /**
+   * Plain environment variables. Never put secret values here; use `secrets`.
+   *
+   * @default {}
+   */
+  readonly environment?: Record<string, string>;
+  /**
+   * Secrets passed to the container as environment variables, read from
+   * Secrets Manager or SSM Parameter Store (`Secret.fromSecretsManager`,
+   * `Secret.fromSsmParameter`). The execution role may read only these.
+   *
+   * @default {}
+   */
+  readonly secrets?: Record<string, Secret>;
+  /**
+   * Internal load balancer settings, or `false` for a service with no load
+   * balancer and no URL (a worker).
+   *
+   * @default {}
+   */
+  readonly loadBalancer?: EcsServiceLoadBalancerOptions | false;
+  /**
+   * How callers reach the service. Only valid with a load balancer.
+   *
+   * @default 'http-api'
+   */
+  readonly ingress?: EcsServiceIngress;
+  /**
+   * How the HTTP API authenticates. Only valid with `ingress: 'http-api'`.
+   *
+   * @default { type: 'iam' }
+   */
+  readonly auth?: EcsServiceAuth;
+  /**
+   * Retention of the container log group.
+   *
+   * @default RetentionDays.ONE_YEAR
+   */
+  readonly logRetention?: RetentionDays;
+  /**
+   * Called once with the task role, to add grants the service needs. The task
+   * role has no permissions otherwise; connections add theirs here or through
+   * `taskRole`.
+   */
+  readonly grantTaskRole?: (taskRole: IRole) => void;
+}
+
+/**
+ * An ECS service on AWS Fargate with an optional internal Application Load
+ * Balancer and an optional API Gateway HTTP API in front of it.
+ *
+ * Members other connections and stacks rely on: `service`, `taskDefinition`,
+ * `taskRole`, `securityGroup`, `connections`, `loadBalancer`, `httpApi`, `url`
+ * and `grantInvoke`.
+ */
+export class EcsService extends Construct implements IConnectable {
+  /** The cluster the service runs in. */
+  public readonly cluster: ICluster;
+  /** The Fargate service. */
+  public readonly service: FargateService;
+  /** The Fargate task definition (linux/arm64). */
+  public readonly taskDefinition: FargateTaskDefinition;
+  /** Role the container's code runs as. No permissions unless granted. */
+  public readonly taskRole: IRole;
+  /** Security group of the tasks. */
+  public readonly securityGroup: ISecurityGroup;
+  /** Connections of the tasks' security group, for database and other rules. */
+  public readonly connections: Connections;
+  /** The internal load balancer, unless `loadBalancer` is `false`. */
+  public readonly loadBalancer?: ApplicationLoadBalancer;
+  /** The HTTP API, when `ingress` is `http-api`. */
+  public readonly httpApi?: HttpApi;
+  /** URL callers use: the HTTP API URL, or the internal load balancer URL. */
+  public readonly url?: string;
+
+  constructor(scope: Construct, id: string, props: EcsServiceProps) {
+    super(scope, id);
+    // TODO(CDK lane): cluster, task definition, container, service, load
+    // balancer, HTTP API, security groups, autoscaling, logs and roles.
+    throw new Error(`EcsService ${props.serviceName} is not implemented yet`);
+  }
+
+  /**
+   * Lets `grantee` call the HTTP API (`execute-api:Invoke`) when `auth` is IAM.
+   */
+  public grantInvoke(grantee: IGrantable): Grant {
+    // TODO(CDK lane)
+    throw new Error(`grantInvoke is not implemented yet for ${grantee}`);
+  }
+}
