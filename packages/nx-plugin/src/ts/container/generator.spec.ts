@@ -25,6 +25,7 @@ import {
   snapshotTreeDir,
 } from '../../utils/test.js';
 import { BASE_IMAGES } from '../../utils/versions.js';
+import { injectRdsCaBundleIntoDockerfile } from '../rdb/utils.js';
 import {
   TS_CONTAINER_GENERATOR_INFO,
   tsContainerGenerator,
@@ -151,6 +152,24 @@ describe('ts#container generator', () => {
     expect(dockerfile).toContain('USER node');
     expect(dockerfile).toContain('EXPOSE 8080');
     expect(dockerfile).toContain('COPY index.js');
+  });
+
+  // ts#rdb#container-connection inserts its root-only RDS CA install step
+  // right before the first EXPOSE line, so USER must come after EXPOSE.
+  it('should keep the steps a connection inserts before EXPOSE running as root', async () => {
+    await run();
+
+    const dockerfile = tree.read(`${SERVICE_DIR}/Dockerfile`, 'utf-8') ?? '';
+    injectRdsCaBundleIntoDockerfile(tree, `${SERVICE_DIR}/Dockerfile`);
+    const injected = tree.read(`${SERVICE_DIR}/Dockerfile`, 'utf-8') ?? '';
+
+    expect(dockerfile.indexOf('EXPOSE 8080')).toBeLessThan(
+      dockerfile.indexOf('USER node'),
+    );
+    expect(injected.indexOf('update-ca-certificates')).toBeGreaterThan(-1);
+    expect(injected.indexOf('update-ca-certificates')).toBeLessThan(
+      injected.indexOf('USER node'),
+    );
   });
 
   it('should add the bundle, docker, trivy, serve and dev targets', async () => {
