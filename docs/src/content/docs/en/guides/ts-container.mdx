@@ -1,0 +1,494 @@
+---
+title: TypeScript Container Service
+description: Add a containerised HTTP service to a TypeScript project and run it on Amazon ECS
+generator: ts#container
+---
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import ArchitectureDiagram from '@components/architecture-diagram.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import OptionFilter from '@components/option-filter.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Snippet from '@components/snippet.astro';
+
+This generator adds a containerised HTTP service to an existing TypeScript project. You get a small HTTP server with a `GET /health` route, a Dockerfile, and targets to run the server locally, build its image and scan the image. You also get CDK or Terraform code that runs the image on [Amazon Elastic Container Service (Amazon ECS)](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html), the AWS service that runs and scales containers.
+
+The service runs on [AWS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html), which runs each container without servers for you to manage. It runs in your own VPC (virtual private cloud, an isolated network in your AWS account), behind an internal [Application Load Balancer](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/introduction.html) (ALB) that only addresses inside the VPC can reach. By default an [Amazon API Gateway HTTP API](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) receives requests from callers and passes them to the ALB through a VPC link (API Gateway's private connection into a VPC). Callers get an authenticated HTTPS endpoint, and the load balancer never faces the internet.
+
+## Usage
+
+### Add a Container Service
+
+You can add a container service to a TypeScript project in two ways:
+
+<RunGenerator generator="ts#container" />
+
+:::tip[Project Prerequisite]
+First use the <Link path="/guides/typescript-project">`ts#project`</Link> generator to create a project to add your service to.
+:::
+
+### Options
+
+<GeneratorParameters generator="ts#container" />
+
+The `infra`, `ingress` and `auth` options depend on each other. With `infra` set to `none` the generator vends no infrastructure, and it ignores `ingress` and `auth` with a warning. `ingress` applies only with `infra` set to `ecs`. `auth` applies only with `ingress` set to `http-api`, because a `private` service has no HTTP API to authenticate.
+
+## Generator Output
+
+The generator adds the following files to your project. The source folder is named after the `name` option, or `service` if you leave it out:
+
+{/* TODO(integration): server file name, server.ts or index.ts, and where .dockerignore goes (lane A) */}
+<FileTree>
+  - your-project/
+    - src/
+      - service/ (or the name you chose)
+        - server.ts HTTP server with `GET /health` and a sample route, listening on `PORT`
+        - Dockerfile Container image definition
+        - .dockerignore Files left out of the image build context
+    - project.json Updated with the `serve`, `docker` and `trivy` targets for your service
+</FileTree>
+
+<OptionFilter when={{ infra: 'ecs' }} description="ECS service infrastructure">
+### Infrastructure
+
+<Snippet name="shared-constructs" />
+
+For deploying your service, the following files are generated:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<FileTree>
+  - packages/common/constructs/src
+    - app
+      - services
+        - \<name>.ts CDK construct for your service, with its image, `ingress` and `auth` set
+    - core
+      - container
+        - ecs-service.ts Generic construct for an ECS service on Fargate
+</FileTree>
+</Fragment>
+<Fragment slot="terraform">
+{/* TODO(integration): resource file name (lane B) */}
+<FileTree>
+  - packages/common/terraform/src
+    - app
+      - services
+        - \<name>
+          - \<name>.tf Module for your service, which publishes its image and writes its URL to runtime config
+    - core
+      - container
+        - ecs-service
+          - ecs-service.tf Generic module for an ECS service on Fargate
+          - variables.tf Inputs of the generic module
+          - outputs.tf Outputs of the generic module
+</FileTree>
+</Fragment>
+</Infrastructure>
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'none' }} description="No infrastructure is vended for infra=none">
+If you set `infra` to `none`, no CDK constructs or Terraform modules are generated, and the service runs only locally. The `ingress` and `auth` options are ignored in this mode.
+</OptionFilter>
+
+#### Architecture
+
+<ArchitectureDiagram />
+
+## Running Your Service Locally
+
+The `serve` target runs the server on your machine, without a container:
+
+<NxCommands commands={['run your-project:service-serve']} />
+
+Targets are prefixed with the `name` option, or `service` if you leave it out. For example, `--name=orders` gives `orders-serve`. The server listens on the port in the `PORT` environment variable. The `serve` target sets it to a port the generator assigns, starting at 8081 and skipping ports other projects in your workspace already use. Inside the container the server listens on port 8080.
+
+Check that the server is up with its health route:
+
+```bash
+curl http://localhost:<port>/health
+```
+
+{/* TODO(integration): sample route path (lane A) */}
+The server also has a sample route that you replace with your own routes.
+
+## Building and Scanning the Image
+
+The `<name>-docker` target builds a linux/arm64 image of your service. It runs the `bundle` target first, so the image holds the bundled server. It uses the container engine your workspace is set up with, `docker` or [Finch](https://runfinch.com/). The target runs as part of the aggregate `docker` target, which builds every image in the project.
+
+<NxCommands commands={['run your-project:service-docker']} />
+
+Only the load balancer's target group (the list of tasks the load balancer sends requests to) checks `GET /health`, to decide whether a task is ready for traffic. ECS ignores a `HEALTHCHECK` instruction in the Dockerfile. For more on how images are built and published, see <Link path="/guides/docker-bundling">Docker Bundling</Link>.
+
+### Image Scanning
+
+<Snippet name="trivy-image-scan" parentHeading="Image Scanning" />
+
+<OptionFilter when={{ infra: 'ecs' }} description="Deploying the ECS service">
+## Deploying Your Service
+
+### Adding the Service to Your Infrastructure
+
+The construct and the module never create a VPC. You create or import one in your stack or root module and pass it in. The tasks and the load balancer run in private subnets with egress, which reach AWS services through a NAT gateway (a managed gateway that lets private subnets make outbound connections) or through VPC endpoints (private connections from your VPC to AWS services).
+
+<Infrastructure>
+<Fragment slot="cdk">
+The CDK construct is created in `common/constructs` and named after your service. Example usage with a new VPC:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyService } from '@my-scope/common-constructs';
+import { Stack, StackProps } from 'aws-cdk-lib';
+import { SubnetType, Vpc } from 'aws-cdk-lib/aws-ec2';
+import { Construct } from 'constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const vpc = new Vpc(this, 'Vpc', { natGateways: 1 });
+
+    new MyService(this, 'MyService', {
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    });
+  }
+}
+```
+
+To use an existing VPC, look it up with `Vpc.fromLookup(this, 'Vpc', { vpcId: '<vpc-id>' })` and pass it as `vpc`.
+</Fragment>
+<Fragment slot="terraform">
+The Terraform module is created in `common/terraform`. The service's image is published to the shared asset repository, so instantiate the `core/asset-ecr` module once per deployment and pass its outputs to every service module:
+
+```hcl title="packages/infra/src/main.tf"
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
+}
+
+module "my_service" {
+  source = "../../common/terraform/src/app/services/my-service"
+
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = aws_subnet.private[*].id
+
+  # TODO(integration): confirm the app module's variables (lane B).
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+  asset_ecr_repository_arn = module.asset_ecr.repository_arn
+}
+```
+</Fragment>
+</Infrastructure>
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'ecs', ingress: 'http-api' }} description="HTTP API request limits">
+### Request Limits
+
+API Gateway stops waiting for your service after 30 seconds and returns an error to the caller. You cannot raise this integration timeout. The largest request payload the HTTP API accepts is 10 MB, and you cannot raise this limit either. Both values come from the [Amazon API Gateway quotas for HTTP APIs](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-quotas.html) page.
+
+So requests that run longer than 30 seconds, and responses that stream data over a long time, do not work through the HTTP API. For those, set `ingress` to `private` and call the internal load balancer from inside the VPC.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'ecs' }} description="Networking, security, calling, advanced configuration, cost and destroy">
+### Running Without a NAT Gateway
+
+When your tasks start, ECS pulls the image and sends logs on their behalf. Your server code may also call AWS services. In private subnets with no NAT gateway, each of these calls needs a VPC endpoint. Without the right endpoints, tasks fail to start or time out when they call AWS.
+
+Create these endpoints in the VPC, replacing `<region>` with your AWS Region:
+
+| Endpoint | Type | What uses it |
+| --- | --- | --- |
+| `com.amazonaws.<region>.ecr.api` | Interface | ECS, to authenticate with Amazon ECR and look up the image |
+| `com.amazonaws.<region>.ecr.dkr` | Interface | ECS, to pull the image from Amazon ECR |
+| `com.amazonaws.<region>.s3` | Gateway | ECS, to download image layers, which Amazon ECR stores in Amazon S3 |
+| `com.amazonaws.<region>.logs` | Interface | The container's log output, sent to Amazon CloudWatch Logs |
+| `com.amazonaws.<region>.secretsmanager` | Interface | ECS, to read the secrets you pass to the container when a task starts |
+| `com.amazonaws.<region>.appconfigdata` | Interface | Your code, to read <Link path="/guides/runtime-config">runtime configuration</Link> from AWS AppConfig |
+| `com.amazonaws.<region>.sts` | Interface | Your code, when it requests temporary credentials from AWS STS (for example to assume another role) |
+
+Interface endpoints need a security group that allows HTTPS (port 443) from the tasks. For details on the Amazon ECR endpoints, see [Amazon ECR interface VPC endpoints](https://docs.aws.amazon.com/AmazonECR/latest/userguide/vpc-endpoints.html).
+
+### Security Defaults
+
+The generated infrastructure applies these settings by default:
+
+- The load balancer is internal. No security group allows inbound traffic from `0.0.0.0/0` or `::/0`.
+- Tasks run in private subnets and never get a public IP address.
+- The load balancer accepts traffic only from the VPC link (`http-api`) or from the VPC's address range (`private`). The tasks accept traffic only from the load balancer, on the container port.
+- Tasks may send outbound traffic only on port 443. Connections to databases add the database port.
+- The task role (the role your server code runs as) has no permissions until you or a connection grant them.
+- The execution role (the role ECS uses to start your task) may only pull the service's image, write to its log group and read the secrets you list.
+- Secrets reach the container only as references to AWS Secrets Manager or AWS Systems Manager Parameter Store, never as plain environment values.
+- The container has a read-only root file system and runs as a non-root user. ECS Exec (shell access into a running task) is off.
+- A deployment that fails its health checks stops and rolls back to the previous version.
+- The HTTP API writes access logs and throttles requests. It authenticates with IAM unless you choose otherwise.
+- Logs are kept for one year.
+
+### Calling Your Service
+
+The service's URL is written to <Link path="/guides/runtime-config">runtime configuration</Link> as `connection.services.<NameClassName>`, where `<NameClassName>` is the service name in PascalCase (for example `Orders` for `--name=orders`).
+
+<Tabs syncKey="auth">
+<TabItem label="IAM" _filter={{ ingress: 'http-api', auth: 'iam' }}>
+Callers sign each request with [AWS Signature Version 4 (SigV4)](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv.html) for the `execute-api` service, using AWS credentials that may call the API. API Gateway rejects a request without a valid signature before it reaches your service.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Grant a role or function permission to call the service with `grantInvoke`:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const service = new MyService(this, 'MyService', { vpc });
+service.grantInvoke(myFunction);
+```
+</Fragment>
+<Fragment slot="terraform">
+Grant a role permission to call the service with an `execute-api:Invoke` policy on the API's execution ARN, which the `ecs-service` module outputs as `api_execution_arn`:
+
+{/* TODO(integration): whether the app module re-exports api_execution_arn (lane B) */}
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_role_policy" "invoke_my_service" {
+  role = aws_iam_role.caller.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["execute-api:Invoke"]
+      Resource = ["${module.my_service.api_execution_arn}/*"]
+    }]
+  })
+}
+```
+</Fragment>
+</Infrastructure>
+</TabItem>
+<TabItem label="Cognito" _filter={{ ingress: 'http-api', auth: 'cognito' }}>
+Callers send a JSON Web Token (JWT) issued by your Amazon Cognito user pool in the `Authorization` header. The HTTP API checks that the token comes from the user pool and was issued to one of the accepted app clients.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Pass the user pool and app client in the `auth` prop of `EcsService`: `auth: { type: 'cognito', userPool, userPoolClient }`.
+</Fragment>
+<Fragment slot="terraform">
+Set the `user_pool_id` and `user_pool_client_ids` variables of the `ecs-service` module.
+</Fragment>
+</Infrastructure>
+</TabItem>
+<TabItem label="None" _filter={{ ingress: 'http-api', auth: 'none' }}>
+The HTTP API accepts requests without authentication. Anyone who knows the URL can call your service, so check callers in your own code.
+</TabItem>
+<TabItem label="Private" _filter={{ ingress: 'private' }}>
+A `private` service has no HTTP API. Its URL is the internal load balancer's address, which only callers inside the VPC can reach. The load balancer accepts traffic from the VPC's address range on its listener port. For example, call it from a Lambda function or another ECS service in the same VPC.
+</TabItem>
+</Tabs>
+
+### Advanced Configuration
+
+The generic construct and module take more settings than the generated service passes. The examples below use them directly.
+
+{/* TODO(integration): confirm EcsService is exported from the common-constructs index, and that the per-service construct passes cluster and auth through (lane A) */}
+
+#### Prebuilt Image
+
+To run an image that is already built, for example from a public registry, pass its URI. Nothing is built locally. For an Amazon ECR image, the execution role is granted pull access on it.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+new EcsService(this, 'Prebuilt', {
+  serviceName: 'Prebuilt',
+  vpc,
+  image: { imageUri: 'public.ecr.aws/my-org/my-image@sha256:<digest>' },
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl
+module "prebuilt" {
+  source = "../../common/terraform/src/core/container/ecs-service"
+
+  service_name = "Prebuilt"
+  vpc_id       = aws_vpc.main.id
+  subnet_ids   = aws_subnet.private[*].id
+  image_uri    = "public.ecr.aws/my-org/my-image@sha256:<digest>"
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+#### Worker With No Load Balancer
+
+A worker reads from a queue or runs background jobs, and nothing calls it. Turn off the load balancer to get a service with no load balancer, no HTTP API and no URL.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+new EcsService(this, 'Worker', {
+  serviceName: 'Worker',
+  vpc,
+  image: { directory: '<path to the folder with the Dockerfile>' },
+  loadBalancer: false,
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl
+module "worker" {
+  source = "../../common/terraform/src/core/container/ecs-service"
+
+  service_name  = "Worker"
+  vpc_id        = aws_vpc.main.id
+  subnet_ids    = aws_subnet.private[*].id
+  image_uri     = "<image uri pinned by digest>"
+  load_balancer = false
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+#### Several Services in One Stack
+
+Each service creates its own ECS cluster unless you pass one in. To run several services in one cluster, pass the same cluster to each.
+
+{/* TODO(integration): whether services share a VPC link (lane A/B) */}
+Each HTTP API service uses a VPC link. API Gateway allows 10 VPC links per account per Region by default, and you can request an increase.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+const cluster = new Cluster(this, 'Cluster', { vpc });
+
+new MyService(this, 'MyService', { vpc, cluster });
+new MyOtherService(this, 'MyOtherService', { vpc, cluster });
+```
+
+</Fragment>
+<Fragment slot="terraform">
+Pass the same `cluster_arn` to each `ecs-service` module. The `cluster_arn` output of the first service gives you one:
+
+```hcl
+cluster_arn = module.my_service.cluster_arn
+```
+
+</Fragment>
+</Infrastructure>
+
+#### Environment Variables and Secrets
+
+Plain settings go in `environment`. Never put secret values there, because anyone who can read the task definition can read them. Pass secrets as references instead. The execution role may read only the secrets you list.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+new EcsService(this, 'MyService', {
+  // ...
+  environment: { LOG_LEVEL: 'info' },
+  secrets: { API_KEY: Secret.fromSecretsManager(apiKeySecret) },
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl
+environment = { LOG_LEVEL = "info" }
+secrets     = { API_KEY = aws_secretsmanager_secret.api_key.arn }
+```
+
+</Fragment>
+</Infrastructure>
+
+#### Sizing and Scaling
+
+Each task gets 256 CPU units (a quarter of a vCPU) and 512 MiB of memory by default. The service starts one task, and autoscaling keeps between one and two tasks running, adding tasks when average CPU use goes above 70%.
+
+| Setting | CDK prop | Terraform variable | Default |
+| --- | --- | --- | --- |
+| CPU units per task | `cpu` | `cpu` | 256 |
+| Memory per task (MiB) | `memoryLimitMiB` | `memory` | 512 |
+| Tasks at start | `desiredCount` | `desired_count` | 1 |
+| Fewest tasks | `minCapacity` | `min_capacity` | 1 |
+| Most tasks | `maxCapacity` | `max_capacity` | 2 |
+| Target average CPU (%) | `targetCpuUtilizationPercent` | `target_cpu_utilization` | 70 |
+
+#### Task Role Permissions
+
+The task role starts with no permissions. Add the ones your code needs:
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+new EcsService(this, 'MyService', {
+  // ...
+  grantTaskRole: (taskRole) => myTable.grantReadData(taskRole),
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl
+task_role_policy_statements = [{
+  Effect   = "Allow"
+  Action   = ["dynamodb:GetItem", "dynamodb:Query"]
+  Resource = [aws_dynamodb_table.my_table.arn]
+}]
+```
+
+</Fragment>
+</Infrastructure>
+
+### Cost
+
+A container service bills while it is idle, unlike a Lambda function. These parts bill by the hour whether or not anyone calls the service:
+
+- Fargate tasks, per vCPU and per GB of memory. `desiredCount` and `minCapacity` keep at least one task running.
+- The Application Load Balancer, per hour and per load balancer capacity unit.
+- Interface VPC endpoints, per hour in each Availability Zone, or a NAT gateway, per hour and per GB of data it processes.
+- Log storage in CloudWatch Logs, and image storage in Amazon ECR.
+
+The HTTP API bills per request. To estimate the cost for your Region and traffic, use the [AWS Pricing Calculator](https://calculator.aws/).
+
+### Destroying Your Service
+
+To remove the service, destroy the stack or the Terraform configuration that holds it:
+
+<Infrastructure>
+<Fragment slot="cdk">
+Run your infrastructure project's `destroy` target, which runs `cdk destroy`:
+
+<NxCommands commands={['run infra:destroy']} />
+</Fragment>
+<Fragment slot="terraform">
+Run your infrastructure project's `destroy` target:
+
+<NxCommands commands={['run infra:destroy']} />
+</Fragment>
+</Infrastructure>
+
+Then check in the AWS console or with the AWS CLI that these are gone: the ECS service and cluster, the load balancer and its target group, the HTTP API and its VPC link, and the service's log group. Images stay in Amazon ECR, in the CDK assets repository or the shared `asset-ecr` repository. Delete them if you no longer need them. The VPC is yours, so destroying the service leaves it in place.
+</OptionFilter>
+
+## Connecting Your Service
+
+Use the <Link path="/guides/connection">`connection`</Link> generator to connect your service to other projects in your workspace:
+
+<RunGenerator generator="connection" />
+
+{/* TODO(integration): link the connection/<page> guides (lane D) */}
+A website or an agent can call your service, and your service can use a relational database or a DynamoDB table. Each connection has conditions:
+
+- A website or an agent can connect only to a service with `ingress` set to `http-api`.
+- An agent can also connect only to a service with `auth` set to `iam`.
+- A database or DynamoDB connection needs a service with `infra` set to `ecs`.
