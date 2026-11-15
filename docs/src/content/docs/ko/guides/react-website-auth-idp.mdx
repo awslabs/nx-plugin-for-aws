@@ -1,23 +1,24 @@
 ---
 title: 웹사이트 아이덴티티 프로바이더
 description: Okta, Auth0 또는 Microsoft Entra ID와 같은 외부 OpenID Connect 아이덴티티 프로바이더를 통해 사용자가 웹사이트에 로그인할 수 있도록 합니다
-generator: ts#website#auth#idp
+generator: ts#website#auth
+when:
+  federation: [oidc]
 ---
 
 import { FileTree } from '@astrojs/starlight/components';
-import GeneratorParameters from '@components/generator-parameters.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 
 <Link path="guides/react-website-auth">웹사이트 인증</Link>은 Amazon Cognito 사용자 풀을 생성하며, 기본적으로 해당 풀에 사용자 이름과 비밀번호가 있는 사용자만 로그인할 수 있습니다. 직원이나 고객이 Okta, Auth0 또는 Microsoft Entra ID와 같은 아이덴티티 프로바이더(IdP)에 이미 계정을 가지고 있다면, 웹사이트를 위해 별도의 두 번째 계정이 필요하게 됩니다.
 
-이 생성기는 사용자 풀에 외부 [OpenID Connect](https://openid.net/developers/how-connect-works/) (OIDC) 아이덴티티 프로바이더를 추가합니다. 그러면 로그인 페이지에 사용자 이름과 비밀번호 양식 옆에 아이덴티티 프로바이더를 위한 버튼이 표시됩니다.
+`--federation=oidc`와 함께 `ts#website#auth`를 실행하면 사용자 풀에 외부 [OpenID Connect](https://openid.net/developers/how-connect-works/) (OIDC) 아이덴티티 프로바이더를 추가할 수 있습니다. 인프라 코드에 아이덴티티 프로바이더를 나열합니다: CDK의 `UserIdentity`의 `oidcIdentityProviders` prop 또는 Terraform의 `user_identity` 모듈의 `oidc_identity_providers` 변수입니다. 그러면 로그인 페이지에 사용자 이름과 비밀번호 양식 옆에 각 아이덴티티 프로바이더를 위한 버튼이 표시됩니다.
 
 ## 작동 방식
 
-- 웹사이트는 여전히 사용자를 Cognito 로그인 페이지로 보냅니다. 이제 페이지에는 아이덴티티 프로바이더의 이름이 붙은 버튼이 있습니다.
-- 버튼을 선택한 사용자는 아이덴티티 프로바이더에서 로그인합니다. 아이덴티티 프로바이더는 리디렉션 URI인 `https://<cognito domain>/oauth2/idpresponse`로 사용자를 Cognito로 다시 보냅니다.
+- 웹사이트는 여전히 사용자를 Cognito 로그인 페이지로 보냅니다. 이제 페이지에는 각 아이덴티티 프로바이더의 이름이 붙은 버튼이 있습니다.
+- 버튼을 선택한 사용자는 해당 아이덴티티 프로바이더에서 로그인합니다. 아이덴티티 프로바이더는 리디렉션 URI인 `https://<cognito domain>/oauth2/idpresponse`로 사용자를 Cognito로 다시 보냅니다.
 - Cognito는 사용자 풀에 페더레이션 사용자를 생성하고, 매핑한 클레임(예: `email`)을 사용자의 속성으로 복사합니다.
 - 그런 다음 Cognito는 로컬 사용자에게 발급하는 것과 동일한 종류의 토큰을 발급합니다. API, 에이전트 및 아이덴티티 풀은 변경 없이 이를 수락합니다.
 
@@ -27,6 +28,8 @@ import RunGenerator from '@components/run-generator.astro';
 
 아이덴티티 프로바이더를 추가하면 예상보다 훨씬 많은 사람들이 웹사이트에 접근할 수 있습니다. `ts#website#auth`의 `allowSignup` 옵션은 페더레이션 사용자에게 적용되지 않습니다. Cognito는 사용자 풀이 사용자 자체 가입을 허용하지 않는 경우에도 누군가가 아이덴티티 프로바이더를 통해 처음 로그인할 때 페더레이션 사용자를 생성합니다. 각 페더레이션 사용자는 아이덴티티 풀의 인증된 역할도 받으므로 로그인한 다른 사용자와 마찬가지로 API 및 에이전트를 호출할 수 있습니다.
 
+아이덴티티 프로바이더는 전체 사용자 풀에 적용됩니다. 풀을 사용하는 모든 웹사이트는 해당 버튼을 표시하고 사용자를 수락합니다.
+
 따라서 아이덴티티 프로바이더가 로그인할 수 있는 사용자를 결정합니다. 웹사이트가 필요한 사람만 로그인하도록 설정하세요:
 
 - Microsoft Entra ID: 애플리케이션의 엔터프라이즈 애플리케이션 속성에서 "Assignment required?"를 Yes로 설정하고 액세스가 필요한 사용자 또는 그룹만 할당하세요. 기본값인 No를 사용하면 테넌트의 모든 사용자가 로그인할 수 있습니다.
@@ -35,123 +38,269 @@ import RunGenerator from '@components/run-generator.astro';
 
 ## 사용법
 
+### OpenID Connect 페더레이션 추가
+
+<Link path="guides/react-website-auth">`ts#website#auth`</Link> 생성기를 `--federation=oidc`와 함께 실행하세요. 아직 인증이 없는 웹사이트에서 실행하거나 이미 인증이 있는 웹사이트에서 실행할 수 있습니다. 둘 다 동일한 결과를 제공합니다.
+
+<RunGenerator generator="ts#website#auth" requiredParameters={{ federation: 'oidc' }} />
+
+생성기는 아이덴티티 프로바이더를 추가하지 않습니다. 목록은 비어 있는 상태로 시작하므로 항목을 추가할 때까지 로그인이 이전과 같이 작동합니다. 인프라 코드에 아이덴티티 프로바이더를 추가하므로 두 번째 아이덴티티 프로바이더를 추가하는 데 다른 생성기 실행이 필요하지 않습니다.
+
+`--federation=oidc`와 함께 생성기를 다시 실행하면 파일이 변경되지 않습니다. `--federation=none` 또는 `--federation` 없이 실행하면 이미 있는 페더레이션이 유지됩니다.
+
 ### 아이덴티티 프로바이더 추가
 
-<Link path="guides/react-website-auth">`ts#website#auth`</Link> 생성기에서 인증이 설정된 웹사이트가 필요합니다. 각 아이덴티티 프로바이더마다 이 생성기를 한 번씩 실행하세요.
+각 아이덴티티 프로바이더에 대한 항목을 추가한 다음 배포하세요. 클라이언트 시크릿은 코드에 포함되지 않습니다. [아이덴티티 프로바이더 설정](#set-up-your-identity-provider)에서 설명하는 대로 AWS Secrets Manager에 저장하고 이름을 제공합니다.
 
-<RunGenerator generator="ts#website#auth#idp" />
+<Infrastructure>
+  <Fragment slot="cdk">
+스택의 `UserIdentity`에 아이덴티티 프로바이더를 전달하세요:
 
-생성기는 아이덴티티 프로바이더에 등록된 애플리케이션의 클라이언트 ID가 필요합니다. 클라이언트 시크릿은 코드에 포함되지 않습니다. [아이덴티티 프로바이더 설정](#set-up-your-identity-provider)에서 설명하는 대로 AWS Secrets Manager에 저장합니다.
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyWebsite, UserIdentity } from '@my-scope/common-constructs';
+
+const identity = new UserIdentity(this, 'Identity', {
+  oidcIdentityProviders: [
+    {
+      name: 'Okta',
+      issuerUrl: 'https://example.okta.com',
+      clientId: '0oa1example',
+      clientSecretName: 'okta-oidc-client-secret',
+    },
+    {
+      name: 'Entra',
+      issuerUrl: 'https://login.microsoftonline.com/<tenant-id>/v2.0',
+      clientId: '11111111-2222-3333-4444-555555555555',
+      clientSecretName: 'entra-oidc-client-secret',
+      identifiers: ['example.com'],
+    },
+  ],
+});
+new MyWebsite(this, 'MyWebsite');
+```
+
+각 항목의 타입인 `OidcIdentityProviderProps`는 공유 구성 패키지에서 내보내지므로 다른 곳에서 목록을 작성하고 타입을 가져올 수 있습니다.
+  </Fragment>
+  <Fragment slot="terraform">
+루트 모듈의 `user_identity` 모듈에 아이덴티티 프로바이더를 전달하고 리디렉션 URI에 대한 출력을 추가하세요:
+
+```hcl title="packages/infra/src/main.tf"
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+
+  oidc_identity_providers = [
+    {
+      name               = "Okta"
+      issuer_url         = "https://example.okta.com"
+      client_id          = "0oa1example"
+      client_secret_name = "okta-oidc-client-secret"
+    },
+  ]
+}
+
+output "idp_redirect_uri" {
+  value = module.user_identity.idp_redirect_uri
+}
+```
+
+각 환경에서 다른 아이덴티티 프로바이더를 사용하려면 루트 변수를 선언하고 각 환경의 `.tfvars` 파일에 설정하세요. 모듈의 변수가 타입을 확인하므로 루트 변수는 `type = any`를 가집니다:
+
+```hcl
+# packages/infra/src/variables.tf
+variable "oidc_identity_providers" {
+  type    = any
+  default = []
+}
+
+# packages/infra/src/env/dev.tfvars
+oidc_identity_providers = [
+  { name = "Okta", issuer_url = "https://example.okta.com", client_id = "0oa1example", client_secret_name = "okta-oidc-client-secret" },
+]
+
+# packages/infra/src/main.tf, in module "user_identity"
+oidc_identity_providers = var.oidc_identity_providers
+```
+  </Fragment>
+</Infrastructure>
 
 ### 옵션
 
-<GeneratorParameters generator="ts#website#auth#idp" />
+목록의 각 아이덴티티 프로바이더에는 다음 속성이 있습니다. 생성기 옵션은 <Link path="guides/react-website-auth">웹사이트 인증</Link>에 설명되어 있습니다.
+
+| CDK prop | Terraform attribute | Required | Default | Description |
+|---|---|---|---|---|
+| `name` | `name` | Yes | | 로그인 버튼에 표시됩니다. Cognito는 소문자로 페더레이션 사용자 이름에 접두사를 붙입니다(`<name>_<sub>`). 문자로 시작하는 3-32자의 문자, 숫자 및 하이픈입니다. `COGNITO`는 안 됩니다. 대소문자를 무시하고 목록에서 고유합니다. CDK에서는 토큰이 아닌 리터럴 문자열이어야 합니다. |
+| `issuerUrl` | `issuer_url` | Yes | | 아이덴티티 프로바이더의 토큰의 `iss` 클레임에 나타나는 그대로의 발급자입니다. `https://`를 사용해야 합니다. |
+| `clientId` | `client_id` | Yes | | 아이덴티티 프로바이더에 등록된 애플리케이션의 클라이언트 ID입니다. |
+| `clientSecretName` | `client_secret_name` | Yes | | 클라이언트 시크릿을 일반 문자열로 보관하는 Secrets Manager 시크릿의 이름입니다. ARN이 아닌 이름입니다. |
+| `scopes` | `scopes` | No | `openid`, `email`, `profile` | 요청할 OAuth 범위입니다. `openid`를 포함해야 합니다. |
+| `attributeMapping` | `attribute_mapping` | No | `email`, `given_name` 및 `family_name`, 각각 동일한 이름의 클레임에 매핑 | 사용자 풀 속성을 아이덴티티 프로바이더 클레임에 매핑합니다. [속성 매핑](#attribute-mapping)을 참조하세요. |
+| `identifiers` | `identifiers` | No | None | Cognito가 사용자를 이 아이덴티티 프로바이더로 보내는 데 사용할 수 있는 이메일 도메인과 같은 식별자입니다. |
+
+### 검증
+
+벤딩된 코드는 배포되기 전에 각 항목을 확인합니다:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+`UserIdentity`는 규칙을 위반하는 항목으로 생성할 때 예외를 발생시키므로 `cdk synth`가 실패합니다. 인프라 프로젝트의 빌드는 `cdk synth`를 실행합니다. 메시지는 항목의 이름을 지정합니다. 예를 들어 `UserIdentity: oidcIdentityProviders[1] (Entra): Microsoft Entra ID issuers have no trailing slash. Use https://login.microsoftonline.com/<tenant-id>/v2.0`입니다.
+
+토큰인 값, 예를 들어 AWS Systems Manager Parameter Store에서 읽은 값은 확인되지 않습니다. 잘못된 값은 synth 대신 배포에 실패합니다. `name`은 토큰이 아니어야 합니다.
+  </Fragment>
+  <Fragment slot="terraform">
+모듈의 `oidc_identity_providers` 변수에는 각 규칙에 대한 하나의 `validation` 블록이 있습니다. 오류 메시지는 규칙을 위반하는 항목의 이름을 지정하지 않습니다.
+
+`user_identity` 모듈 블록에 목록을 리터럴로 작성하면 `terraform validate`가 확인합니다. 프로젝트의 `validate` 대상은 `terraform validate`를 실행합니다. 위의 `.tfvars` 패턴과 같이 목록이 루트 변수에서 오는 경우 `terraform plan`이 대신 확인합니다.
+  </Fragment>
+</Infrastructure>
+
+규칙:
+
+- `name`: 문자로 시작하는 3-32자의 문자, 숫자 및 하이픈입니다. Cognito가 사용자 풀 자체로 로그인하기 위해 예약하므로 대소문자에 관계없이 `COGNITO`는 안 됩니다.
+- 이름은 대소문자를 무시하고 목록에서 고유합니다. Cognito가 소문자 이름으로 페더레이션 사용자 이름에 접두사를 붙이기 때문입니다. 예를 들어 `Okta`와 `OKTA`는 둘 다 목록에 있을 수 없습니다. `test-idp`와 `testidp`는 접두사가 다르기 때문에 가능합니다.
+- 발급자는 `https://`를 사용하며 쿼리, 프래그먼트, 사용자 이름, 비밀번호 또는 공백이 없습니다. CDK에서는 URL로 파싱되어야 합니다. Terraform에서는 정규 표현식이 확인하며, CDK가 거부하는 몇 가지 잘못된 형식의 URL을 허용합니다.
+- Microsoft Entra ID: 다중 테넌트 발급자(`common`, `organizations`, `consumers` 및 `9188040d-6c67-4c5b-b112-36a304b66dad`)는 거부되며, 발급자는 슬래시로 끝나지 않아야 합니다.
+- Auth0: `*.auth0.com`의 발급자는 슬래시로 끝나야 합니다.
+- 클라이언트 ID는 비어 있지 않습니다.
+- 시크릿 이름은 1-512자의 문자, 숫자 및 `/ _ + = . @ -`입니다. 이는 Secrets Manager 명명 규칙이므로 ARN은 거부됩니다.
+- 범위에는 `openid`가 포함됩니다. CDK에서 각 범위는 비어 있지 않고 공백이 없어야 합니다.
+- 속성 매핑 키와 값은 [속성 매핑](#attribute-mapping)의 규칙을 따릅니다.
+- 최대 50개의 식별자입니다. 각각은 1-40자의 문자, 숫자, 공백 또는 `_ + = . @ -`입니다.
 
 ## 생성기 출력
 
-생성기는 선택한 `iac` 프로바이더에 대해 다음 파일을 추가합니다. 여기서 `<name>`은 `name` 옵션의 케밥 케이스 형식입니다(`TestIdp`의 경우 `test-idp`):
+`--federation=oidc`와 함께 생성기는 선택한 `iac` 프로바이더에 대해 다음 파일과 편집을 추가합니다:
 
 <Infrastructure>
   <Fragment slot="cdk">
     <FileTree>
       - packages/common/constructs/src/core
-        - identity-providers
-          - \<name>.ts CDK construct containing the identity provider
-        - index.ts Exports the new construct
-        - user-identity.ts Now creates the identity provider
+        - oidc-identity-providers.ts `OidcIdentityProviders` 구성, props 및 검증
+        - index.ts 이제 `oidc-identity-providers.ts`를 내보냅니다
+        - user-identity.ts 이제 `oidcIdentityProviders` prop을 가지며 아이덴티티 프로바이더를 생성합니다
     </FileTree>
   </Fragment>
   <Fragment slot="terraform">
     <FileTree>
       - packages/common/terraform/src/core/user-identity
-        - \<name>-identity-provider.tf Passes the redirect URI output up from the identity module
+        - oidc-identity-providers.tf 검증이 포함된 `oidc_identity_providers` 변수 및 `idp_redirect_uri` 출력
+        - main.tf 이제 변수를 identity 모듈에 전달합니다
         - identity
-          - \<name>-identity-provider.tf The identity provider, and the data source that reads its client secret
-          - identity.tf Now lists the identity provider on the web client
+          - oidc-identity-providers.tf 아이덴티티 프로바이더, 각 클라이언트 시크릿을 읽는 데이터 소스 및 `idp_redirect_uri` 출력
+          - identity.tf 이제 웹 클라이언트에 아이덴티티 프로바이더를 나열합니다
     </FileTree>
   </Fragment>
 </Infrastructure>
 
-생성기는 또한 사용자 풀의 웹 클라이언트, 즉 웹사이트가 로그인하는 Cognito 앱 클라이언트를 편집하여 새 아이덴티티 프로바이더를 수락하도록 합니다. `TestIdp` 아이덴티티 프로바이더의 경우 다음과 같이 변경합니다:
+편집을 통해 사용자 풀의 웹 클라이언트, 즉 웹사이트가 로그인하는 Cognito 앱 클라이언트가 아이덴티티 프로바이더를 수락할 수 있습니다:
 
 <Infrastructure>
   <Fragment slot="cdk">
 ```diff lang="ts" title="packages/common/constructs/src/core/user-identity.ts"
-+import { TestIdpIdentityProvider } from './identity-providers/test-idp.js';
-     this.userPoolClient = this.createUserPoolClient(this.userPool);
-+    new TestIdpIdentityProvider(this, 'TestIdpIdentityProvider', {
++import {
++  OidcIdentityProviders,
++  type OidcIdentityProviderProps,
++} from './oidc-identity-providers.js';
+   readonly mfaSecondFactor?: MfaSecondFactor;
++
++  /**
++   * OpenID Connect identity providers users can sign in through, next to the user pool's own sign-in.
++   * Applies to every website that uses this user pool.
++   * ...
++   */
++  readonly oidcIdentityProviders?: OidcIdentityProviderProps[];
+ }
+       mfaSecondFactor = { sms: true, otp: true },
++      oidcIdentityProviders = [],
+     }: UserIdentityProps = {},
+     this.userPoolDomain = this.createUserPoolDomain(this.userPool);
++    new OidcIdentityProviders(this, 'OidcIdentityProviders', {
 +      userPool: this.userPool,
-+      userPoolClient: this.userPoolClient,
 +      userPoolDomain: this.userPoolDomain,
++      providers: oidcIdentityProviders,
 +    });
-     this.identityPool = this.createIdentityPool(
+     this.userPoolClient = this.createUserPoolClient(this.userPool);
 ```
+
+`UserIdentity`는 웹 클라이언트 전에 아이덴티티 프로바이더를 생성하므로 웹 클라이언트는 이를 나열한 다음 `COGNITO`를 나열합니다.
   </Fragment>
   <Fragment slot="terraform">
+```diff lang="hcl" title="packages/common/terraform/src/core/user-identity/main.tf"
+   mfa_second_factor_sms = var.mfa_second_factor_sms
++  oidc_identity_providers = var.oidc_identity_providers
+```
+
 ```diff lang="hcl" title="packages/common/terraform/src/core/user-identity/identity/identity.tf"
 -  supported_identity_providers = ["COGNITO"]
-+  supported_identity_providers = ["COGNITO", aws_cognito_identity_provider.test_idp.provider_name]
++  supported_identity_providers = concat(["COGNITO"], [for p in aws_cognito_identity_provider.oidc : p.provider_name])
 ```
+
+각 아이덴티티 프로바이더는 이름으로 키가 지정된 `for_each` 인스턴스입니다. 예를 들어 `aws_cognito_identity_provider.oidc["Okta"]`입니다. 따라서 항목의 이름을 바꾸면 해당 아이덴티티 프로바이더가 교체됩니다.
   </Fragment>
 </Infrastructure>
 
-두 번째 아이덴티티 프로바이더는 첫 번째 이후에 추가됩니다. 동일한 `name`과 옵션으로 생성기를 다시 실행하면 파일이 변경되지 않으며, 생성기는 아이덴티티 프로바이더 파일에 대한 편집 내용을 덮어쓰지 않습니다. 동일한 `name`이지만 다른 옵션으로 다시 실행하면 생성기는 기존 파일을 유지하고 새 옵션이 적용되지 않았다고 경고합니다. 아이덴티티 프로바이더를 변경하려면 해당 파일을 편집하세요. 케밥 케이스 형식이 동일한 이름은 동일한 파일을 사용하므로 생성기는 두 번째 이름을 거부합니다. 예를 들어 `TestIdp`와 `Test-Idp`는 모두 `test-idp`를 사용하고, `Okta`와 `OKTA`는 모두 `okta`를 사용합니다.
-
-생성기는 케밥 케이스 형식이 다른 이름은 감지하지 않습니다. 예를 들어 `Okta`(`okta`)와 `Ok-ta`(`ok-ta`), 또는 `TestIdp`(`test-idp`)와 `testidp`(`testidp`)입니다. 발급자와 클라이언트 ID가 동일하더라도 자체 파일과 자체 시크릿 이름을 가진 두 번째 아이덴티티 프로바이더를 추가합니다. 명확하게 구별되는 이름을 선택하세요.
-
-`user-identity.ts` 또는 `supported_identity_providers` 목록을 변경하여 생성기가 더 이상 인식하지 못하는 경우, 생성기는 해당 파일을 변경하지 않고 그대로 둡니다. 대신 수동으로 추가할 줄을 출력합니다.
+생성기는 새 파일에 대한 편집 내용을 덮어쓰지 않습니다. `user-identity.ts` 또는 `main.tf` 또는 `identity.tf`를 변경하여 생성기가 더 이상 인식하지 못하는 경우 생성기는 해당 파일을 변경하지 않고 그대로 둡니다. 여전히 새 파일을 추가하고 수동으로 추가할 줄을 출력합니다.
 
 ## 아이덴티티 프로바이더 설정
 
-생성기를 실행한 후 첫 번째 배포는 Secrets Manager에서 클라이언트 시크릿을 읽습니다. 시크릿이 존재하지 않으면 배포가 실패합니다. 다음 단계를 이 순서대로 따르세요. 생성기는 완료 시 이러한 단계도 출력합니다.
+아이덴티티 프로바이더를 추가하는 배포는 Secrets Manager에서 클라이언트 시크릿을 읽습니다. 시크릿이 존재하지 않으면 배포가 실패합니다. 다음 단계를 이 순서대로 따르세요. 생성기는 완료 시 이러한 단계도 출력합니다.
 
-1. 아이덴티티 프로바이더에 애플리케이션을 등록하고 클라이언트 ID와 클라이언트 시크릿을 기록합니다. 4단계에서 리디렉션 URI를 추가합니다. `--clientId`를 클라이언트 ID로 설정하여 이 생성기를 실행합니다.
-2. `clientSecretName` 옵션의 이름(기본값은 `<name>-oidc-client-secret`)으로 Secrets Manager에 클라이언트 시크릿을 저장합니다:
-
-   ```bash
-   aws secretsmanager create-secret --name TestIdp-oidc-client-secret --secret-string <client secret> --region <region>
-   ```
-
-   `--region`을 스택의 리전으로 설정하세요. 첫 번째 배포 전에 해당 리전에 시크릿이 존재해야 합니다. Cognito가 전체 시크릿 값을 클라이언트 시크릿으로 받기 때문에 시크릿을 JSON이 아닌 일반 문자열로 저장하세요. Secrets Manager 콘솔에서 Key/value가 아닌 Plaintext를 선택하세요.
-
-3. 배포합니다.
-4. 아이덴티티 프로바이더의 애플리케이션에 리디렉션 URI를 추가합니다.
+1. `--federation=oidc`와 함께 `ts#website#auth`를 실행하고 한 번 배포합니다.
+2. 사용자 풀의 리디렉션 URI를 찾습니다. 풀의 모든 아이덴티티 프로바이더는 동일한 것을 사용합니다.
 
 <Infrastructure>
   <Fragment slot="cdk">
-`UserIdentity`를 포함하는 스택은 리디렉션 URI를 `<Name>IdpRedirectUri`로 출력합니다. 예를 들어 `TestIdpIdpRedirectUri`입니다. 배포하기 전에 `ts#website#auth`에 대해 선택한 `cognitoDomain`, AWS 계정 ID 및 리전에서 계산할 수도 있습니다:
+`UserIdentity`를 포함하는 스택에는 `<id>OidcIdentityProvidersIdpRedirectUri`로 시작하는 키를 가진 출력이 있습니다. 여기서 `<id>`는 `UserIdentity`에 제공한 구성 ID입니다. 예를 들어 `IdentityOidcIdentityProvidersIdpRedirectUri`입니다. 배포하기 전에 `ts#website#auth`에 대해 선택한 `cognitoDomain`, AWS 계정 ID 및 리전에서 계산할 수도 있습니다:
 
 ```
 https://<cognitoDomain>-<account>.auth.<region>.amazoncognito.com/oauth2/idpresponse
 ```
   </Fragment>
   <Fragment slot="terraform">
-Cognito 도메인에는 무작위 접미사가 있으므로 리디렉션 URI는 배포 후에만 알 수 있습니다. `user-identity` 모듈은 이를 `<name>_idp_redirect_uri`로 출력합니다. 이를 보려면 루트 모듈에 출력을 추가하세요. 예를 들어 `packages/infra/src/main.tf`:
+Cognito 도메인에는 무작위 접미사가 있으므로 리디렉션 URI는 배포 후에만 알 수 있습니다. `user_identity` 모듈은 이를 `idp_redirect_uri`로 출력합니다. 이를 보려면 루트 모듈에 출력을 추가하세요. 예를 들어 `packages/infra/src/main.tf`:
 
 ```hcl
-output "test_idp_idp_redirect_uri" { value = module.user_identity.test_idp_idp_redirect_uri }
+output "idp_redirect_uri" { value = module.user_identity.idp_redirect_uri }
 ```
   </Fragment>
 </Infrastructure>
 
-아이덴티티 프로바이더에는 이 `/oauth2/idpresponse` URI만 등록하세요. 웹사이트 자체의 URL은 아이덴티티 프로바이더가 아닌 Cognito에 등록됩니다.
+3. 해당 리디렉션 URI로 아이덴티티 프로바이더에 애플리케이션을 등록하고 클라이언트 ID와 클라이언트 시크릿을 기록합니다. 아이덴티티 프로바이더에는 이 `/oauth2/idpresponse` URI만 등록하세요. 웹사이트 자체의 URL은 아이덴티티 프로바이더가 아닌 Cognito에 등록됩니다.
+4. Secrets Manager에 클라이언트 시크릿을 저장합니다:
+
+   ```bash
+   aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string <client secret> --region <region>
+   ```
+
+   `--region`을 스택의 리전으로 설정하세요. 아이덴티티 프로바이더를 추가하는 배포 전에 해당 리전에 시크릿이 존재해야 합니다. Cognito가 전체 시크릿 값을 클라이언트 시크릿으로 받기 때문에 시크릿을 JSON이 아닌 일반 문자열로 저장하세요. Secrets Manager 콘솔에서 Key/value가 아닌 Plaintext를 선택하세요.
+
+5. [아이덴티티 프로바이더 추가](#add-identity-providers)에 표시된 대로 시크릿의 이름을 `clientSecretName`(Terraform에서는 `client_secret_name`)으로 사용하여 목록에 아이덴티티 프로바이더를 추가합니다. 그런 다음 배포합니다.
 
 ## 속성 매핑
 
-생성된 사용자 풀에는 `email`, `given_name` 및 `family_name` 속성이 필요합니다. Cognito는 매 로그인 시 아이덴티티 프로바이더의 클레임에서 이를 채웁니다. 아이덴티티 프로바이더가 이 중 하나를 보내지 않으면 사용자의 첫 번째 로그인이 실패합니다. 따라서 생성기는 세 가지 중 하나라도 누락된 `attributeMapping`을 거부합니다.
+생성된 사용자 풀에는 `email`, `given_name` 및 `family_name` 속성이 필요합니다. Cognito는 매 로그인 시 아이덴티티 프로바이더의 클레임에서 이를 채웁니다. 아이덴티티 프로바이더가 이 중 하나를 보내지 않으면 사용자의 첫 번째 로그인이 실패합니다. 따라서 `UserIdentity`와 Terraform 변수는 세 가지 중 하나라도 누락된 속성 매핑을 거부합니다.
 
-`attributeMapping`은 JSON 객체입니다. 각 키는 사용자 풀 속성이고, 각 값은 아이덴티티 프로바이더의 클레임 이름입니다. 기본값은 각 속성을 동일한 이름의 클레임에 매핑합니다:
+`attributeMapping`(Terraform에서는 `attribute_mapping`)은 사용자 풀 속성을 클레임에 매핑합니다. 각 키는 사용자 풀 속성이고, 각 값은 1-128자 길이의 아이덴티티 프로바이더의 클레임 이름입니다. 제공하는 매핑은 기본값을 대체합니다. 기본값은 각 필수 속성을 동일한 이름의 클레임에 매핑합니다:
 
-```json
-{"email":"email","given_name":"given_name","family_name":"family_name"}
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts
+attributeMapping: { email: 'email', given_name: 'given_name', family_name: 'family_name' },
 ```
+  </Fragment>
+  <Fragment slot="terraform">
+```hcl
+attribute_mapping = { email = "email", given_name = "given_name", family_name = "family_name" }
+```
+  </Fragment>
+</Infrastructure>
 
-- 키는 `name` 또는 `phone_number`와 같은 [표준 속성](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-attributes.html#cognito-user-pools-standard-attributes) 또는 `custom:department`와 같은 사용자 정의 속성일 수 있습니다.
+- 키는 `name` 또는 `phone_number`, `phone_number_verified`와 같은 [표준 속성](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-attributes.html#cognito-user-pools-standard-attributes) 또는 `custom:department`와 같은 사용자 정의 속성(`custom:` 뒤에 최대 20자의 문자, 숫자 또는 밑줄)일 수 있습니다. 키는 CDK와 Terraform 모두에서 Cognito 속성 이름을 사용합니다. `username`은 거부됩니다.
 - Cognito는 매핑된 이메일 주소를 미확인으로 처리합니다. 이메일 주소를 자체적으로 확인하는 아이덴티티 프로바이더에서만 `email_verified`를 매핑하세요. 그렇지 않으면 사용자가 아이덴티티 프로바이더에서 다른 사람의 주소를 설정하고 풀에서 확인된 것으로 표시될 수 있습니다.
 - 아이덴티티 프로바이더에서 사용자의 이메일 주소가 변경되면 Cognito는 사용자의 다음 로그인 시 사용자 풀에 새 주소를 씁니다. `email_verified`는 `false`로 유지됩니다.
 - 사용자 정의 속성은 사용자 풀에 이미 존재해야 하며 변경 가능해야 합니다.
 
-Terraform 아이덴티티 프로바이더 파일은 또한 Cognito가 아이덴티티 프로바이더를 반환할 때 추가하는 두 가지 값을 설정합니다: `attribute_mapping`의 `"username" = "sub"` 및 `provider_details`의 `attributes_url_add_attributes = "false"`. 파일이 이를 설정하기 때문에 첫 번째 배포 후 두 번째 `terraform plan`은 아이덴티티 프로바이더에 대한 변경 사항을 표시하지 않습니다. 다른 아이덴티티 프로바이더를 사용하여 두 번째 플랜이 여전히 `provider_details`의 변경 사항을 표시하는 경우, 플랜이 Cognito가 반환하는 것으로 표시하는 값으로 해당 키를 파일에 추가하세요.
+`identity/oidc-identity-providers.tf`의 Terraform 아이덴티티 프로바이더 리소스는 또한 Cognito가 아이덴티티 프로바이더를 반환할 때 추가하는 두 가지 값을 설정합니다: `attribute_mapping`의 `username = "sub"` 및 `provider_details`의 `attributes_url_add_attributes = "false"`. 파일이 이를 설정하기 때문에 첫 번째 배포 후 두 번째 `terraform plan`은 아이덴티티 프로바이더에 대한 변경 사항을 표시하지 않습니다. 다른 아이덴티티 프로바이더를 사용하여 두 번째 플랜이 여전히 `provider_details`의 변경 사항을 표시하는 경우, 플랜이 Cognito가 반환하는 것으로 표시하는 값으로 해당 키를 파일에 추가하세요.
 
 ## 아이덴티티 프로바이더 참고 사항
 
@@ -159,21 +308,23 @@ Terraform 아이덴티티 프로바이더 파일은 또한 Cognito가 아이덴�
 
 ### Okta
 
-CDK와 Terraform을 사용하여 AWS에서 테스트되었습니다. Okta에서 Authorization Code 부여 및 클라이언트 시크릿을 사용하는 OIDC Web Application을 생성하세요. [아이덴티티 프로바이더 설정](#set-up-your-identity-provider)의 4단계에서 제공하는 `/oauth2/idpresponse` 리디렉션 URI로 로그인 리디렉션 URI를 설정하세요. 로그아웃 리디렉션 URI는 필요하지 않습니다. 발급자는 Okta 도메인인 `https://<your-org>.okta.com`이며, 이것이 테스트된 형식입니다. `https://<your-org>.okta.com/oauth2/default`와 같은 사용자 정의 권한 부여 서버도 발급자를 가지고 있지만 해당 형식은 테스트되지 않았습니다. 기본 범위인 `openid email profile`은 `email`, `given_name` 및 `family_name`을 반환하므로 기본 매핑이 작동합니다. 각 사용자는 Okta에 이메일, 이름 및 성이 설정되어 있어야 합니다. 액세스가 필요한 사용자 또는 그룹에만 애플리케이션을 할당하세요.
+CDK와 Terraform을 사용하여 AWS에서 테스트되었습니다. Okta에서 Authorization Code 부여 및 클라이언트 시크릿을 사용하는 OIDC Web Application을 생성하세요. [아이덴티티 프로바이더 설정](#set-up-your-identity-provider)의 2단계에서 제공하는 `/oauth2/idpresponse` 리디렉션 URI로 로그인 리디렉션 URI를 설정하세요. 로그아웃 리디렉션 URI는 필요하지 않습니다. 발급자는 Okta 도메인인 `https://<your-org>.okta.com`이며, 이것이 테스트된 형식입니다. `https://<your-org>.okta.com/oauth2/default`와 같은 사용자 정의 권한 부여 서버도 발급자를 가지고 있지만 해당 형식은 테스트되지 않았습니다. 기본 범위인 `openid email profile`은 `email`, `given_name` 및 `family_name`을 반환하므로 기본 매핑이 작동합니다. 각 사용자는 Okta에 이메일, 이름 및 성이 설정되어 있어야 합니다. 액세스가 필요한 사용자 또는 그룹에만 애플리케이션을 할당하세요.
 
 ### Auth0
 
 Auth0의 검색 문서와 대조하여 확인되었으며, 실제 로그인으로는 테스트되지 않았습니다. Auth0에서 Regular Web Application을 생성하세요. 발급자는 후행 슬래시를 포함하여 `https://<your-tenant>.auth0.com/`입니다.
 
-**경고:** 생성기는 후행 슬래시 없이도 발급자를 수락하지만, Auth0 토큰의 `iss` 클레임에 슬래시가 있기 때문에 로그인이 실패합니다.
+:::caution
+Auth0 토큰의 `iss` 클레임은 슬래시로 끝나므로 슬래시가 없는 발급자는 로그인이 실패합니다. 벤딩된 코드는 슬래시가 없는 `*.auth0.com`의 발급자를 거부합니다. Auth0 사용자 정의 도메인을 인식할 수 없으므로 사용할 때 슬래시를 직접 확인하세요.
+:::
 
 Auth0은 사용자의 연결이 제공하는 경우에만 `given_name` 및 `family_name`을 반환합니다. 이를 제공하지 않는 연결의 사용자는 다른 클레임을 매핑할 때까지 로그인할 수 없습니다.
 
 ### Microsoft Entra ID
 
-Microsoft의 검색 문서와 대조하여 확인되었으며, 실제 로그인으로는 테스트되지 않았습니다. Entra ID에서 단일 테넌트 애플리케이션을 등록하세요. 발급자는 `https://login.microsoftonline.com/<tenant-id>/v2.0`입니다. 생성기는 모든 Entra ID 테넌트의 사용자를 수락하기 때문에 다중 테넌트 발급자(`/common/`, `/organizations/` 및 `/consumers/`)를 거부합니다.
+Microsoft의 검색 문서와 대조하여 확인되었으며, 실제 로그인으로는 테스트되지 않았습니다. Entra ID에서 단일 테넌트 애플리케이션을 등록하세요. 발급자는 `https://login.microsoftonline.com/<tenant-id>/v2.0`입니다. 벤딩된 코드는 모든 Entra ID 테넌트의 사용자를 수락하기 때문에 다중 테넌트 발급자(`common`, `organizations` 및 `consumers`)를 거부합니다. 또한 모든 개인 Microsoft 계정을 수락하는 테넌트 `9188040d-6c67-4c5b-b112-36a304b66dad`도 거부합니다.
 
-**경고:** 발급자는 슬래시로 끝나지 않아야 합니다. `/v2.0/`이 아닌 `/v2.0`을 사용하세요. 생성기는 슬래시가 있는 형식을 수락하지만, Entra ID 토큰의 `iss` 클레임에 슬래시가 없기 때문에 로그인이 실패합니다.
+발급자는 슬래시로 끝나지 않아야 합니다: `/v2.0/`이 아닌 `/v2.0`을 사용하세요. Entra ID 토큰의 `iss` 클레임에 슬래시가 없기 때문에 로그인이 실패합니다. 벤딩된 코드는 슬래시가 있는 형식을 거부합니다.
 
 애플리케이션의 ID 토큰에 `email`, `given_name` 및 `family_name`을 선택적 클레임으로 추가하세요. Entra ID는 추가한 경우에만 이를 보냅니다. 각 사용자는 Mail 필드가 설정되어 있어야 합니다. 그렇지 않으면 `email` 클레임이 비어 있고, 사용자 풀이 `email`을 요구하기 때문에 사용자의 첫 번째 로그인이 실패합니다. Entra ID의 `email` 클레임은 확인되지 않으므로 Entra ID에서 `email_verified`를 매핑하지 마세요.
 
@@ -191,12 +342,12 @@ Microsoft의 검색 문서와 대조하여 확인되었으며, 실제 로그인�
 
 - 사용자 풀에서 요구하는 MFA(다단계 인증)는 페더레이션 사용자에게 적용되지 않습니다. Cognito는 인증을 아이덴티티 프로바이더에 맡기므로 아이덴티티 프로바이더에서 MFA를 적용하세요.
 - 웹사이트에서 로그아웃하면 Cognito 세션만 종료됩니다. OIDC 아이덴티티 프로바이더에서 사용자의 세션을 종료하지 않으므로 버튼을 통한 다음 로그인은 비밀번호 없이 완료될 수 있습니다. 공유 컴퓨터에서 사용자는 아이덴티티 프로바이더에서도 로그아웃해야 합니다.
-- 사용자 메뉴에는 Cognito 사용자 이름이 표시됩니다. 페더레이션 사용자의 경우 아이덴티티 프로바이더 이름, 밑줄 및 아이덴티티 프로바이더에서의 사용자 `sub`가 소문자로 표시됩니다. 예를 들어 `testidp_00u1abcd`입니다.
+- 사용자 메뉴에는 Cognito 사용자 이름이 표시됩니다. 페더레이션 사용자의 경우 아이덴티티 프로바이더 이름, 밑줄 및 아이덴티티 프로바이더에서의 사용자 `sub`가 소문자로 표시됩니다. 예를 들어 `okta_00u1abcd`입니다.
 - 아이덴티티 프로바이더에서 사용자를 제거하거나 비활성화하면 해당 사용자의 다음 로그인만 중지됩니다. Cognito는 자체 리프레시 토큰으로 토큰을 갱신하며 아이덴티티 프로바이더에 묻지 않고, 웹사이트는 사용자가 알아차리지 못하게 토큰을 갱신합니다. 따라서 사용자는 리프레시 토큰이 만료될 때까지, 즉 마지막 로그인 후 최대 30일까지 액세스를 유지할 수 있습니다. 사용자의 액세스를 즉시 종료하려면 모든 세션에서 로그아웃시키고 사용자 풀에서 비활성화하세요. 사용자 이름은 `<identity provider name in lowercase>_<sub>`입니다:
 
   ```bash
-  aws cognito-idp admin-user-global-sign-out --user-pool-id <user pool id> --username testidp_<sub>
-  aws cognito-idp admin-disable-user --user-pool-id <user pool id> --username testidp_<sub>
+  aws cognito-idp admin-user-global-sign-out --user-pool-id <user pool id> --username okta_<sub>
+  aws cognito-idp admin-disable-user --user-pool-id <user pool id> --username okta_<sub>
   ```
 
   이는 AWS에서 테스트되었습니다. `admin-user-global-sign-out` 및 `admin-disable-user` 후에도 아이덴티티 프로바이더는 여전히 사용자를 로그인시키지만 Cognito는 거부합니다.
@@ -224,13 +375,7 @@ CloudFormation은 아이덴티티 프로바이더의 설정(`ProviderDetails`) �
 
 <Infrastructure>
   <Fragment slot="cdk">
-교체 후 배포에서 아이덴티티 프로바이더 리소스를 변경합니다. 한 가지 방법은 참조를 시크릿의 새 버전으로 지정하는 것입니다. 아이덴티티 프로바이더 구성인 `identity-providers/<name>.ts`에서 `aws secretsmanager put-secret-value`가 출력하는 버전 ID를 `SecretValue.secretsManager` 호출에 추가하고 `.unsafeUnwrap()`을 유지합니다:
-
-```ts
-SecretValue.secretsManager('TestIdp-oidc-client-secret', { versionId: '<version id>' })
-```
-
-그러면 템플릿의 참조가 변경되므로 CloudFormation은 아이덴티티 프로바이더를 업데이트하고 해당 버전의 시크릿을 읽습니다. 각 교체 시 버전 ID를 다시 변경하세요. 이는 동적 참조에 대한 CloudFormation 문서를 따르며 AWS에서 테스트되지 않았습니다.
+교체 후 배포에서 아이덴티티 프로바이더 리소스를 변경합니다. 한 가지 방법은 교체된 시크릿을 새 이름으로 저장하고 `clientSecretName`을 해당 이름으로 설정하는 것입니다. 그러면 템플릿의 참조가 변경되므로 CloudFormation은 아이덴티티 프로바이더를 업데이트하고 새 시크릿을 읽습니다. 나중에 이전 시크릿을 삭제하세요. 이는 동적 참조에 대한 CloudFormation 문서를 따르며 AWS에서 테스트되지 않았습니다.
   </Fragment>
   <Fragment slot="terraform">
 교체 후 `terraform plan` 및 `terraform apply`를 실행합니다. 데이터 소스는 모든 플랜에서 시크릿의 현재 버전을 읽으므로 플랜은 아이덴티티 프로바이더의 제자리 업데이트를 표시하고 `apply`는 새 시크릿을 Cognito로 보냅니다. `hashicorp/aws` 프로바이더 소스에서 `provider_details`의 변경은 아이덴티티 프로바이더를 제자리에서 업데이트하며 교체하지 않습니다. 이는 AWS에서 테스트되지 않았습니다.
@@ -239,7 +384,27 @@ SecretValue.secretsManager('TestIdp-oidc-client-secret', { versionId: '<version 
 
 ## 기타 앱 클라이언트
 
-앱 클라이언트는 애플리케이션이 로그인하는 Cognito 구성입니다. 생성기는 웹사이트의 앱 클라이언트인 웹 클라이언트에만 아이덴티티 프로바이더를 추가합니다. 동일한 사용자 풀의 다른 앱 클라이언트는 아이덴티티 프로바이더를 추가한 경우에만 페더레이션 사용자를 수락합니다. 예를 들어 <Link path="guides/ts-dcr-proxy">DCR 프록시</Link>(MCP 클라이언트, Model Context Protocol을 사용하는 AI 도구가 Cognito를 통해 로그인할 수 있도록 함)에 대해 생성하는 앱 클라이언트에는 이것이 필요합니다. 그렇지 않으면 페더레이션 사용자가 MCP 서버에 로그인할 수 없습니다. CDK에서 아이덴티티 프로바이더의 `provider.providerName`을 해당 클라이언트의 `supportedIdentityProviders`에 추가하세요.
+앱 클라이언트는 애플리케이션이 로그인하는 Cognito 구성입니다. 생성기는 웹사이트의 앱 클라이언트인 웹 클라이언트에만 아이덴티티 프로바이더를 추가합니다. 동일한 사용자 풀의 다른 앱 클라이언트는 아이덴티티 프로바이더도 나열하는 경우에만 페더레이션 사용자를 수락합니다. 예를 들어 <Link path="guides/ts-dcr-proxy">DCR 프록시</Link>(MCP 클라이언트, Model Context Protocol을 사용하는 AI 도구가 Cognito를 통해 로그인할 수 있도록 함)에 대해 생성하는 앱 클라이언트에는 이것이 필요합니다. 그렇지 않으면 페더레이션 사용자가 MCP 서버에 로그인할 수 없습니다.
+
+<Infrastructure>
+  <Fragment slot="cdk">
+`supportedIdentityProviders` 없이 `UserIdentity` 이후에 `identity.userPool.addClient(...)`로 생성하는 앱 클라이언트는 풀의 모든 아이덴티티 프로바이더와 `COGNITO`를 나열합니다. DCR 프록시 예제는 이렇게 합니다. 앱 클라이언트가 `supportedIdentityProviders`를 설정하는 경우 풀의 아이덴티티 프로바이더를 추가하세요:
+
+```ts
+import { UserPoolClientIdentityProvider } from 'aws-cdk-lib/aws-cognito';
+
+supportedIdentityProviders: [
+  UserPoolClientIdentityProvider.COGNITO,
+  ...identity.userPool.identityProviders.map((p) =>
+    UserPoolClientIdentityProvider.custom(p.providerName),
+  ),
+],
+```
+  </Fragment>
+  <Fragment slot="terraform">
+각 아이덴티티 프로바이더의 `name`을 앱 클라이언트의 `supported_identity_providers`에 추가하고, 아이덴티티 프로바이더가 먼저 존재하도록 앱 클라이언트가 `module.user_identity`에 의존하도록 만드세요.
+  </Fragment>
+</Infrastructure>
 
 ## 에이전트 채팅을 위한 토큰
 

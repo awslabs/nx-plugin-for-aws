@@ -1,23 +1,24 @@
 ---
 title: 网站身份提供商
 description: 让用户通过外部 OpenID Connect 身份提供商（如 Okta、Auth0 或 Microsoft Entra ID）登录您的网站
-generator: ts#website#auth#idp
+generator: ts#website#auth
+when:
+  federation: [oidc]
 ---
 
 import { FileTree } from '@astrojs/starlight/components';
-import GeneratorParameters from '@components/generator-parameters.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 
 <Link path="guides/react-website-auth">网站身份验证</Link>创建一个 Amazon Cognito 用户池，默认情况下只有在该池中拥有用户名和密码的用户才能登录。如果您的员工或客户已经在身份提供商（IdP）（如 Okta、Auth0 或 Microsoft Entra ID）拥有账户，他们就需要为您的网站创建第二个账户。
 
-此生成器将外部 [OpenID Connect](https://openid.net/developers/how-connect-works/)（OIDC）身份提供商添加到用户池。登录页面随后会在用户名和密码表单旁边显示一个身份提供商按钮。
+使用 `--federation=oidc` 运行 `ts#website#auth` 可以让您将外部 [OpenID Connect](https://openid.net/developers/how-connect-works/)（OIDC）身份提供商添加到用户池。您在基础设施代码中列出身份提供商：CDK 中 `UserIdentity` 的 `oidcIdentityProviders` 属性，或 Terraform 中 `user_identity` 模块的 `oidc_identity_providers` 变量。登录页面随后会在用户名和密码表单旁边显示每个身份提供商的按钮。
 
 ## 工作原理
 
-- 您的网站仍然将用户发送到 Cognito 登录页面。该页面现在有一个以身份提供商命名的按钮。
-- 选择该按钮的用户在身份提供商处登录。身份提供商将他们发送回 Cognito 的重定向 URI，`https://<cognito domain>/oauth2/idpresponse`。
+- 您的网站仍然将用户发送到 Cognito 登录页面。该页面现在有一个以每个身份提供商命名的按钮。
+- 选择按钮的用户在该身份提供商处登录。身份提供商将他们发送回 Cognito 的重定向 URI，`https://<cognito domain>/oauth2/idpresponse`。
 - Cognito 在您的用户池中为他们创建一个用户（联合用户），并将您映射的声明（例如 `email`）复制到用户的属性中。
 - 然后 Cognito 颁发与本地用户相同类型的令牌。您的 API、代理和身份池无需任何更改即可接受它们。
 
@@ -27,6 +28,8 @@ import RunGenerator from '@components/run-generator.astro';
 
 添加身份提供商可能会让比您预期更多的人进入您的网站。`ts#website#auth` 的 `allowSignup` 选项不适用于联合用户。Cognito 在某人首次通过身份提供商登录时创建联合用户，即使用户池不允许用户自行注册。每个联合用户还会获得身份池的已认证角色，因此他们可以像任何已登录用户一样调用您的 API 和代理。
 
+身份提供商适用于整个用户池。使用该池的每个网站都会显示它们的按钮并接受它们的用户。
+
 因此，身份提供商决定谁可以登录。设置它以便仅让需要您网站的人登录：
 
 - Microsoft Entra ID：在应用程序的企业应用程序属性中，将"需要分配？"设置为"是"，并仅分配需要访问的用户或组。使用默认值"否"时，租户中的每个用户都可以登录。
@@ -35,123 +38,269 @@ import RunGenerator from '@components/run-generator.astro';
 
 ## 使用方法
 
+### 添加 OpenID Connect 联合
+
+使用 `--federation=oidc` 运行 <Link path="guides/react-website-auth">`ts#website#auth`</Link> 生成器。您可以在尚未进行身份验证的网站上运行它，也可以在已经具有身份验证的网站上运行它。两者给出相同的结果。
+
+<RunGenerator generator="ts#website#auth" requiredParameters={{ federation: 'oidc' }} />
+
+生成器不添加任何身份提供商。列表从空开始，因此在您添加条目之前，登录的工作方式与以前相同。您将身份提供商添加到基础设施代码中，因此添加第二个身份提供商不需要再次运行生成器。
+
+使用 `--federation=oidc` 再次运行生成器不会更改任何文件。使用 `--federation=none` 或不使用 `--federation` 运行它会保留已经存在的联合。
+
 ### 添加身份提供商
 
-您需要一个具有来自 <Link path="guides/react-website-auth">`ts#website#auth`</Link> 生成器的身份验证的网站。为每个身份提供商运行一次此生成器。
+为每个身份提供商添加一个条目，然后部署。客户端密钥永远不会进入您的代码。您将其存储在 AWS Secrets Manager 中并提供其名称，如[设置您的身份提供商](#set-up-your-identity-provider)所述。
 
-<RunGenerator generator="ts#website#auth#idp" />
+<Infrastructure>
+  <Fragment slot="cdk">
+在您的堆栈中将身份提供商传递给 `UserIdentity`：
 
-生成器需要在身份提供商处注册的应用程序的客户端 ID。客户端密钥永远不会进入您的代码：您将其存储在 AWS Secrets Manager 中，如[设置您的身份提供商](#set-up-your-identity-provider)所述。
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyWebsite, UserIdentity } from '@my-scope/common-constructs';
+
+const identity = new UserIdentity(this, 'Identity', {
+  oidcIdentityProviders: [
+    {
+      name: 'Okta',
+      issuerUrl: 'https://example.okta.com',
+      clientId: '0oa1example',
+      clientSecretName: 'okta-oidc-client-secret',
+    },
+    {
+      name: 'Entra',
+      issuerUrl: 'https://login.microsoftonline.com/<tenant-id>/v2.0',
+      clientId: '11111111-2222-3333-4444-555555555555',
+      clientSecretName: 'entra-oidc-client-secret',
+      identifiers: ['example.com'],
+    },
+  ],
+});
+new MyWebsite(this, 'MyWebsite');
+```
+
+`OidcIdentityProviderProps`（每个条目的类型）从您的共享构造包中导出，因此您可以在其他地方构建列表并导入该类型。
+  </Fragment>
+  <Fragment slot="terraform">
+在您的根模块中将身份提供商传递给 `user_identity` 模块，并为重定向 URI 添加输出：
+
+```hcl title="packages/infra/src/main.tf"
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+
+  oidc_identity_providers = [
+    {
+      name               = "Okta"
+      issuer_url         = "https://example.okta.com"
+      client_id          = "0oa1example"
+      client_secret_name = "okta-oidc-client-secret"
+    },
+  ]
+}
+
+output "idp_redirect_uri" {
+  value = module.user_identity.idp_redirect_uri
+}
+```
+
+要在每个环境中使用不同的身份提供商，请声明一个根变量并在每个环境的 `.tfvars` 文件中设置它。根变量具有 `type = any`，因为模块的变量会检查类型：
+
+```hcl
+# packages/infra/src/variables.tf
+variable "oidc_identity_providers" {
+  type    = any
+  default = []
+}
+
+# packages/infra/src/env/dev.tfvars
+oidc_identity_providers = [
+  { name = "Okta", issuer_url = "https://example.okta.com", client_id = "0oa1example", client_secret_name = "okta-oidc-client-secret" },
+]
+
+# packages/infra/src/main.tf, in module "user_identity"
+oidc_identity_providers = var.oidc_identity_providers
+```
+  </Fragment>
+</Infrastructure>
 
 ### 选项
 
-<GeneratorParameters generator="ts#website#auth#idp" />
+列表中的每个身份提供商都具有这些属性。生成器选项在<Link path="guides/react-website-auth">网站身份验证</Link>中描述。
+
+| CDK prop | Terraform attribute | Required | Default | Description |
+|---|---|---|---|---|
+| `name` | `name` | Yes | | 显示在登录按钮上。Cognito 使用小写形式为联合用户名添加前缀（`<name>_<sub>`）。3-32 个字母、数字和连字符，以字母开头。不能是 `COGNITO`。在列表中唯一，忽略大小写。在 CDK 中，它必须是文字字符串，而不是令牌。 |
+| `issuerUrl` | `issuer_url` | Yes | | 颁发者，与身份提供商令牌的 `iss` 声明中显示的完全一致。必须使用 `https://`。 |
+| `clientId` | `client_id` | Yes | | 在身份提供商处注册的应用程序的客户端 ID。 |
+| `clientSecretName` | `client_secret_name` | Yes | | 保存客户端密钥作为纯字符串的 Secrets Manager 密钥的名称。名称，而不是 ARN。 |
+| `scopes` | `scopes` | No | `openid`、`email`、`profile` | 要请求的 OAuth 范围。必须包含 `openid`。 |
+| `attributeMapping` | `attribute_mapping` | No | `email`、`given_name` 和 `family_name`，每个都映射到具有相同名称的声明 | 用户池属性到身份提供商声明。请参阅[属性映射](#attribute-mapping)。 |
+| `identifiers` | `identifiers` | No | None | 标识符，例如电子邮件域，Cognito 可以使用它们将用户发送到此身份提供商。 |
+
+### 验证
+
+供应的代码在部署任何内容之前检查每个条目：
+
+<Infrastructure>
+  <Fragment slot="cdk">
+当您使用违反规则的条目创建 `UserIdentity` 时，它会抛出异常，因此 `cdk synth` 失败。基础设施项目的构建运行 `cdk synth`。消息会命名该条目，例如 `UserIdentity: oidcIdentityProviders[1] (Entra): Microsoft Entra ID issuers have no trailing slash. Use https://login.microsoftonline.com/<tenant-id>/v2.0`。
+
+令牌值（例如从 AWS Systems Manager Parameter Store 读取的值）不会被检查。错误的值会导致部署失败而不是合成失败。`name` 不能是令牌。
+  </Fragment>
+  <Fragment slot="terraform">
+模块的 `oidc_identity_providers` 变量对每个规则都有一个 `validation` 块。其错误消息不会命名违反规则的条目。
+
+当您在 `user_identity` 模块块中将列表写为文字时，`terraform validate` 会检查它。项目的 `validate` 目标运行 `terraform validate`。当列表来自根变量时，如上面的 `.tfvars` 模式，`terraform plan` 会检查它。
+  </Fragment>
+</Infrastructure>
+
+规则：
+
+- `name`：3-32 个字母、数字和连字符，以字母开头。不能是任何大小写的 `COGNITO`，因为 Cognito 将其保留用于使用用户池本身登录。
+- 名称在列表中是唯一的，忽略大小写，因为 Cognito 使用小写名称为联合用户名添加前缀。例如，`Okta` 和 `OKTA` 不能同时在列表中。`test-idp` 和 `testidp` 可以，因为它们的前缀不同。
+- 颁发者使用 `https://` 并且没有查询、片段、用户名、密码或空格。在 CDK 中，它还必须解析为 URL。在 Terraform 中，正则表达式检查它，它接受一些 CDK 拒绝的格式错误的 URL。
+- Microsoft Entra ID：多租户颁发者（`common`、`organizations`、`consumers` 和 `9188040d-6c67-4c5b-b112-36a304b66dad`）被拒绝，并且颁发者不得以斜杠结尾。
+- Auth0：`*.auth0.com` 上的颁发者必须以斜杠结尾。
+- 客户端 ID 不为空。
+- 密钥名称为 1-512 个字母、数字和 `/ _ + = . @ -`。这些是 Secrets Manager 命名规则，因此 ARN 被拒绝。
+- 范围包括 `openid`。在 CDK 中，每个范围还必须非空且没有空格。
+- 属性映射键和值遵循[属性映射](#attribute-mapping)中的规则。
+- 最多 50 个标识符。每个标识符为 1-40 个字母、数字、空格或 `_ + = . @ -`。
 
 ## 生成器输出
 
-生成器为您选择的 `iac` 提供商添加这些文件，其中 `<name>` 是 `name` 选项的 kebab-case 形式（`TestIdp` 为 `test-idp`）：
+使用 `--federation=oidc`，生成器为您选择的 `iac` 提供商添加这些文件和编辑：
 
 <Infrastructure>
   <Fragment slot="cdk">
     <FileTree>
       - packages/common/constructs/src/core
-        - identity-providers
-          - \<name>.ts CDK construct containing the identity provider
-        - index.ts Exports the new construct
-        - user-identity.ts Now creates the identity provider
+        - oidc-identity-providers.ts `OidcIdentityProviders` 构造、其属性和验证
+        - index.ts 现在导出 `oidc-identity-providers.ts`
+        - user-identity.ts 现在具有 `oidcIdentityProviders` 属性并创建身份提供商
     </FileTree>
   </Fragment>
   <Fragment slot="terraform">
     <FileTree>
       - packages/common/terraform/src/core/user-identity
-        - \<name>-identity-provider.tf Passes the redirect URI output up from the identity module
+        - oidc-identity-providers.tf 带有验证的 `oidc_identity_providers` 变量和 `idp_redirect_uri` 输出
+        - main.tf 现在将变量传递给身份模块
         - identity
-          - \<name>-identity-provider.tf The identity provider, and the data source that reads its client secret
-          - identity.tf Now lists the identity provider on the web client
+          - oidc-identity-providers.tf 身份提供商、读取每个客户端密钥的数据源和 `idp_redirect_uri` 输出
+          - identity.tf 现在在 Web 客户端上列出身份提供商
     </FileTree>
   </Fragment>
 </Infrastructure>
 
-生成器还会编辑用户池的 Web 客户端（您的网站登录所通过的 Cognito 应用客户端），使其接受新的身份提供商。对于 `TestIdp` 身份提供商，它会进行以下更改：
+编辑让用户池的 Web 客户端（您的网站登录所通过的 Cognito 应用客户端）接受身份提供商：
 
 <Infrastructure>
   <Fragment slot="cdk">
 ```diff lang="ts" title="packages/common/constructs/src/core/user-identity.ts"
-+import { TestIdpIdentityProvider } from './identity-providers/test-idp.js';
-     this.userPoolClient = this.createUserPoolClient(this.userPool);
-+    new TestIdpIdentityProvider(this, 'TestIdpIdentityProvider', {
++import {
++  OidcIdentityProviders,
++  type OidcIdentityProviderProps,
++} from './oidc-identity-providers.js';
+   readonly mfaSecondFactor?: MfaSecondFactor;
++
++  /**
++   * OpenID Connect identity providers users can sign in through, next to the user pool's own sign-in.
++   * Applies to every website that uses this user pool.
++   * ...
++   */
++  readonly oidcIdentityProviders?: OidcIdentityProviderProps[];
+ }
+       mfaSecondFactor = { sms: true, otp: true },
++      oidcIdentityProviders = [],
+     }: UserIdentityProps = {},
+     this.userPoolDomain = this.createUserPoolDomain(this.userPool);
++    new OidcIdentityProviders(this, 'OidcIdentityProviders', {
 +      userPool: this.userPool,
-+      userPoolClient: this.userPoolClient,
 +      userPoolDomain: this.userPoolDomain,
++      providers: oidcIdentityProviders,
 +    });
-     this.identityPool = this.createIdentityPool(
+     this.userPoolClient = this.createUserPoolClient(this.userPool);
 ```
+
+`UserIdentity` 在 Web 客户端之前创建身份提供商，因此 Web 客户端列出它们，然后是 `COGNITO`。
   </Fragment>
   <Fragment slot="terraform">
+```diff lang="hcl" title="packages/common/terraform/src/core/user-identity/main.tf"
+   mfa_second_factor_sms = var.mfa_second_factor_sms
++  oidc_identity_providers = var.oidc_identity_providers
+```
+
 ```diff lang="hcl" title="packages/common/terraform/src/core/user-identity/identity/identity.tf"
 -  supported_identity_providers = ["COGNITO"]
-+  supported_identity_providers = ["COGNITO", aws_cognito_identity_provider.test_idp.provider_name]
++  supported_identity_providers = concat(["COGNITO"], [for p in aws_cognito_identity_provider.oidc : p.provider_name])
 ```
+
+每个身份提供商都是一个 `for_each` 实例，按其名称键入，例如 `aws_cognito_identity_provider.oidc["Okta"]`。因此，重命名条目会替换该身份提供商。
   </Fragment>
 </Infrastructure>
 
-第二个身份提供商会添加在第一个之后。使用相同的 `name` 和选项再次运行生成器不会更改任何文件，生成器也不会覆盖您对身份提供商文件的编辑。如果您使用相同的 `name` 但其他选项再次运行它，生成器会保留现有文件并警告新选项未应用。要更改身份提供商，请编辑其文件。具有相同 kebab-case 形式的名称使用相同的文件，因此生成器拒绝第二个名称。例如，`TestIdp` 和 `Test-Idp` 都使用 `test-idp`，`Okta` 和 `OKTA` 都使用 `okta`。
-
-生成器不会检测 kebab-case 形式不同的名称，例如 `Okta`（`okta`）和 `Ok-ta`（`ok-ta`），或 `TestIdp`（`test-idp`）和 `testidp`（`testidp`）。即使颁发者和客户端 ID 相同，它也会添加第二个身份提供商及其自己的文件和密钥名称。请选择明显不同的名称。
-
-如果您更改了 `user-identity.ts` 或 `supported_identity_providers` 列表，使得生成器无法再识别它，生成器会保持该文件不变。它会打印出需要手动添加的行。
+生成器不会覆盖您对新文件的编辑。如果您更改了 `user-identity.ts` 或 `main.tf` 或 `identity.tf`，使得生成器无法再识别它，生成器会保持这些文件不变。它仍然会添加新文件，并打印出需要手动添加的行。
 
 ## 设置您的身份提供商
 
-运行生成器后的第一次部署会从 Secrets Manager 读取客户端密钥。如果密钥不存在，部署将失败。按此顺序执行以下步骤。生成器完成时也会打印这些步骤。
+添加身份提供商的部署会从 Secrets Manager 读取其客户端密钥。如果密钥不存在，部署将失败。按此顺序执行以下步骤。生成器完成时也会打印这些步骤。
 
-1. 在身份提供商处注册一个应用程序，并记下其客户端 ID 和客户端密钥。您将在第 4 步添加其重定向 URI。使用 `--clientId` 设置为客户端 ID 来运行此生成器。
-2. 将客户端密钥存储在 Secrets Manager 中，使用 `clientSecretName` 选项中的名称（默认为 `<name>-oidc-client-secret`）：
-
-   ```bash
-   aws secretsmanager create-secret --name TestIdp-oidc-client-secret --secret-string <client secret> --region <region>
-   ```
-
-   将 `--region` 设置为您的堆栈区域。在第一次部署之前，密钥必须存在于该区域。将密钥存储为纯字符串，而不是 JSON，因为 Cognito 接收整个密钥值作为客户端密钥。在 Secrets Manager 控制台中，选择 Plaintext，而不是 Key/value。
-
-3. 部署。
-4. 将重定向 URI 添加到身份提供商的应用程序中。
+1. 使用 `--federation=oidc` 运行 `ts#website#auth`，并部署一次。
+2. 找到您的用户池的重定向 URI。该池的所有身份提供商都使用相同的 URI。
 
 <Infrastructure>
   <Fragment slot="cdk">
-包含 `UserIdentity` 的堆栈将重定向 URI 输出为 `<Name>IdpRedirectUri`，例如 `TestIdpIdpRedirectUri`。您也可以在部署之前根据您为 `ts#website#auth` 选择的 `cognitoDomain`、您的 AWS 账户 ID 和您的区域计算出来：
+包含 `UserIdentity` 的堆栈有一个输出，其键以 `<id>OidcIdentityProvidersIdpRedirectUri` 开头，其中 `<id>` 是您给 `UserIdentity` 的构造 ID，例如 `IdentityOidcIdentityProvidersIdpRedirectUri`。您也可以在部署之前根据您为 `ts#website#auth` 选择的 `cognitoDomain`、您的 AWS 账户 ID 和您的区域计算出来：
 
 ```
 https://<cognitoDomain>-<account>.auth.<region>.amazoncognito.com/oauth2/idpresponse
 ```
   </Fragment>
   <Fragment slot="terraform">
-Cognito 域名有一个随机后缀，因此重定向 URI 只有在部署后才知道。`user-identity` 模块将其输出为 `<name>_idp_redirect_uri`。要查看它，请向您的根模块添加一个输出，例如 `packages/infra/src/main.tf`：
+Cognito 域名有一个随机后缀，因此重定向 URI 只有在部署后才知道。`user_identity` 模块将其输出为 `idp_redirect_uri`。要查看它，请向您的根模块添加一个输出，例如 `packages/infra/src/main.tf`：
 
 ```hcl
-output "test_idp_idp_redirect_uri" { value = module.user_identity.test_idp_idp_redirect_uri }
+output "idp_redirect_uri" { value = module.user_identity.idp_redirect_uri }
 ```
   </Fragment>
 </Infrastructure>
 
-仅在身份提供商处注册此 `/oauth2/idpresponse` URI。您网站自己的 URL 是在 Cognito 中注册的，而不是在身份提供商处。
+3. 在身份提供商处使用该重定向 URI 注册一个应用程序，并记下其客户端 ID 和客户端密钥。仅在身份提供商处注册此 `/oauth2/idpresponse` URI。您网站自己的 URL 是在 Cognito 中注册的，而不是在身份提供商处。
+4. 将客户端密钥存储在 Secrets Manager 中：
+
+   ```bash
+   aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string <client secret> --region <region>
+   ```
+
+   将 `--region` 设置为您的堆栈区域。在添加身份提供商的部署之前，密钥必须存在于该区域。将密钥存储为纯字符串，而不是 JSON，因为 Cognito 接收整个密钥值作为客户端密钥。在 Secrets Manager 控制台中，选择 Plaintext，而不是 Key/value。
+
+5. 将身份提供商添加到列表中，将密钥的名称作为 `clientSecretName`（Terraform 中的 `client_secret_name`），如[添加身份提供商](#add-identity-providers)所示。然后部署。
 
 ## 属性映射
 
-生成的用户池需要 `email`、`given_name` 和 `family_name` 属性。Cognito 在每次登录时从身份提供商的声明中填充它们。如果身份提供商没有发送其中之一，用户的首次登录将失败。因此，生成器拒绝遗漏这三个属性中任何一个的 `attributeMapping`。
+生成的用户池需要 `email`、`given_name` 和 `family_name` 属性。Cognito 在每次登录时从身份提供商的声明中填充它们。如果身份提供商没有发送其中之一，用户的首次登录将失败。因此，`UserIdentity` 和 Terraform 变量拒绝遗漏这三个属性中任何一个的属性映射。
 
-`attributeMapping` 是一个 JSON 对象。每个键是一个用户池属性，每个值是身份提供商声明的名称。默认情况下，每个属性映射到具有相同名称的声明：
+`attributeMapping`（Terraform 中的 `attribute_mapping`）将用户池属性映射到声明。每个键是一个用户池属性，每个值是身份提供商声明的名称，长度为 1-128 个字符。您提供的映射会替换默认值。默认值将每个必需属性映射到具有相同名称的声明：
 
-```json
-{"email":"email","given_name":"given_name","family_name":"family_name"}
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts
+attributeMapping: { email: 'email', given_name: 'given_name', family_name: 'family_name' },
 ```
+  </Fragment>
+  <Fragment slot="terraform">
+```hcl
+attribute_mapping = { email = "email", given_name = "given_name", family_name = "family_name" }
+```
+  </Fragment>
+</Infrastructure>
 
-- 键可以是任何[标准属性](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-attributes.html#cognito-user-pools-standard-attributes)，如 `name` 或 `phone_number`，或自定义属性，如 `custom:department`。
+- 键可以是任何[标准属性](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-attributes.html#cognito-user-pools-standard-attributes)，如 `name` 或 `phone_number`、`phone_number_verified`，或自定义属性，如 `custom:department`（`custom:` 后最多 20 个字母、数字或下划线）。键在 CDK 和 Terraform 中都使用 Cognito 属性名称。`username` 被拒绝。
 - Cognito 将映射的电子邮件地址视为未验证。仅从自己验证电子邮件地址的身份提供商映射 `email_verified`。否则，用户可能在身份提供商处设置他人的地址，并在您的池中将其标记为已验证。
 - 如果用户的电子邮件地址在身份提供商处更改，Cognito 会在用户下次登录时将新地址写入用户池。`email_verified` 保持为 `false`。
 - 自定义属性必须已存在于用户池中，并且必须是可变的。
 
-Terraform 身份提供商文件还设置了 Cognito 在返回身份提供商时添加的两个值：`attribute_mapping` 中的 `"username" = "sub"` 和 `provider_details` 中的 `attributes_url_add_attributes = "false"`。因为文件设置了它们，所以第一次部署后的第二次 `terraform plan` 不会显示对身份提供商的更改。如果第二次计划仍然显示另一个身份提供商的 `provider_details` 中有更改，请将该键添加到文件中，其值为计划显示 Cognito 返回的值。
+Terraform 身份提供商资源（在 `identity/oidc-identity-providers.tf` 中）还设置了 Cognito 在返回身份提供商时添加的两个值：`attribute_mapping` 中的 `username = "sub"` 和 `provider_details` 中的 `attributes_url_add_attributes = "false"`。因为文件设置了它们，所以第一次部署后的第二次 `terraform plan` 不会显示对身份提供商的更改。如果第二次计划仍然显示另一个身份提供商的 `provider_details` 中有更改，请将该键添加到文件中，其值为计划显示 Cognito 返回的值。
 
 ## 身份提供商说明
 
@@ -159,21 +308,23 @@ Terraform 身份提供商文件还设置了 Cognito 在返回身份提供商时�
 
 ### Okta
 
-已在 AWS 上使用 CDK 和 Terraform 进行测试。在 Okta 中创建一个 OIDC Web 应用程序，使用授权码授予和客户端密钥。将其登录重定向 URI 设置为[设置您的身份提供商](#set-up-your-identity-provider)第 4 步中的 `/oauth2/idpresponse` 重定向 URI。它不需要注销重定向 URI。颁发者是您的 Okta 域名，`https://<your-org>.okta.com`，这是经过测试的形式。自定义授权服务器（如 `https://<your-org>.okta.com/oauth2/default`）也有颁发者，但该形式尚未经过测试。默认范围 `openid email profile` 返回 `email`、`given_name` 和 `family_name`，因此默认映射有效。每个用户需要在 Okta 中设置电子邮件、名字和姓氏。仅将应用程序分配给需要访问的用户或组。
+已在 AWS 上使用 CDK 和 Terraform 进行测试。在 Okta 中创建一个 OIDC Web 应用程序，使用授权码授予和客户端密钥。将其登录重定向 URI 设置为[设置您的身份提供商](#set-up-your-identity-provider)第 2 步中的 `/oauth2/idpresponse` 重定向 URI。它不需要注销重定向 URI。颁发者是您的 Okta 域名，`https://<your-org>.okta.com`，这是经过测试的形式。自定义授权服务器（如 `https://<your-org>.okta.com/oauth2/default`）也有颁发者，但该形式尚未经过测试。默认范围 `openid email profile` 返回 `email`、`given_name` 和 `family_name`，因此默认映射有效。每个用户需要在 Okta 中设置电子邮件、名字和姓氏。仅将应用程序分配给需要访问的用户或组。
 
 ### Auth0
 
 已根据 Auth0 的发现文档进行检查，未进行实际登录测试。在 Auth0 中创建一个常规 Web 应用程序。颁发者是 `https://<your-tenant>.auth0.com/`，包括尾部斜杠。
 
-**警告：**生成器也接受不带尾部斜杠的颁发者，但登录会失败，因为 Auth0 令牌中的 `iss` 声明有斜杠。
+:::caution
+Auth0 令牌中的 `iss` 声明以斜杠结尾，因此没有斜杠的颁发者会导致登录失败。供应的代码拒绝 `*.auth0.com` 上没有斜杠的颁发者。它无法识别 Auth0 自定义域，因此在使用自定义域时请自行检查斜杠。
+:::
 
 Auth0 仅在用户的连接提供 `given_name` 和 `family_name` 时才返回它们。没有它们的连接的用户在您映射其他声明之前无法登录。
 
 ### Microsoft Entra ID
 
-已根据 Microsoft 的发现文档进行检查，未进行实际登录测试。在 Entra ID 中注册一个单租户应用程序。颁发者是 `https://login.microsoftonline.com/<tenant-id>/v2.0`。生成器拒绝多租户颁发者（`/common/`、`/organizations/` 和 `/consumers/`），因为它们接受来自任何 Entra ID 租户的用户。
+已根据 Microsoft 的发现文档进行检查，未进行实际登录测试。在 Entra ID 中注册一个单租户应用程序。颁发者是 `https://login.microsoftonline.com/<tenant-id>/v2.0`。供应的代码拒绝多租户颁发者（`common`、`organizations` 和 `consumers`），因为它们接受来自任何 Entra ID 租户的用户。它还拒绝租户 `9188040d-6c67-4c5b-b112-36a304b66dad`，该租户接受任何个人 Microsoft 账户。
 
-**警告：**颁发者不得以斜杠结尾。使用 `/v2.0`，而不是 `/v2.0/`。生成器接受带斜杠的形式，但登录会失败，因为 Entra ID 令牌中的 `iss` 声明没有斜杠。
+颁发者不得以斜杠结尾：使用 `/v2.0`，而不是 `/v2.0/`。Entra ID 令牌中的 `iss` 声明没有斜杠，因此登录会失败。供应的代码拒绝带斜杠的形式。
 
 将 `email`、`given_name` 和 `family_name` 作为可选声明添加到应用程序的 ID 令牌。Entra ID 仅在您这样做时才发送它们。每个用户需要设置 Mail 字段。否则 `email` 声明为空，用户的首次登录将失败，因为用户池需要 `email`。Entra ID 的 `email` 声明未经验证，因此不要从 Entra ID 映射 `email_verified`。
 
@@ -191,12 +342,12 @@ Auth0 仅在用户的连接提供 `given_name` 和 `family_name` 时才返回它
 
 - 用户池中要求的 MFA（多因素身份验证）不适用于联合用户。Cognito 将他们的身份验证留给身份提供商，因此在身份提供商处强制执行 MFA。
 - 从您的网站注销仅结束 Cognito 会话。它不会结束用户在 OIDC 身份提供商处的会话，因此通过按钮的下一次登录可以在没有密码的情况下完成。在共享计算机上，用户还必须在身份提供商处注销。
-- 用户菜单显示 Cognito 用户名。对于联合用户，它是身份提供商名称、下划线和用户在身份提供商处的 `sub`，小写，例如 `testidp_00u1abcd`。
+- 用户菜单显示 Cognito 用户名。对于联合用户，它是身份提供商名称、下划线和用户在身份提供商处的 `sub`，小写，例如 `okta_00u1abcd`。
 - 在身份提供商处删除或禁用用户仅会阻止他们通过它的下一次登录。Cognito 使用自己的刷新令牌续订令牌，不会询问身份提供商，网站在用户不注意的情况下续订令牌。因此，用户可以保持访问权限，直到刷新令牌过期，最多在他们上次登录后 30 天。要立即结束用户的访问权限，还要将他们从每个会话中注销并在用户池中禁用他们。他们的用户名是 `<identity provider name in lowercase>_<sub>`：
 
   ```bash
-  aws cognito-idp admin-user-global-sign-out --user-pool-id <user pool id> --username testidp_<sub>
-  aws cognito-idp admin-disable-user --user-pool-id <user pool id> --username testidp_<sub>
+  aws cognito-idp admin-user-global-sign-out --user-pool-id <user pool id> --username okta_<sub>
+  aws cognito-idp admin-disable-user --user-pool-id <user pool id> --username okta_<sub>
   ```
 
   这已在 AWS 上进行了测试。在 `admin-user-global-sign-out` 和 `admin-disable-user` 之后，身份提供商仍然会让用户登录，但 Cognito 会拒绝他们。
@@ -224,13 +375,7 @@ CloudFormation 在身份提供商的设置（`ProviderDetails`）内解析引用
 
 <Infrastructure>
   <Fragment slot="cdk">
-在轮换后的部署中更改身份提供商资源。一种方法是将引用指向密钥的新版本。在身份提供商构造 `identity-providers/<name>.ts` 中，将 `aws secretsmanager put-secret-value` 打印的版本 ID 添加到 `SecretValue.secretsManager` 调用中，并保留其 `.unsafeUnwrap()`：
-
-```ts
-SecretValue.secretsManager('TestIdp-oidc-client-secret', { versionId: '<version id>' })
-```
-
-然后模板中的引用会更改，因此 CloudFormation 更新身份提供商并读取该版本的密钥。在每次轮换时再次更改版本 ID。这遵循 CloudFormation 动态引用文档，尚未在 AWS 上测试。
+在轮换后的部署中更改身份提供商资源。一种方法是将轮换的密钥存储在新名称下，并将 `clientSecretName` 设置为该名称。然后模板中的引用会更改，因此 CloudFormation 更新身份提供商并读取新密钥。之后删除旧密钥。这遵循 CloudFormation 动态引用文档，尚未在 AWS 上测试。
   </Fragment>
   <Fragment slot="terraform">
 在轮换后运行 `terraform plan` 和 `terraform apply`。数据源在每次计划时读取密钥的当前版本，因此计划显示身份提供商的就地更新，`apply` 将新密钥发送到 Cognito。在 `hashicorp/aws` 提供商源代码中，对 `provider_details` 的更改会就地更新身份提供商，而不会替换它。尚未在 AWS 上测试。
@@ -239,7 +384,27 @@ SecretValue.secretsManager('TestIdp-oidc-client-secret', { versionId: '<version 
 
 ## 其他应用客户端
 
-应用客户端是应用程序登录所通过的 Cognito 配置。生成器仅将身份提供商添加到网站的应用客户端（Web 客户端）。同一用户池中的另一个应用客户端仅在您也将身份提供商添加到它时才接受联合用户。例如，您为 <Link path="guides/ts-dcr-proxy">DCR 代理</Link>（允许 MCP 客户端，即使用模型上下文协议的 AI 工具，通过 Cognito 登录）创建的应用客户端需要它。否则联合用户无法登录到您的 MCP 服务器。在 CDK 中，将身份提供商的 `provider.providerName` 添加到该客户端的 `supportedIdentityProviders`。
+应用客户端是应用程序登录所通过的 Cognito 配置。生成器仅将身份提供商添加到网站的应用客户端（Web 客户端）。同一用户池中的另一个应用客户端仅在它也列出身份提供商时才接受联合用户。例如，您为 <Link path="guides/ts-dcr-proxy">DCR 代理</Link>（允许 MCP 客户端，即使用模型上下文协议的 AI 工具，通过 Cognito 登录）创建的应用客户端需要它们。否则联合用户无法登录到您的 MCP 服务器。
+
+<Infrastructure>
+  <Fragment slot="cdk">
+在 `UserIdentity` 之后使用 `identity.userPool.addClient(...)` 创建的应用客户端，如果没有 `supportedIdentityProviders`，会列出池的每个身份提供商和 `COGNITO`。DCR 代理示例就是这样做的。如果您的应用客户端设置了 `supportedIdentityProviders`，请将池的身份提供商添加到它：
+
+```ts
+import { UserPoolClientIdentityProvider } from 'aws-cdk-lib/aws-cognito';
+
+supportedIdentityProviders: [
+  UserPoolClientIdentityProvider.COGNITO,
+  ...identity.userPool.identityProviders.map((p) =>
+    UserPoolClientIdentityProvider.custom(p.providerName),
+  ),
+],
+```
+  </Fragment>
+  <Fragment slot="terraform">
+将每个身份提供商的 `name` 添加到应用客户端的 `supported_identity_providers`，并使应用客户端依赖于 `module.user_identity`，以便身份提供商首先存在。
+  </Fragment>
+</Infrastructure>
 
 ## 代理聊天的令牌
 
