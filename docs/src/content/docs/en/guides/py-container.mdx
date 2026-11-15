@@ -40,17 +40,19 @@ The `infra`, `ingress` and `auth` options depend on each other. With `infra` set
 
 The generator adds the following files to your project. The source folder is named after the `name` option in snake_case (for example `my_service` for `--name=my-service`), or `service` if you leave it out:
 
-{/* TODO(integration): the full file list, for example __init__.py and where .dockerignore goes (lane C) */}
 <FileTree>
   - your-project/
     - your_module/
       - service/ (or the name you chose)
-        - main.py FastAPI app with `GET /health` and a sample route, served by uvicorn on `PORT`
+        - \_\_init\_\_.py Python package initialization
+        - main.py FastAPI app with `GET /health` and the sample route `GET /echo`, served by uvicorn on `PORT`
         - Dockerfile Container image definition
         - .dockerignore Files left out of the image build context
     - pyproject.toml Updated with FastAPI and uvicorn dependencies
-    - project.json Updated with the `serve`, `docker` and `trivy` targets for your service
+    - project.json Updated with the `bundle-arm` and `bundle` targets and the `<name>-serve`, `<name>-docker` and `<name>-trivy` targets for your service
 </FileTree>
+
+Target names start with the `name` option, or with `service` if you leave it out. For example, the targets are `service-serve`, `service-docker` and `service-trivy` without a name, and `orders-serve`, `orders-docker` and `orders-trivy` for `--name=orders`. The `bundle-arm` and `bundle` targets are shared by everything the project bundles.
 
 <OptionFilter when={{ infra: 'ecs' }} description="ECS service infrastructure">
 ### Infrastructure
@@ -72,7 +74,6 @@ For deploying your service, the following files are generated:
 </FileTree>
 </Fragment>
 <Fragment slot="terraform">
-{/* TODO(integration): resource file name (lane B) */}
 <FileTree>
   - packages/common/terraform/src
     - app
@@ -100,24 +101,23 @@ If you set `infra` to `none`, no CDK constructs or Terraform modules are generat
 
 ## Running Your Service Locally
 
-The `serve` target runs the server on your machine, without a container:
+The `<name>-serve` target runs the server on your machine, without a container:
 
 <NxCommands commands={['run your-project:service-serve']} />
 
-Targets are prefixed with the `name` option, or `service` if you leave it out. For example, `--name=orders` gives `orders-serve`. The server listens on the port in the `PORT` environment variable. The `serve` target sets it to a port the generator assigns, starting at 8081 and skipping ports other projects in your workspace already use. Inside the container the server listens on port 8080.
+The server listens on the port in the `PORT` environment variable. The `<name>-serve` target sets it to a port the generator assigns, starting at 8081 and skipping ports other projects in your workspace already use. Inside the container the server listens on port 8080.
 
-Check that the server is up with its health route:
+Check that the server is up with its health route, which returns status 200 and `{"status":"ok"}`:
 
 ```bash
 curl http://localhost:<port>/health
 ```
 
-{/* TODO(integration): sample route path (lane C) */}
-The server also has a sample route that you replace with your own routes.
+The server also has a sample route that you replace with your own routes. `GET /echo?message=<x>` returns `{"message":"<x>"}`. The `message` parameter is required and may be at most 1024 characters long. A request without it, or with a longer value, gets status 422.
 
 ## Building and Scanning the Image
 
-The `<name>-docker` target builds a linux/arm64 image of your service. It runs the `bundle` target first, so the image holds your code and its dependencies. It uses the container engine your workspace is set up with, `docker` or [Finch](https://runfinch.com/). The target runs as part of the aggregate `docker` target, which builds every image in the project.
+The `<name>-docker` target builds a linux/arm64 image of your service. It runs the `bundle-arm` target first, which writes your code and its linux/arm64 dependencies to `dist/<project root>/bundle-arm`. The aggregate `bundle` target depends on `bundle-arm`. The `<name>-docker` target then copies that folder, the `Dockerfile` and the `.dockerignore` into `dist/<project root>/docker/<name>`, and builds the image with that folder as the build context (the files the image build can read). It uses the container engine your workspace is set up with, `docker` or [Finch](https://runfinch.com/). The target runs as part of the aggregate `docker` target, which builds every image in the project.
 
 <NxCommands commands={['run your-project:service-docker']} />
 
@@ -161,9 +161,7 @@ export class ApplicationStack extends Stack {
 To use an existing VPC, look it up with `Vpc.fromLookup(this, 'Vpc', { vpcId: '<vpc-id>' })` and pass it as `vpc`.
 </Fragment>
 <Fragment slot="terraform">
-The Terraform module is created in `common/terraform`. The service's image is published to the shared asset repository, so instantiate the `core/asset-ecr` module once per deployment and pass its outputs to every service module:
-
-{/* TODO(integration): confirm the app module's variables (lane B) */}
+The Terraform module is created in `common/terraform`. The service's image is published to the shared asset repository, so instantiate the `core/asset-ecr` module once per deployment and pass its outputs to every service module. Also pass the outputs of the shared `runtime_config_appconfig` module, which hold the AWS AppConfig application the service reads its <Link path="/guides/runtime-config">runtime configuration</Link> from:
 
 ```hcl title="packages/infra/src/main.tf"
 module "asset_ecr" {
@@ -178,6 +176,9 @@ module "my_service" {
 
   asset_ecr_repository_url = module.asset_ecr.repository_url
   asset_ecr_repository_arn = module.asset_ecr.repository_arn
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 }
 ```
 </Fragment>
@@ -219,17 +220,24 @@ The generated infrastructure applies these settings by default:
 - Tasks run in private subnets and never get a public IP address.
 - The load balancer accepts traffic only from the VPC link (`http-api`) or from the VPC's address range (`private`). The tasks accept traffic only from the load balancer, on the container port.
 - Tasks may send outbound traffic only on port 443. Connections to databases add the database port.
-- The task role (the role your server code runs as) has no permissions until you or a connection grant them.
+- The task role (the role your server code runs as) may only read runtime configuration from AWS AppConfig until you or a connection grant more.
 - The execution role (the role ECS uses to start your task) may only pull the service's image, write to its log group and read the secrets you list.
 - Secrets reach the container only as references to AWS Secrets Manager or AWS Systems Manager Parameter Store, never as plain environment values.
-- The container has a read-only root file system and runs as a non-root user. ECS Exec (shell access into a running task) is off.
+- The container has a read-only root file system and runs as uid 1000, a non-root user. ECS Exec (shell access into a running task) is off.
 - A deployment that fails its health checks stops and rolls back to the previous version.
 - The HTTP API writes access logs and throttles requests. It authenticates with IAM unless you choose otherwise.
 - Logs are kept for one year.
 
+The generated code suppresses these [Checkov](https://www.checkov.io/) checks (Checkov scans infrastructure code for insecure settings), and states the reason next to each suppression:
+
+- `CKV_AWS_91` asks for load balancer access logs. The HTTP API access logs, or your service's own logs, record the requests instead.
+- `CKV_AWS_2` and `CKV_AWS_103` ask for an HTTPS listener with TLS. The load balancer listens on plain HTTP because it is internal and only callers inside the VPC can reach it. With `http-api`, TLS ends at API Gateway.
+
+The Terraform module also skips `CKV2_AWS_20` and `CKV_AWS_378` for the same HTTP listener reason, and `CKV_AWS_150` because load balancer deletion protection is off so that the service can be destroyed.
+
 ### Calling Your Service
 
-The service's URL is written to <Link path="/guides/runtime-config">runtime configuration</Link> as `connection.services.<NameClassName>`, where `<NameClassName>` is the service name in PascalCase (for example `Orders` for `--name=orders`).
+The service's URL is written to <Link path="/guides/runtime-config">runtime configuration</Link> as `connection.services.<NameClassName>`, where `<NameClassName>` is the service name in PascalCase. For `--name=orders` the key is `Orders`. Without a name, the service name is `<project>-service`, so for a project called `my-project` the key is `MyProjectService`. The source folder and the target prefix are still `service` in that case.
 
 <Tabs syncKey="auth">
 <TabItem label="IAM" _filter={{ ingress: 'http-api', auth: 'iam' }}>
@@ -245,9 +253,8 @@ service.grantInvoke(myFunction);
 ```
 </Fragment>
 <Fragment slot="terraform">
-Grant a role permission to call the service with an `execute-api:Invoke` policy on the API's execution ARN, which the `ecs-service` module outputs as `api_execution_arn`:
+Grant a role permission to call the service with an `execute-api:Invoke` policy on the API's execution ARN, which your service's module outputs as `api_execution_arn`:
 
-{/* TODO(integration): whether the app module re-exports api_execution_arn (lane B) */}
 ```hcl title="packages/infra/src/main.tf"
 resource "aws_iam_role_policy" "invoke_my_service" {
   role = aws_iam_role.caller.id
@@ -269,10 +276,17 @@ Callers send a JSON Web Token (JWT) issued by your Amazon Cognito user pool in t
 
 <Infrastructure>
 <Fragment slot="cdk">
-Pass the user pool and app client in the `auth` prop of `EcsService`: `auth: { type: 'cognito', userPool, userPoolClient }`.
+The generated construct for a Cognito service takes no `auth` prop. Pass the user pool and app client in its required `identity` prop instead:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+new MyService(this, 'MyService', {
+  vpc,
+  identity: { userPool, userPoolClient },
+});
+```
 </Fragment>
 <Fragment slot="terraform">
-Set the `user_pool_id` and `user_pool_client_ids` variables of the `ecs-service` module.
+Set the required `user_pool_id` and `user_pool_client_ids` variables of your service's module, `app/services/<name>/<name>.tf`. The module passes them on to the `ecs-service` module.
 </Fragment>
 </Infrastructure>
 </TabItem>
@@ -286,13 +300,15 @@ A `private` service has no HTTP API. Its URL is the internal load balancer's add
 
 ### Advanced Configuration
 
-The generic construct and module take more settings than the generated service passes. The examples below use them directly.
+The generated service sets its name, `ingress` and `auth` for you. The examples below use the generic `EcsService` construct and `ecs-service` module directly, for settings the generated service does not pass or to choose `ingress` and `auth` per instance.
 
-{/* TODO(integration): confirm EcsService is exported from the common-constructs index, and that the per-service construct passes cluster and auth through (lane A) */}
+In CDK, your `common-constructs` package exports `EcsService` next to your service's construct, so you import it the same way: `import { EcsService } from '@my-scope/common-constructs'`. The generated construct extends `EcsService` and passes every other prop through, for example `cluster`, `loadBalancer`, `environment`, `secrets` and `grantTaskRole`. Its optional `image` prop replaces the image built from your project. It has no `auth` prop. A Cognito service takes `identity` instead, and other services always use the `auth` they were generated with.
+
+In Terraform, your service's module lets you set only some of the `ecs-service` module's variables: `vpc_id`, `subnet_ids`, `cluster_arn`, `environment`, `secrets`, `task_role_policy_statements` and `tags`, plus `user_pool_id` and `user_pool_client_ids` for a Cognito service. To set any other variable, edit the `module "ecs_service"` block in your service's module.
 
 #### Prebuilt Image
 
-To run an image that is already built, for example from a public registry, pass its URI. Nothing is built locally. For an Amazon ECR image, the execution role is granted pull access on it.
+To run an image that is already built, for example from a public registry, pass its URI. Nothing is built locally. For an image in a private Amazon ECR repository, CDK grants the execution role pull access on that repository. Terraform grants pull access only when you also pass the repository's ARN as `image_repository_arn`.
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -316,6 +332,8 @@ module "prebuilt" {
   vpc_id       = aws_vpc.main.id
   subnet_ids   = aws_subnet.private[*].id
   image_uri    = "public.ecr.aws/my-org/my-image@sha256:<digest>"
+  # For an image in a private Amazon ECR repository, also pass:
+  # image_repository_arn = aws_ecr_repository.my_image.arn
 }
 ```
 
@@ -340,6 +358,7 @@ new EcsService(this, 'Worker', {
 
 </Fragment>
 <Fragment slot="terraform">
+As with a prebuilt image, Terraform grants pull access on a private Amazon ECR repository only when you pass `image_repository_arn`.
 
 ```hcl
 module "worker" {
@@ -350,6 +369,8 @@ module "worker" {
   subnet_ids    = aws_subnet.private[*].id
   image_uri     = "<image uri pinned by digest>"
   load_balancer = false
+  # For an image in a private Amazon ECR repository, also pass:
+  # image_repository_arn = aws_ecr_repository.my_image.arn
 }
 ```
 
@@ -360,8 +381,7 @@ module "worker" {
 
 Each service creates its own ECS cluster unless you pass one in. To run several services in one cluster, pass the same cluster to each.
 
-{/* TODO(integration): whether services share a VPC link (lane A/B) */}
-Each HTTP API service uses a VPC link. API Gateway allows 10 VPC links per account per Region by default, and you can request an increase.
+Each HTTP API service creates its own VPC link, even when services share a cluster. API Gateway allows 10 VPC links per account per Region by default, and you can request an increase.
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -425,7 +445,7 @@ Each task gets 256 CPU units (a quarter of a vCPU) and 512 MiB of memory by defa
 
 #### Task Role Permissions
 
-The task role starts with no permissions. Add the ones your code needs:
+The task role of your service's construct or module starts with read access to runtime configuration only. Add the permissions your code needs:
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -450,6 +470,33 @@ task_role_policy_statements = [{
 
 </Fragment>
 </Infrastructure>
+
+#### Container User
+
+The task definition runs the container as uid 1000, a non-root user. The vended Dockerfile matches it: it creates a user `app` with uid and gid 1000 and sets `USER 1000:1000`. To run as another user, set the CDK `user` prop or the Terraform `container_user` variable. Terraform rejects `0` and `root`.
+
+| Setting | CDK prop | Terraform variable | Default |
+| --- | --- | --- | --- |
+| User the container runs as | `user` | `container_user` | `'1000'` (CDK), `"1000:1000"` (Terraform) |
+
+#### CORS and Throttling
+
+These settings apply only with `ingress` set to `http-api`. CORS (cross-origin resource sharing) decides which websites may call your service from a browser. By default the HTTP API accepts browser requests from any origin, with any method, and with the `authorization`, `content-type`, `x-amz-content-sha256`, `x-amz-date` and `x-amz-security-token` headers. The last three are the headers a SigV4 signature adds. The HTTP API also throttles requests to a steady rate of 10,000 per second, with bursts of up to 5,000.
+
+| Setting | CDK | Terraform variable | Default |
+| --- | --- | --- | --- |
+| Allowed CORS origins | `restrictCorsTo(...origins)` method, or `corsPreflight` prop | `cors_allow_origins` | any origin (`["*"]`) |
+| Other CORS settings | `corsPreflight` prop | none | any method, and the headers above |
+| Throttling | `throttle` prop | none | `{ rateLimit: 10000, burstLimit: 5000 }` |
+
+A `corsPreflight` prop replaces the whole default, so list every header your callers send. The `restrictCorsTo` method keeps the other CORS settings and changes only the allowed origins:
+
+```ts
+const service = new MyService(this, 'MyService', { vpc });
+service.restrictCorsTo('https://app.example.com');
+```
+
+In Terraform, `cors_allow_origins` and `container_user` are variables of the `ecs-service` module. Your service's module does not pass them, so set them in its `module "ecs_service"` block. The throttling values are fixed in `ecs-service.tf`.
 
 ### Cost
 
@@ -488,8 +535,15 @@ Use the <Link path="/guides/connection">`connection`</Link> generator to connect
 
 <RunGenerator generator="connection" />
 
-{/* TODO(integration): link the connection/<page> guides (lane D) */}
-A website or an agent can call your service, and your service can use a relational database or a DynamoDB table. Each connection has conditions:
+A website or an agent can call your service, and your service can use a relational database or a DynamoDB table. Each connection has its own guide:
+
+- <Link path="guides/connection/react-container">React to Container Service</Link>
+- <Link path="guides/connection/ts-agent-container">TypeScript Agent to Container Service</Link>
+- <Link path="guides/connection/py-agent-container">Python Agent to Container Service</Link>
+- <Link path="guides/connection/py-container-rdb">Python Container Service to Relational Database</Link>
+- <Link path="guides/connection/py-container-dynamodb">Python Container Service to DynamoDB</Link>
+
+Each connection also has conditions:
 
 - A website or an agent can connect only to a service with `ingress` set to `http-api`.
 - An agent can also connect only to a service with `auth` set to `iam`.
