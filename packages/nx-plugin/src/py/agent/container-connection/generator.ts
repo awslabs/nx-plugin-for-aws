@@ -41,6 +41,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { addWorkspaceDependencyToPyProject } from '../../../utils/py.js';
 import type { PyAgentContainerConnectionGeneratorSchema } from './schema';
 
@@ -64,6 +65,8 @@ export const pyAgentContainerConnectionGenerator = async (
   tree: Tree,
   options: PyAgentContainerConnectionGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  // Refuse an older Nx major before any file is written.
+  assertSupportedNxVersion(tree);
   const agentProject = readProjectConfigurationUnqualified(
     tree,
     options.sourceProject,

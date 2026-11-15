@@ -23,6 +23,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { addWorkspaceDependencyToPyProject } from '../../../utils/py.js';
 import type { PyDynamoDBContainerConnectionGeneratorSchema } from './schema';
 import { dataStoreNames, dynamoDBContainerWiringMessage } from './wiring.js';
@@ -37,6 +38,8 @@ export const pyDynamoDBContainerConnectionGenerator = async (
   tree: Tree,
   options: PyDynamoDBContainerConnectionGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  // Refuse an older Nx major before any file is written.
+  assertSupportedNxVersion(tree);
   const serviceProject = readProjectConfigurationUnqualified(
     tree,
     options.sourceProject,

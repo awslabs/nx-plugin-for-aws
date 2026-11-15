@@ -34,6 +34,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import {
   assertContainerConnectionConstraints,
   containerServiceNames,
@@ -63,6 +64,8 @@ export const tsAgentContainerConnectionGenerator = async (
   tree: Tree,
   options: TsAgentContainerConnectionGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  // Refuse an older Nx major before any file is written.
+  assertSupportedNxVersion(tree);
   const agentProject = readProjectConfigurationUnqualified(
     tree,
     options.sourceProject,

@@ -45,6 +45,7 @@ import {
   readProjectConfigurationUnqualified,
   updateComponentGeneratorMetadata,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { sortObjectKeys } from '../../utils/object.js';
 import { toProjectRelativePath } from '../../utils/paths.js';
 import { assignPort } from '../../utils/port.js';
@@ -87,6 +88,8 @@ export const pyContainerGenerator = async (
   tree: Tree,
   options: PyContainerGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  // Refuse an older Nx major before any file is written.
+  assertSupportedNxVersion(tree);
   const project = readProjectConfigurationUnqualified(tree, options.project);
 
   if (!tree.exists(joinPathFragments(project.root, 'pyproject.toml'))) {

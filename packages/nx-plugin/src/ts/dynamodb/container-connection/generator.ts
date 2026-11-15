@@ -17,6 +17,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import {
   assertContainerConnectionConstraints,
   containerServiceNames,
@@ -35,6 +36,8 @@ export const tsDynamoDBContainerConnectionGenerator = async (
   tree: Tree,
   options: TsDynamoDBContainerConnectionGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  // Refuse an older Nx major before any file is written.
+  assertSupportedNxVersion(tree);
   const serviceProject = readProjectConfigurationUnqualified(
     tree,
     options.sourceProject,

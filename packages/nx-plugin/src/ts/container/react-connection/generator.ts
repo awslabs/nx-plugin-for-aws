@@ -22,6 +22,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { toProjectRelativePath } from '../../../utils/paths.js';
 import { runtimeConfigGenerator } from '../../react-website/runtime-config/generator.js';
 import {
@@ -66,6 +67,8 @@ export const tsContainerReactConnectionGenerator = async (
   tree: Tree,
   options: TsContainerReactConnectionGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  // Refuse an older Nx major before any file is written.
+  assertSupportedNxVersion(tree);
   const website = readProjectConfigurationUnqualified(
     tree,
     options.sourceProject,

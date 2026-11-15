@@ -20,6 +20,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { toProjectRelativePath } from '../../../utils/paths.js';
 import {
   assertContainerConnectionConstraints,
@@ -40,6 +41,8 @@ export const tsRdbContainerConnectionGenerator = async (
   tree: Tree,
   options: TsRdbContainerConnectionGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  // Refuse an older Nx major before any file is written.
+  assertSupportedNxVersion(tree);
   const serviceProject = readProjectConfigurationUnqualified(
     tree,
     options.sourceProject,

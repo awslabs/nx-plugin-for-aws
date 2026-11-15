@@ -24,6 +24,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { addWorkspaceDependencyToPyProject } from '../../../utils/py.js';
 import { injectRdsCaBundleIntoDockerfile } from '../utils.js';
 import type { PyRdbContainerConnectionGeneratorSchema } from './schema';
@@ -39,6 +40,8 @@ export const pyRdbContainerConnectionGenerator = async (
   tree: Tree,
   options: PyRdbContainerConnectionGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  // Refuse an older Nx major before any file is written.
+  assertSupportedNxVersion(tree);
   const serviceProject = readProjectConfigurationUnqualified(
     tree,
     options.sourceProject,
