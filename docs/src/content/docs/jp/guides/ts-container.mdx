@@ -1,0 +1,550 @@
+---
+title: TypeScript Container Service
+description: TypeScriptプロジェクトにコンテナ化されたHTTPサービスを追加し、Amazon ECS上で実行する
+generator: ts#container
+---
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import ArchitectureDiagram from '@components/architecture-diagram.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import OptionFilter from '@components/option-filter.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Snippet from '@components/snippet.astro';
+
+このジェネレーターは、既存のTypeScriptプロジェクトにコンテナ化されたHTTPサービスを追加します。`GET /health`ルートを持つ小さなHTTPサーバー、Dockerfile、そしてサーバーをローカルで実行し、イメージをビルドしてスキャンするためのターゲットが提供されます。また、[Amazon Elastic Container Service (Amazon ECS)](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html)（コンテナを実行およびスケーリングするAWSサービス）上でイメージを実行するCDKまたはTerraformコードも取得できます。
+
+サービスは[AWS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html)上で実行されます。これは、管理するサーバーなしで各コンテナを実行します。サービスは、独自のVPC（仮想プライベートクラウド、AWSアカウント内の隔離されたネットワーク）内で、VPC内のアドレスからのみ到達可能な内部[Application Load Balancer](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/introduction.html)（ALB）の背後で実行されます。デフォルトでは、[Amazon API Gateway HTTP API](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html)が呼び出し元からのリクエストを受信し、VPCリンク（API GatewayのVPCへのプライベート接続）を通じてALBに渡します。呼び出し元は認証されたHTTPSエンドポイントを取得し、ロードバランサーはインターネットに公開されません。
+
+## 使用方法
+
+### Container Serviceの追加
+
+TypeScriptプロジェクトにコンテナサービスを追加するには、2つの方法があります：
+
+<RunGenerator generator="ts#container" />
+
+:::tip[プロジェクトの前提条件]
+まず<Link path="/guides/typescript-project">`ts#project`</Link>ジェネレーターを使用して、サービスを追加するプロジェクトを作成してください。
+:::
+
+### オプション
+
+<GeneratorParameters generator="ts#container" />
+
+`infra`、`ingress`、`auth`オプションは相互に依存しています。`infra`を`none`に設定すると、ジェネレーターはインフラストラクチャを生成せず、警告とともに`ingress`と`auth`を無視します。`ingress`は`infra`が`ecs`に設定されている場合にのみ適用されます。`auth`は`ingress`が`http-api`に設定されている場合にのみ適用されます。これは、`private`サービスには認証するHTTP APIがないためです。
+
+## ジェネレーターの出力
+
+ジェネレーターは、プロジェクトに以下のファイルを追加します。ソースフォルダーは`name`オプションに従って命名されます。省略した場合は`service`になります：
+
+<FileTree>
+  - your-project/
+    - src/
+      - service/ (または選択した名前)
+        - server.ts HTTPルート：`GET /health`とサンプルルート`GET /hello`
+        - index.ts `PORT`を読み取りサーバーを起動するエントリーポイント。バンドルと`<name>-serve`ターゲットはこのファイルから開始されます
+        - Dockerfile コンテナイメージ定義
+        - .dockerignore イメージビルドコンテキストから除外されるファイル
+    - rolldown.config.ts `index.ts`のバンドルエントリーで更新されます
+    - project.json `bundle`ターゲットと、サービス用の`<name>-serve`、`<name>-docker`、`<name>-trivy`ターゲットで更新されます
+</FileTree>
+
+ターゲット名は`name`オプションで始まります。省略した場合は`service`で始まります。例えば、名前なしの場合、ターゲットは`service-serve`、`service-docker`、`service-trivy`となり、`--name=orders`の場合は`orders-serve`、`orders-docker`、`orders-trivy`となります。`bundle`ターゲットは、プロジェクト内のすべてのバンドルされたエントリーポイントで共有されます。
+
+<OptionFilter when={{ infra: 'ecs' }} description="ECS service infrastructure">
+### インフラストラクチャ
+
+<Snippet name="shared-constructs" />
+
+サービスをデプロイするために、以下のファイルが生成されます：
+
+<Infrastructure>
+<Fragment slot="cdk">
+<FileTree>
+  - packages/common/constructs/src
+    - app
+      - services
+        - \<name>.ts サービス用のCDKコンストラクト。イメージ、`ingress`、`auth`が設定されています
+    - core
+      - container
+        - ecs-service.ts Fargate上のECSサービス用の汎用コンストラクト
+</FileTree>
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - app
+      - services
+        - \<name>
+          - \<name>.tf サービス用のモジュール。イメージを公開し、URLをランタイム設定に書き込みます
+    - core
+      - container
+        - ecs-service
+          - ecs-service.tf Fargate上のECSサービス用の汎用モジュール
+          - variables.tf 汎用モジュールの入力
+          - outputs.tf 汎用モジュールの出力
+</FileTree>
+</Fragment>
+</Infrastructure>
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'none' }} description="No infrastructure is vended for infra=none">
+`infra`を`none`に設定すると、CDKコンストラクトやTerraformモジュールは生成されず、サービスはローカルでのみ実行されます。このモードでは、`ingress`と`auth`オプションは無視されます。
+</OptionFilter>
+
+#### アーキテクチャ
+
+<ArchitectureDiagram />
+
+## サービスをローカルで実行する
+
+`<name>-serve`ターゲットは、コンテナなしでマシン上でサーバーを実行します：
+
+<NxCommands commands={['run your-project:service-serve']} />
+
+サーバーは`PORT`環境変数のポートでリッスンします。`<name>-serve`ターゲットは、ジェネレーターが割り当てたポートに設定します。8081から開始し、ワークスペース内の他のプロジェクトがすでに使用しているポートをスキップします。コンテナ内では、サーバーはポート8080でリッスンします。
+
+ヘルスルートでサーバーが起動していることを確認します。これはステータス200と`{"status":"ok"}`を返します：
+
+```bash
+curl http://localhost:<port>/health
+```
+
+サーバーには、独自のルートに置き換えるサンプルルートもあります。`GET /hello?name=<x>`は`{"message":"Hello, <x>!"}`を返し、`name`のデフォルトは`world`です。その他のパスはステータス404を返します。
+
+## イメージのビルドとスキャン
+
+`<name>-docker`ターゲットは、サービスのlinux/arm64イメージをビルドします。最初に`bundle`ターゲットを実行するため、イメージにはバンドルされたサーバーが含まれます。次に、`Dockerfile`と`.dockerignore`をバンドル出力フォルダー`dist/<project root>/bundle/container/<name>`にコピーし、そのフォルダーをビルドコンテキスト（イメージビルドが読み取れるファイル）としてイメージをビルドします。ワークスペースで設定されているコンテナエンジン、`docker`または[Finch](https://runfinch.com/)を使用します。このターゲットは、プロジェクト内のすべてのイメージをビルドする集約`docker`ターゲットの一部として実行されます。
+
+<NxCommands commands={['run your-project:service-docker']} />
+
+ロードバランサーのターゲットグループ（ロードバランサーがリクエストを送信するタスクのリスト）のみが`GET /health`をチェックして、タスクがトラフィックの準備ができているかどうかを判断します。ECSはDockerfileの`HEALTHCHECK`命令を無視します。イメージのビルドと公開の詳細については、<Link path="/guides/docker-bundling">Docker Bundling</Link>を参照してください。
+
+### イメージスキャン
+
+<Snippet name="trivy-image-scan" parentHeading="イメージスキャン" />
+
+<OptionFilter when={{ infra: 'ecs' }} description="Deploying the ECS service">
+## サービスのデプロイ
+
+### インフラストラクチャへのサービスの追加
+
+コンストラクトとモジュールはVPCを作成しません。スタックまたはルートモジュールでVPCを作成またはインポートし、それを渡します。タスクとロードバランサーは、NATゲートウェイ（プライベートサブネットがアウトバウンド接続を行えるようにする管理されたゲートウェイ）またはVPCエンドポイント（VPCからAWSサービスへのプライベート接続）を通じてAWSサービスに到達する、エグレス付きのプライベートサブネットで実行されます。
+
+<Infrastructure>
+<Fragment slot="cdk">
+CDKコンストラクトは`common/constructs`に作成され、サービスにちなんで命名されます。新しいVPCでの使用例：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyService } from '@my-scope/common-constructs';
+import { Stack, StackProps } from 'aws-cdk-lib';
+import { SubnetType, Vpc } from 'aws-cdk-lib/aws-ec2';
+import { Construct } from 'constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const vpc = new Vpc(this, 'Vpc', { natGateways: 1 });
+
+    new MyService(this, 'MyService', {
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    });
+  }
+}
+```
+
+既存のVPCを使用するには、`Vpc.fromLookup(this, 'Vpc', { vpcId: '<vpc-id>' })`で検索し、`vpc`として渡します。
+</Fragment>
+<Fragment slot="terraform">
+Terraformモジュールは`common/terraform`に作成されます。サービスのイメージは共有アセットリポジトリに公開されるため、デプロイごとに`core/asset-ecr`モジュールを1回インスタンス化し、その出力をすべてのサービスモジュールに渡します。また、サービスが<Link path="/guides/runtime-config">ランタイム設定</Link>を読み取るAWS AppConfigアプリケーションを保持する、共有`runtime_config_appconfig`モジュールの出力も渡します：
+
+```hcl title="packages/infra/src/main.tf"
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
+}
+
+module "my_service" {
+  source = "../../common/terraform/src/app/services/my-service"
+
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = aws_subnet.private[*].id
+
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+  asset_ecr_repository_arn = module.asset_ecr.repository_arn
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+}
+```
+</Fragment>
+</Infrastructure>
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'ecs', ingress: 'http-api' }} description="HTTP API request limits">
+### リクエスト制限
+
+API Gatewayは30秒後にサービスの待機を停止し、呼び出し元にエラーを返します。この統合タイムアウトを引き上げることはできません。HTTP APIが受け入れる最大のリクエストペイロードは10 MBで、この制限も引き上げることはできません。両方の値は[Amazon API Gateway quotas for HTTP APIs](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-quotas.html)ページから来ています。
+
+したがって、30秒より長く実行されるリクエストや、長時間にわたってデータをストリーミングするレスポンスは、HTTP APIを通じて機能しません。それらの場合は、`ingress`を`private`に設定し、VPC内から内部ロードバランサーを呼び出してください。
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'ecs' }} description="Networking, security, calling, advanced configuration, cost and destroy">
+### NATゲートウェイなしでの実行
+
+タスクが起動すると、ECSはイメージをプルし、タスクに代わってログを送信します。サーバーコードもAWSサービスを呼び出す可能性があります。NATゲートウェイのないプライベートサブネットでは、これらの呼び出しのそれぞれにVPCエンドポイントが必要です。適切なエンドポイントがないと、タスクは起動に失敗するか、AWSを呼び出すときにタイムアウトします。
+
+VPCに以下のエンドポイントを作成し、`<region>`をAWSリージョンに置き換えてください：
+
+| エンドポイント | タイプ | 使用者 |
+| --- | --- | --- |
+| `com.amazonaws.<region>.ecr.api` | Interface | ECS、Amazon ECRで認証しイメージを検索するため |
+| `com.amazonaws.<region>.ecr.dkr` | Interface | ECS、Amazon ECRからイメージをプルするため |
+| `com.amazonaws.<region>.s3` | Gateway | ECS、Amazon ECRがAmazon S3に保存するイメージレイヤーをダウンロードするため |
+| `com.amazonaws.<region>.logs` | Interface | コンテナのログ出力、Amazon CloudWatch Logsに送信されます |
+| `com.amazonaws.<region>.secretsmanager` | Interface | ECS、タスク起動時にコンテナに渡すシークレットを読み取るため |
+| `com.amazonaws.<region>.appconfigdata` | Interface | コード、AWS AppConfigから<Link path="/guides/runtime-config">ランタイム設定</Link>を読み取るため |
+| `com.amazonaws.<region>.sts` | Interface | コード、AWS STSから一時的な認証情報をリクエストするとき（例：別のロールを引き受ける） |
+
+インターフェースエンドポイントには、タスクからのHTTPS（ポート443）を許可するセキュリティグループが必要です。Amazon ECRエンドポイントの詳細については、[Amazon ECR interface VPC endpoints](https://docs.aws.amazon.com/AmazonECR/latest/userguide/vpc-endpoints.html)を参照してください。
+
+### セキュリティのデフォルト
+
+生成されたインフラストラクチャは、デフォルトで以下の設定を適用します：
+
+- ロードバランサーは内部です。`0.0.0.0/0`または`::/0`からのインバウンドトラフィックを許可するセキュリティグループはありません。
+- タスクはプライベートサブネットで実行され、パブリックIPアドレスを取得しません。
+- ロードバランサーは、VPCリンク（`http-api`）またはVPCのアドレス範囲（`private`）からのトラフィックのみを受け入れます。タスクは、コンテナポートでロードバランサーからのトラフィックのみを受け入れます。
+- タスクは、ポート443でのみアウトバウンドトラフィックを送信できます。データベースへの接続は、データベースポートを追加します。
+- タスクロール（サーバーコードが実行されるロール）は、ユーザーまたは接続がさらに許可を付与するまで、AWS AppConfigからランタイム設定を読み取ることのみができます。
+- 実行ロール（ECSがタスクを起動するために使用するロール）は、サービスのイメージをプルし、ロググループに書き込み、リストしたシークレットを読み取ることのみができます。
+- シークレットは、AWS Secrets ManagerまたはAWS Systems Manager Parameter Storeへの参照としてのみコンテナに到達し、プレーンな環境値としては決して到達しません。
+- コンテナは読み取り専用のルートファイルシステムを持ち、uid 1000（非rootユーザー）として実行されます。ECS Exec（実行中のタスクへのシェルアクセス）はオフです。
+- ヘルスチェックに失敗したデプロイは停止し、以前のバージョンにロールバックします。
+- HTTP APIはアクセスログを書き込み、リクエストをスロットルします。特に選択しない限り、IAMで認証します。
+- ログは1年間保持されます。
+
+生成されたコードは、以下の[Checkov](https://www.checkov.io/)チェック（Checkovはインフラストラクチャコードを安全でない設定についてスキャンします）を抑制し、各抑制の横に理由を記載しています：
+
+- `CKV_AWS_91`はロードバランサーのアクセスログを要求します。代わりに、HTTP APIアクセスログまたはサービス自身のログがリクエストを記録します。
+- `CKV_AWS_2`と`CKV_AWS_103`は、TLSを使用したHTTPSリスナーを要求します。ロードバランサーは内部であり、VPC内の呼び出し元のみが到達できるため、プレーンHTTPでリッスンします。`http-api`の場合、TLSはAPI Gatewayで終了します。
+
+Terraformモジュールは、同じHTTPリスナーの理由で`CKV2_AWS_20`と`CKV_AWS_378`もスキップし、サービスを破棄できるようにロードバランサーの削除保護がオフになっているため`CKV_AWS_150`もスキップします。
+
+### サービスの呼び出し
+
+サービスのURLは、<Link path="/guides/runtime-config">ランタイム設定</Link>に`connection.services.<NameClassName>`として書き込まれます。ここで、`<NameClassName>`はPascalCaseのサービス名です。`--name=orders`の場合、キーは`Orders`です。名前がない場合、サービス名は`<project>-service`となるため、`my-project`というプロジェクトの場合、キーは`MyProjectService`です。その場合でも、ソースフォルダーとターゲットプレフィックスは`service`のままです。
+
+<Tabs syncKey="auth">
+<TabItem label="IAM" _filter={{ ingress: 'http-api', auth: 'iam' }}>
+呼び出し元は、APIを呼び出せるAWS認証情報を使用して、`execute-api`サービス用の[AWS Signature Version 4 (SigV4)](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv.html)で各リクエストに署名します。API Gatewayは、サービスに到達する前に、有効な署名のないリクエストを拒否します。
+
+<Infrastructure>
+<Fragment slot="cdk">
+`grantInvoke`でロールまたは関数にサービスを呼び出す権限を付与します：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const service = new MyService(this, 'MyService', { vpc });
+service.grantInvoke(myFunction);
+```
+</Fragment>
+<Fragment slot="terraform">
+APIの実行ARN（サービスのモジュールが`api_execution_arn`として出力します）に対する`execute-api:Invoke`ポリシーで、ロールにサービスを呼び出す権限を付与します：
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_role_policy" "invoke_my_service" {
+  role = aws_iam_role.caller.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["execute-api:Invoke"]
+      Resource = ["${module.my_service.api_execution_arn}/*"]
+    }]
+  })
+}
+```
+</Fragment>
+</Infrastructure>
+</TabItem>
+<TabItem label="Cognito" _filter={{ ingress: 'http-api', auth: 'cognito' }}>
+呼び出し元は、`Authorization`ヘッダーでAmazon Cognitoユーザープールによって発行されたJSON Web Token（JWT）を送信します。HTTP APIは、トークンがユーザープールから来ており、受け入れられたアプリクライアントの1つに発行されたことを確認します。
+
+<Infrastructure>
+<Fragment slot="cdk">
+Cognitoサービス用に生成されたコンストラクトは、`auth`プロップを取りません。代わりに、必須の`identity`プロップでユーザープールとアプリクライアントを渡します：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+new MyService(this, 'MyService', {
+  vpc,
+  identity: { userPool, userPoolClient },
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+サービスのモジュール`app/services/<name>/<name>.tf`の必須変数`user_pool_id`と`user_pool_client_ids`を設定します。モジュールはそれらを`ecs-service`モジュールに渡します。
+</Fragment>
+</Infrastructure>
+</TabItem>
+<TabItem label="None" _filter={{ ingress: 'http-api', auth: 'none' }}>
+HTTP APIは認証なしでリクエストを受け入れます。URLを知っている人は誰でもサービスを呼び出せるため、独自のコードで呼び出し元を確認してください。
+</TabItem>
+<TabItem label="Private" _filter={{ ingress: 'private' }}>
+`private`サービスにはHTTP APIがありません。そのURLは内部ロードバランサーのアドレスであり、VPC内の呼び出し元のみが到達できます。ロードバランサーは、リスナーポートでVPCのアドレス範囲からのトラフィックを受け入れます。例えば、同じVPC内のLambda関数または別のECSサービスから呼び出します。
+</TabItem>
+</Tabs>
+
+### 高度な設定
+
+生成されたサービスは、名前、`ingress`、`auth`を設定します。以下の例では、生成されたサービスが渡さない設定や、インスタンスごとに`ingress`と`auth`を選択するために、汎用の`EcsService`コンストラクトと`ecs-service`モジュールを直接使用します。
+
+CDKでは、`common-constructs`パッケージがサービスのコンストラクトの隣に`EcsService`をエクスポートするため、同じ方法でインポートします：`import { EcsService } from '@my-scope/common-constructs'`。生成されたコンストラクトは`EcsService`を拡張し、他のすべてのプロップを渡します。例えば、`cluster`、`loadBalancer`、`environment`、`secrets`、`grantTaskRole`などです。オプションの`image`プロップは、プロジェクトからビルドされたイメージを置き換えます。`auth`プロップはありません。Cognitoサービスは代わりに`identity`を取り、他のサービスは常に生成された`auth`を使用します。
+
+Terraformでは、サービスのモジュールは`ecs-service`モジュールの変数の一部のみを設定できます：`vpc_id`、`subnet_ids`、`cluster_arn`、`environment`、`secrets`、`task_role_policy_statements`、`tags`、およびCognitoサービスの場合は`user_pool_id`と`user_pool_client_ids`です。他の変数を設定するには、サービスのモジュール内の`module "ecs_service"`ブロックを編集します。
+
+#### ビルド済みイメージ
+
+すでにビルドされているイメージ（例：パブリックレジストリから）を実行するには、そのURIを渡します。ローカルでは何もビルドされません。プライベートAmazon ECRリポジトリのイメージの場合、CDKはそのリポジトリに対する実行ロールのプルアクセスを付与します。Terraformは、リポジトリのARNを`image_repository_arn`として渡した場合にのみプルアクセスを付与します。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+new EcsService(this, 'Prebuilt', {
+  serviceName: 'Prebuilt',
+  vpc,
+  image: { imageUri: 'public.ecr.aws/my-org/my-image@sha256:<digest>' },
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl
+module "prebuilt" {
+  source = "../../common/terraform/src/core/container/ecs-service"
+
+  service_name = "Prebuilt"
+  vpc_id       = aws_vpc.main.id
+  subnet_ids   = aws_subnet.private[*].id
+  image_uri    = "public.ecr.aws/my-org/my-image@sha256:<digest>"
+  # For an image in a private Amazon ECR repository, also pass:
+  # image_repository_arn = aws_ecr_repository.my_image.arn
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+#### ロードバランサーなしのワーカー
+
+ワーカーはキューから読み取るか、バックグラウンドジョブを実行し、何も呼び出しません。ロードバランサーをオフにして、ロードバランサー、HTTP API、URLのないサービスを取得します。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+new EcsService(this, 'Worker', {
+  serviceName: 'Worker',
+  vpc,
+  image: { directory: '<path to the folder with the Dockerfile>' },
+  loadBalancer: false,
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+ビルド済みイメージと同様に、Terraformは`image_repository_arn`を渡した場合にのみ、プライベートAmazon ECRリポジトリに対するプルアクセスを付与します。
+
+```hcl
+module "worker" {
+  source = "../../common/terraform/src/core/container/ecs-service"
+
+  service_name  = "Worker"
+  vpc_id        = aws_vpc.main.id
+  subnet_ids    = aws_subnet.private[*].id
+  image_uri     = "<image uri pinned by digest>"
+  load_balancer = false
+  # For an image in a private Amazon ECR repository, also pass:
+  # image_repository_arn = aws_ecr_repository.my_image.arn
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+#### 1つのスタック内の複数のサービス
+
+各サービスは、渡さない限り独自のECSクラスターを作成します。複数のサービスを1つのクラスターで実行するには、同じクラスターをそれぞれに渡します。
+
+各HTTP APIサービスは、サービスがクラスターを共有している場合でも、独自のVPCリンクを作成します。API Gatewayは、デフォルトでアカウントごとリージョンごとに10個のVPCリンクを許可し、増加をリクエストできます。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+const cluster = new Cluster(this, 'Cluster', { vpc });
+
+new MyService(this, 'MyService', { vpc, cluster });
+new MyOtherService(this, 'MyOtherService', { vpc, cluster });
+```
+
+</Fragment>
+<Fragment slot="terraform">
+各`ecs-service`モジュールに同じ`cluster_arn`を渡します。最初のサービスの`cluster_arn`出力が1つを提供します：
+
+```hcl
+cluster_arn = module.my_service.cluster_arn
+```
+
+</Fragment>
+</Infrastructure>
+
+#### 環境変数とシークレット
+
+プレーンな設定は`environment`に入れます。タスク定義を読み取れる人は誰でも読み取れるため、シークレット値をそこに入れないでください。代わりに、シークレットを参照として渡します。実行ロールは、リストしたシークレットのみを読み取ることができます。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+new EcsService(this, 'MyService', {
+  // ...
+  environment: { LOG_LEVEL: 'info' },
+  secrets: { API_KEY: Secret.fromSecretsManager(apiKeySecret) },
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl
+environment = { LOG_LEVEL = "info" }
+secrets     = { API_KEY = aws_secretsmanager_secret.api_key.arn }
+```
+
+</Fragment>
+</Infrastructure>
+
+#### サイジングとスケーリング
+
+各タスクは、デフォルトで256 CPUユニット（vCPUの4分の1）と512 MiBのメモリを取得します。サービスは1つのタスクを起動し、オートスケーリングは1つから2つのタスクを実行し続け、平均CPU使用率が70%を超えるとタスクを追加します。
+
+| 設定 | CDKプロップ | Terraform変数 | デフォルト |
+| --- | --- | --- | --- |
+| タスクあたりのCPUユニット | `cpu` | `cpu` | 256 |
+| タスクあたりのメモリ（MiB） | `memoryLimitMiB` | `memory` | 512 |
+| 起動時のタスク数 | `desiredCount` | `desired_count` | 1 |
+| 最小タスク数 | `minCapacity` | `min_capacity` | 1 |
+| 最大タスク数 | `maxCapacity` | `max_capacity` | 2 |
+| ターゲット平均CPU（%） | `targetCpuUtilizationPercent` | `target_cpu_utilization` | 70 |
+
+#### タスクロールの権限
+
+サービスのコンストラクトまたはモジュールのタスクロールは、ランタイム設定への読み取りアクセスのみで開始します。コードが必要とする権限を追加します：
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+new EcsService(this, 'MyService', {
+  // ...
+  grantTaskRole: (taskRole) => myTable.grantReadData(taskRole),
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl
+task_role_policy_statements = [{
+  Effect   = "Allow"
+  Action   = ["dynamodb:GetItem", "dynamodb:Query"]
+  Resource = [aws_dynamodb_table.my_table.arn]
+}]
+```
+
+</Fragment>
+</Infrastructure>
+
+#### コンテナユーザー
+
+タスク定義は、uid 1000（非rootユーザー）としてコンテナを実行します。これは、提供されたDockerfileが設定する`node`ユーザーと一致します。別のユーザーとして実行するには、CDKの`user`プロップまたはTerraformの`container_user`変数を設定します。Terraformは`0`と`root`を拒否します。
+
+| 設定 | CDKプロップ | Terraform変数 | デフォルト |
+| --- | --- | --- | --- |
+| コンテナが実行されるユーザー | `user` | `container_user` | `'1000'`（CDK）、`"1000:1000"`（Terraform） |
+
+#### CORSとスロットリング
+
+これらの設定は、`ingress`が`http-api`に設定されている場合にのみ適用されます。CORS（クロスオリジンリソース共有）は、どのWebサイトがブラウザからサービスを呼び出せるかを決定します。デフォルトでは、HTTP APIは任意のオリジンから、任意のメソッドで、`authorization`、`content-type`、`x-amz-content-sha256`、`x-amz-date`、`x-amz-security-token`ヘッダーを使用したブラウザリクエストを受け入れます。最後の3つは、SigV4署名が追加するヘッダーです。HTTP APIは、リクエストを毎秒10,000の安定したレートにスロットルし、最大5,000のバーストを許可します。
+
+| 設定 | CDK | Terraform変数 | デフォルト |
+| --- | --- | --- | --- |
+| 許可されたCORSオリジン | `restrictCorsTo(...origins)`メソッド、または`corsPreflight`プロップ | `cors_allow_origins` | 任意のオリジン（`["*"]`） |
+| その他のCORS設定 | `corsPreflight`プロップ | none | 任意のメソッド、および上記のヘッダー |
+| スロットリング | `throttle`プロップ | none | `{ rateLimit: 10000, burstLimit: 5000 }` |
+
+`corsPreflight`プロップはデフォルト全体を置き換えるため、呼び出し元が送信するすべてのヘッダーをリストします。`restrictCorsTo`メソッドは他のCORS設定を保持し、許可されたオリジンのみを変更します：
+
+```ts
+const service = new MyService(this, 'MyService', { vpc });
+service.restrictCorsTo('https://app.example.com');
+```
+
+Terraformでは、`cors_allow_origins`と`container_user`は`ecs-service`モジュールの変数です。サービスのモジュールはそれらを渡さないため、その`module "ecs_service"`ブロックで設定します。スロットリング値は`ecs-service.tf`で固定されています。
+
+### コスト
+
+コンテナサービスは、Lambda関数とは異なり、アイドル状態でも課金されます。これらの部分は、誰かがサービスを呼び出すかどうかに関係なく、時間単位で課金されます：
+
+- Fargateタスク、vCPUごとおよびメモリのGBごと。`desiredCount`と`minCapacity`は少なくとも1つのタスクを実行し続けます。
+- Application Load Balancer、時間ごとおよびロードバランサー容量ユニットごと。
+- インターフェースVPCエンドポイント、各アベイラビリティーゾーンで時間ごと、またはNATゲートウェイ、時間ごとおよび処理するデータのGBごと。
+- CloudWatch Logsのログストレージ、およびAmazon ECRのイメージストレージ。
+
+HTTP APIはリクエストごとに課金されます。リージョンとトラフィックのコストを見積もるには、[AWS Pricing Calculator](https://calculator.aws/)を使用してください。
+
+### サービスの破棄
+
+サービスを削除するには、それを保持するスタックまたはTerraform設定を破棄します：
+
+<Infrastructure>
+<Fragment slot="cdk">
+インフラストラクチャプロジェクトの`destroy`ターゲットを実行します。これは`cdk destroy`を実行します：
+
+<NxCommands commands={['run infra:destroy']} />
+</Fragment>
+<Fragment slot="terraform">
+インフラストラクチャプロジェクトの`destroy`ターゲットを実行します：
+
+<NxCommands commands={['run infra:destroy']} />
+</Fragment>
+</Infrastructure>
+
+次に、AWSコンソールまたはAWS CLIで、これらがなくなっていることを確認します：ECSサービスとクラスター、ロードバランサーとそのターゲットグループ、HTTP APIとそのVPCリンク、およびサービスのログループ。イメージはAmazon ECRに残り、CDKアセットリポジトリまたは共有`asset-ecr`リポジトリにあります。不要になった場合は削除してください。VPCはあなたのものなので、サービスを破棄してもそのまま残ります。
+</OptionFilter>
+
+## サービスの接続
+
+<Link path="/guides/connection">`connection`</Link>ジェネレーターを使用して、サービスをワークスペース内の他のプロジェクトに接続します：
+
+<RunGenerator generator="connection" />
+
+Webサイトまたはエージェントがサービスを呼び出すことができ、サービスはリレーショナルデータベースまたはDynamoDBテーブルを使用できます。各接続には独自のガイドがあります：
+
+- <Link path="guides/connection/react-container">React to Container Service</Link>
+- <Link path="guides/connection/ts-agent-container">TypeScript Agent to Container Service</Link>
+- <Link path="guides/connection/py-agent-container">Python Agent to Container Service</Link>
+- <Link path="guides/connection/ts-container-rdb">TypeScript Container Service to Relational Database</Link>
+- <Link path="guides/connection/ts-container-dynamodb">TypeScript Container Service to DynamoDB</Link>
+
+各接続には条件もあります：
+
+- Webサイトまたはエージェントは、`ingress`が`http-api`に設定されているサービスにのみ接続できます。
+- エージェントは、`auth`が`iam`に設定されているサービスにのみ接続できます。
+- データベースまたはDynamoDB接続には、`infra`が`ecs`に設定されているサービスが必要です。

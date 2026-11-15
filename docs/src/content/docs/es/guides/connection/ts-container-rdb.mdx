@@ -1,0 +1,154 @@
+---
+title: Servicio de Contenedor TypeScript a Base de Datos Relacional
+description: Conectar un servicio de contenedor TypeScript a una Base de Datos Relacional
+when:
+  sourceType: ts#container
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+El generador `connection` permite que un <Link path="guides/ts-container">servicio de contenedor TypeScript</Link> use un proyecto de <Link path="guides/ts-rdb">Base de Datos Relacional</Link>. Agrega un módulo que devuelve el cliente Prisma de la base de datos y prepara la imagen Docker del servicio para conexiones SSL a Amazon Aurora.
+
+## Cómo funciona esto
+
+Un servicio de contenedor con `infra=ecs` se ejecuta como tareas en Amazon ECS (Elastic Container Service) en tu VPC. Cada tarea se ejecuta como el rol de tarea del servicio, un rol de IAM que no tiene permisos hasta que los otorgas, y se encuentra en el grupo de seguridad del servicio, que solo permite tráfico saliente en el puerto 443. Para usar la base de datos, el servicio necesita dos cosas que no tiene por defecto:
+
+- Permiso de IAM para `rds-db:connect`, para que pueda iniciar sesión en la base de datos con autenticación IAM.
+- Un par de reglas de grupo de seguridad en el puerto de la base de datos: una regla de entrada en el grupo de seguridad de la base de datos y una regla de salida en el grupo de seguridad del servicio. Sin la regla de salida, el servicio no puede alcanzar la base de datos, porque su grupo de seguridad solo permite el puerto 443 de salida.
+
+El generador rechaza un servicio con `infra=none`, porque tal servicio no tiene un rol de tarea al cual otorgar acceso.
+
+## Requisitos previos
+
+Antes de usar este generador, asegúrate de tener:
+
+1. Un servicio de contenedor con `infra=ecs` (generado usando el generador <Link path="guides/ts-container">`ts#container`</Link>)
+2. Un proyecto <Link path="guides/ts-rdb">`ts#rdb`</Link>
+
+## Uso
+
+### Ejecutar el Generador
+
+<RunGenerator generator="connection" />
+
+Selecciona el proyecto que contiene tu servicio de contenedor como origen y tu proyecto de base de datos relacional como destino. Si el proyecto de origen contiene varios componentes, establece `sourceComponent` con el nombre del servicio.
+
+### Opciones
+
+<GeneratorParameters generator="connection" />
+
+## Salida del Generador
+
+El generador cambia los siguientes archivos en el directorio de origen de tu servicio:
+
+<FileTree>
+
+- packages/my-project/src/my-service
+  - my-database.ts Exporta `getMyDatabase`, que devuelve el cliente Prisma de la base de datos
+  - Dockerfile Instala el paquete CA de Amazon RDS para conexiones SSL a Aurora
+
+</FileTree>
+
+Además, el objetivo `<service-name>-serve` del servicio se actualiza para depender del objetivo `dev` de la base de datos.
+
+## Usar la Base de Datos en el Servicio
+
+Importa el getter en el código de tu servicio y llámalo donde manejes una solicitud:
+
+```ts title="packages/my-project/src/my-service/orders.ts"
+import { getMyDatabase } from './my-database.js';
+
+export const listOrders = async () => {
+  const myDatabase = await getMyDatabase();
+  return myDatabase.order.findMany();
+};
+```
+
+El cliente de la base de datos lee los detalles de conexión de la base de datos desde la <Link path="guides/runtime-config">configuración de tiempo de ejecución</Link>, usando la variable de entorno `RUNTIME_CONFIG_APP_ID`.
+
+El servicio de contenedor generado establece `RUNTIME_CONFIG_APP_ID` y otorga a su rol de tarea acceso de lectura a la configuración de tiempo de ejecución, por lo que no necesitas agregar ninguno de los dos tú mismo. En Terraform, el bloque de módulo del servicio debe pasar `appconfig_application_id` y `appconfig_application_arn`, como se muestra en la <Link path="guides/ts-container">guía de contenedor</Link>.
+
+## Infraestructura
+
+El generador no cambia tu stack o módulo raíz de Terraform. En su lugar, imprime el código a agregar, que se muestra a continuación para un servicio llamado `my-service` y una base de datos llamada `my-database`. Hasta que lo agregues, el servicio no puede alcanzar el puerto de la base de datos y la base de datos rechaza su autenticación IAM.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+En el ejemplo, `myService` es tu constructo `MyService` y `myDatabase` es tu constructo `MyDatabase`:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myDatabase.allowDefaultPortFrom(myService);
+myDatabase.grantConnect(myService.taskRole);
+```
+
+`allowDefaultPortFrom` agrega la regla de entrada en el grupo de seguridad de la base de datos y la regla de salida en el grupo de seguridad del servicio. `grantConnect` otorga `rds-db:connect` al rol de tarea del servicio.
+
+</Fragment>
+<Fragment slot="terraform">
+
+En el ejemplo, `module "my_service"` despliega el servicio y `module "my_database"` despliega la base de datos. Las fuentes de datos `data "aws_region" "current"` y `data "aws_caller_identity" "current"` se declaran en el `providers.tf` generado:
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_role_policy" "my_service_my_database_connect" {
+  name = "my-service-my-database-connect"
+  role = module.my_service.task_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["rds-db:connect"]
+        Resource = ["arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"]
+      },
+    ]
+  })
+}
+
+resource "aws_vpc_security_group_ingress_rule" "my_service_to_my_database" {
+  description                  = "Allow the my-service container service to connect to the database"
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_service.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "my_service_to_my_database" {
+  description                  = "Allow the my-service container service to reach the database"
+  security_group_id            = module.my_service.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+### Requisitos de SSL al Conectarse sin RDS Proxy
+
+Cuando el servicio se conecta al clúster Aurora directamente, sin RDS Proxy, Node.js debe confiar en la autoridad de certificación de Amazon RDS. El generador agrega este paso al Dockerfile del servicio, antes de su línea `EXPOSE`:
+
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \
+    -o /usr/local/share/ca-certificates/rds-bundle.crt && \
+    update-ca-certificates
+```
+
+Establece la variable de entorno `NODE_EXTRA_CA_CERTS` del servicio en `/usr/local/share/ca-certificates/rds-bundle.crt`, para que Node.js lea el paquete. Cuando uses RDS Proxy no necesitas establecerla. Para más detalles, consulta la [documentación de Amazon RDS SSL/TLS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html).
+
+## Desarrollo Local
+
+<NxCommands commands={["<service-name>-serve <project-name>"]} />
+
+Esto inicia el servicio y la base de datos Docker local de la base de datos. Con `LOCAL_DEV=true` establecido, el cliente Prisma se conecta a la base de datos local en lugar de Aurora.

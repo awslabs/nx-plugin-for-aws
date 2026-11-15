@@ -1,0 +1,122 @@
+---
+title: TypeScript Container Service 到 DynamoDB
+description: 将 TypeScript 容器服务连接到 TypeScript DynamoDB 项目
+when:
+  sourceType: ts#container
+  targetType: ts#dynamodb
+---
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 生成器让 <Link path="guides/ts-container">TypeScript 容器服务</Link> 使用 <Link path="guides/ts-dynamodb">TypeScript DynamoDB</Link> 项目。它配置本地开发，使服务和 DynamoDB Local 一起启动，并打印服务所需的授权。
+
+## 工作原理
+
+使用 `infra=ecs` 的容器服务在 Amazon ECS (Elastic Container Service) 上作为任务运行。每个任务以服务的任务角色运行，这是一个 IAM 角色，在您授予更多权限之前只能读取运行时配置。要读写表，任务角色需要对表及其索引的 DynamoDB 操作权限，以及使用表的 AWS KMS 加密密钥的权限。
+
+生成器会拒绝 `infra=none` 的服务，因为这样的服务没有任务角色可以授予访问权限。
+
+## 前提条件
+
+在使用此生成器之前，请确保您有：
+
+1. 一个使用 `infra=ecs` 的容器服务（使用 <Link path="guides/ts-container">`ts#container`</Link> 生成器生成）
+2. 一个 <Link path="guides/ts-dynamodb">`ts#dynamodb`</Link> 项目
+
+## 使用方法
+
+### 运行生成器
+
+<RunGenerator generator="connection" />
+
+选择包含您的容器服务的项目作为源，选择您的 DynamoDB 项目作为目标。如果源项目包含多个组件，请将 `sourceComponent` 设置为服务的名称。
+
+### 选项
+
+<GeneratorParameters generator="connection" />
+
+## 生成器输出
+
+生成器会更新服务的 `<service-name>-serve` 目标（在 `project.json` 中），使其依赖于 DynamoDB 项目的 `dev` 目标。不会修改源文件。
+
+## 在服务中使用 DynamoDB
+
+从 DynamoDB 包导入实体工厂，并在处理请求的地方使用它们：
+
+```ts title="packages/my-project/src/my-service/examples.ts"
+import { createExampleEntity } from '@my-scope/my-table';
+
+export const listExamples = async () => {
+  const entity = await createExampleEntity();
+  const result = await entity.scan.go();
+  return result.data;
+};
+```
+
+## 基础设施
+
+生成器不会更改您的堆栈或根 Terraform 模块。相反，它会打印要添加的代码，下面显示了名为 `my-service` 的服务和名为 `my-table` 的表的示例。在您添加它之前，服务对表的请求将被拒绝。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+在示例中，`myService` 是您的 `MyService` 构造，`myTable` 是您的 `MyTable` 构造：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myTable.grantReadWriteData(myService.taskRole);
+```
+
+`grantReadWriteData` 将 DynamoDB 和 KMS 权限都授予服务的任务角色。
+
+</Fragment>
+<Fragment slot="terraform">
+
+在示例中，`module "my_service"` 部署服务，`module "my_table"` 部署表：
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_role_policy" "my_service_my_table_access" {
+  name = "my-service-my-table-access"
+  role = module.my_service.task_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:Scan",
+          "dynamodb:BatchGetItem", "dynamodb:BatchWriteItem",
+        ]
+        Resource = [
+          module.my_table.table_arn,
+          "${module.my_table.table_arn}/index/*",
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey",
+        ]
+        Resource = [module.my_table.kms_key_arn]
+      },
+    ]
+  })
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+## 本地开发
+
+<NxCommands commands={["<service-name>-serve <project-name>"]} />
+
+这会启动服务和 DynamoDB Local。当设置 `LOCAL_DEV=true` 时，`getDynamoDBClient()` 和 `resolveTableName()` 会连接到 DynamoDB Local 而不是 AWS。

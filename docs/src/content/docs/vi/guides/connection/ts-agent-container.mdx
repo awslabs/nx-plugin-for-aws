@@ -1,0 +1,129 @@
+---
+title: TypeScript Agent đến Container Service
+description: Kết nối TypeScript Agent với dịch vụ container TypeScript hoặc Python
+when:
+  sourceType: ts#agent
+  targetType:
+    - ts#container
+    - py#container
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Generator `connection` cho phép <Link path="guides/ts-agent">TypeScript Agent</Link> gọi một dịch vụ container được tạo bằng <Link path="guides/ts-container">`ts#container`</Link> hoặc <Link path="guides/py-container">`py#container`</Link>. Nó thêm một client vào dự án `agent-connection` dùng chung, client này đọc URL của dịch vụ từ cấu hình runtime và ký mỗi yêu cầu bằng thông tin xác thực AWS của chính agent.
+
+## Cách hoạt động
+
+Một dịch vụ container với `infra=ecs` chạy trên Amazon ECS (Elastic Container Service) đằng sau một Application Load Balancer nội bộ. Với `ingress=http-api` mặc định, một Amazon API Gateway HTTP API (một HTTPS endpoint được quản lý) tiếp cận load balancer đó thông qua VPC link, đây là kết nối riêng tư của API Gateway vào VPC của bạn. Agent gọi HTTP API.
+
+Client ký mỗi yêu cầu bằng SigV4, quy trình ký yêu cầu của AWS, sử dụng thông tin xác thực của vai trò agent. HTTP API chấp nhận yêu cầu khi vai trò đó có thể gọi `execute-api:Invoke` trên nó. HTTP API kết thúc bất kỳ yêu cầu nào mất hơn 30 giây, vì vậy một route chạy lâu hơn phải trả về sớm và hoàn thành công việc của nó ở chế độ nền.
+
+Generator từ chối một dịch vụ mà nó không thể tiếp cận theo cách này. Dịch vụ phải có `infra=ecs`, vì `infra=none` không tạo endpoint. Nó phải có `ingress=http-api`, vì một dịch vụ `private` chỉ có thể tiếp cận được từ bên trong VPC của nó. Nó phải có `auth=iam`, vì agent ký các yêu cầu của nó bằng thông tin xác thực IAM và không có token Cognito để gửi.
+
+## Điều kiện tiên quyết
+
+Trước khi sử dụng generator này, hãy đảm bảo bạn có:
+
+1. Một dự án <Link path="guides/ts-agent">`ts#agent`</Link>
+2. Một dịch vụ container với `infra=ecs`, `ingress=http-api` và `auth=iam` (được tạo bằng generator <Link path="guides/ts-container">`ts#container`</Link> hoặc <Link path="guides/py-container">`py#container`</Link>)
+
+## Cách sử dụng
+
+### Chạy Generator
+
+<RunGenerator generator="connection" />
+
+Chọn dự án của agent làm nguồn và dự án chứa dịch vụ container của bạn làm đích. Nếu một trong hai dự án chứa nhiều component, hãy đặt `sourceComponent` thành tên của agent và `targetComponent` thành tên của dịch vụ.
+
+### Tùy chọn
+
+<GeneratorParameters generator="connection" />
+
+## Kết quả của Generator
+
+Generator tạo các tệp sau trong dự án `agent-connection` dùng chung:
+
+<FileTree>
+
+- packages/common/agent-connection
+  - src
+    - app
+      - \<service-name>-client.ts Client đọc URL của dịch vụ từ cấu hình runtime và ký các yêu cầu bằng SigV4
+    - index.ts Xuất client
+
+</FileTree>
+
+Nó thêm `@aws-lambda-powertools/parameters`, `@aws-sdk/credential-providers` và `aws4fetch` vào dự án `agent-connection`, và làm cho target `<agent-name>-dev` của agent khởi động target `<service-name>-serve` của dịch vụ.
+
+## Sử dụng Client
+
+`<ServiceName>Client.create()` đọc URL của dịch vụ từ namespace `connection` của <Link path="guides/runtime-config">cấu hình runtime</Link>, dưới `services.<ServiceName>`. `fetch` của client nhận một đường dẫn tương đối với dịch vụ. Generator không thay đổi mã của agent. Để cho phép model gọi dịch vụ, hãy bọc client trong một tool:
+
+```ts title="packages/my-project/src/my-agent/agent.ts"
+import { Agent, tool } from '@strands-agents/sdk';
+import { MyServiceClient } from '@my-scope/agent-connection';
+import { z } from 'zod';
+
+export const getAgent = async () => {
+  const myService = await MyServiceClient.create();
+  const checkMyService = tool({
+    name: 'check_my_service',
+    description: 'Check whether the MyService container service is healthy',
+    inputSchema: z.object({}),
+    callback: async () => (await myService.fetch('/health')).status,
+  });
+
+  return new Agent({
+    tools: [checkMyService],
+  });
+};
+```
+
+`create()` ném lỗi khi `RUNTIME_CONFIG_APP_ID` không được đặt hoặc khi cấu hình runtime không có mục nhập cho dịch vụ.
+
+## Hạ tầng
+
+Vai trò của agent cần quyền để gọi HTTP API của dịch vụ. Generator không thay đổi stack hoặc module Terraform gốc của bạn. Thay vào đó, nó in mã để thêm, được hiển thị bên dưới cho một agent có tên `my-agent` và một dịch vụ có tên `my-service`. Cho đến khi bạn thêm nó, HTTP API từ chối các yêu cầu của agent với 403 Forbidden.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+Trong ví dụ, `myService` là construct `MyService` của bạn và `myAgent` là construct `MyAgent` của bạn:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myService.grantInvoke(myAgent);
+```
+
+`grantInvoke` cho phép vai trò của agent gọi `execute-api:Invoke` trên HTTP API của dịch vụ.
+
+</Fragment>
+<Fragment slot="terraform">
+
+Thêm câu lệnh vào `additional_iam_policy_statements` của agent, bên cạnh bất kỳ câu lệnh nào mà khối đã liệt kê. Trong ví dụ, `module "my_service"` triển khai dịch vụ:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+  # ...existing arguments...
+  additional_iam_policy_statements = [
+    {
+      Effect   = "Allow"
+      Action   = ["execute-api:Invoke"]
+      Resource = ["${module.my_service.api_execution_arn}/*"]
+    },
+  ]
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+## Phát triển cục bộ
+
+<NxCommands commands={["<agent-name>-dev <project-name>"]} />
+
+Điều này khởi động agent và target `<service-name>-serve` của dịch vụ. Target dev của agent đặt `LOCAL_DEV=true`, vì vậy client gọi dịch vụ tại `http://localhost:<port>` mà không cần ký. Port là port mà generator container đã gán cho dịch vụ.

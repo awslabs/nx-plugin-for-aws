@@ -1,0 +1,142 @@
+---
+title: React tới Container Service
+description: Kết nối một website React với một container service TypeScript hoặc Python
+when:
+  sourceType: ts#react-website
+  targetType:
+    - ts#container
+    - py#container
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Generator `connection` cho phép website React của bạn gọi một container service được tạo bằng <Link path="guides/ts-container">`ts#container`</Link> hoặc <Link path="guides/py-container">`py#container`</Link>. Nó thêm một React hook đọc URL của service từ runtime configuration và thêm xác thực mà service mong đợi vào mỗi request.
+
+## Cách hoạt động
+
+Một container service với `infra=ecs` chạy trên Amazon ECS (Elastic Container Service) đằng sau một Application Load Balancer nội bộ. Với `ingress=http-api` mặc định, một Amazon API Gateway HTTP API (một HTTPS endpoint được quản lý) tiếp cận load balancer đó thông qua VPC link, là kết nối riêng tư của API Gateway vào VPC của bạn. Website gọi HTTP API.
+
+Tùy chọn `auth` của service quyết định cách HTTP API kiểm tra mỗi request:
+
+- `iam` (mặc định): request phải được ký bằng SigV4, quy trình ký request của AWS. Hook ký nó bằng thông tin xác thực AWS tạm thời mà Cognito identity pool của website cung cấp cho người dùng đã đăng nhập.
+- `cognito`: request phải chứa Cognito access token của người dùng đã đăng nhập dưới dạng bearer token.
+- `none`: HTTP API chấp nhận mọi request.
+
+HTTP API kết thúc bất kỳ request nào mất nhiều hơn 30 giây, vì vậy một route chạy lâu hơn phải trả về sớm và hoàn thành công việc của nó ở background.
+
+Generator từ chối một service mà nó không thể tiếp cận. Service phải có `infra=ecs`, vì `infra=none` không tạo endpoint. Nó cũng phải có `ingress=http-api`, vì một service `private` chỉ có thể tiếp cận được từ bên trong VPC của nó.
+
+## Điều kiện tiên quyết
+
+Trước khi sử dụng generator này, hãy đảm bảo bạn có:
+
+1. Một website React (được tạo bằng <Link path="guides/react-website">generator `ts#website`</Link>)
+2. Một container service với `infra=ecs` và `ingress=http-api` (được tạo bằng generator <Link path="guides/ts-container">`ts#container`</Link> hoặc <Link path="guides/py-container">`py#container`</Link>)
+3. Cognito Auth được thêm qua <Link path="guides/react-website-auth">generator `ts#website#auth`</Link>, nếu `auth` của service là `iam` hoặc `cognito`
+
+## Cách sử dụng
+
+### Chạy Generator
+
+<RunGenerator generator="connection" />
+
+Chọn website React của bạn làm source project và project chứa container service của bạn làm target project. Nếu target project chứa nhiều component, đặt `targetComponent` thành tên của service.
+
+### Tùy chọn
+
+<GeneratorParameters generator="connection" />
+
+## Kết quả của Generator
+
+Generator tạo các file sau trong website React của bạn:
+
+<FileTree>
+
+- src
+  - hooks
+    - use\<ServiceName>.tsx Hook trả về URL của service và một `fetch` thêm xác thực của service
+    - useSigV4.tsx Hook để ký request bằng SigV4 (chỉ `iam`)
+  - components
+    - RuntimeConfig/index.tsx Trỏ hook tới service local trong local development
+
+</FileTree>
+
+`<ServiceName>` là tên class của service, ví dụ `useOrders` cho một service có tên `orders`. Generator cũng thêm các dependency này vào website:
+
+- `aws4fetch`, `oidc-client-ts`, `@aws-sdk/credential-provider-cognito-identity`, `react-oidc-context`, và dev dependency `@smithy/types` (`iam`)
+- `react-oidc-context` (`cognito`)
+
+## Sử dụng Hook
+
+Hook trả về `url` của service và một hàm `fetch`. `fetch` nhận một path tương đối với service và các tùy chọn `fetch` thông thường:
+
+```tsx
+import { useEffect, useState } from 'react';
+import { useMyService } from './hooks/useMyService';
+
+export const ServiceStatus = () => {
+  const myService = useMyService();
+  const [status, setStatus] = useState<number>();
+
+  useEffect(() => {
+    myService.fetch('/health').then((response) => setStatus(response.status));
+  }, [myService.fetch]);
+
+  return <p>Service status: {status ?? 'loading'}</p>;
+};
+```
+
+Service đã deploy ghi URL của nó vào <Link path="guides/runtime-config">runtime configuration</Link> dưới `connection.services.<ServiceName>`, mà website đọc từ `runtime-config.json`.
+
+Website gọi HTTP API từ trình duyệt, vì vậy cài đặt CORS (cross-origin resource sharing) của HTTP API phải cho phép origin của website. Generator không thay đổi chúng. Mặc định HTTP API chấp nhận request từ bất kỳ origin nào, với các header `authorization`, `content-type` và SigV4 mà hook gửi. Để chỉ chấp nhận request từ website của bạn, gọi `myService.restrictCorsTo('https://<your website domain>')` trong CDK. Trong Terraform, đặt `cors_allow_origins` trong block `module "ecs_service"` của module service của bạn. Để biết chi tiết, xem <Link path="guides/ts-container#cors-and-throttling">CORS and Throttling</Link>.
+
+## Infrastructure
+
+Đối với `auth=iam`, người dùng đã đăng nhập của website cần quyền để gọi HTTP API của service. Generator không thay đổi stack hoặc root Terraform module của bạn. Thay vào đó, nó in code cần thêm, được hiển thị bên dưới cho một service có tên `my-service`. Cho đến khi bạn thêm nó, HTTP API từ chối các request của website với 403 Forbidden. Đối với `cognito` và `none` không có gì cần thêm.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+Trong ví dụ, `myService` là construct `MyService` của bạn và `identity` là construct `UserIdentity` của bạn:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myService.grantInvoke(identity.identityPool.authenticatedRole);
+```
+
+`grantInvoke` cho phép authenticated role của identity pool gọi `execute-api:Invoke` trên HTTP API của service.
+
+</Fragment>
+<Fragment slot="terraform">
+
+Trong ví dụ, `module "my_service"` deploy service và `module "user_identity"` deploy identity pool của website của bạn:
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_role_policy" "authenticated_my_service_invoke" {
+  name = "authenticated-my-service-invoke"
+  role = module.user_identity.authenticated_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["execute-api:Invoke"]
+        Resource = ["${module.my_service.api_execution_arn}/*"]
+      },
+    ]
+  })
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+## Local Development
+
+<NxCommands commands={["dev <website-project-name>"]} />
+
+Target `dev` của website cũng khởi động target `<service-name>-serve` của service, và hook gọi service tại `http://localhost:<port>`. Port là port mà container generator đã gán cho service. Trong local development, hook `useSigV4` không ký request khi `runtime-config.json` không có cài đặt Cognito.

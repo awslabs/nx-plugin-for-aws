@@ -1,0 +1,142 @@
+---
+title: React a Container Service
+description: Connetti un sito web React a un servizio container TypeScript o Python
+when:
+  sourceType: ts#react-website
+  targetType:
+    - ts#container
+    - py#container
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Il generatore `connection` consente al tuo sito web React di chiamare un servizio container creato con <Link path="guides/ts-container">`ts#container`</Link> o <Link path="guides/py-container">`py#container`</Link>. Aggiunge un hook React che legge l'URL del servizio dalla configurazione runtime e aggiunge l'autenticazione che il servizio si aspetta a ogni richiesta.
+
+## Come funziona
+
+Un servizio container con `infra=ecs` viene eseguito su Amazon ECS (Elastic Container Service) dietro un Application Load Balancer interno. Con il valore predefinito `ingress=http-api`, un'API HTTP di Amazon API Gateway (un endpoint HTTPS gestito) raggiunge quel load balancer attraverso un VPC link, che è la connessione privata di API Gateway nel tuo VPC. Il sito web chiama l'API HTTP.
+
+L'opzione `auth` del servizio decide come l'API HTTP controlla ogni richiesta:
+
+- `iam` (predefinito): la richiesta deve essere firmata con SigV4, il processo di firma delle richieste AWS. L'hook la firma con le credenziali AWS temporanee che il pool di identità Cognito del tuo sito web fornisce a un utente autenticato.
+- `cognito`: la richiesta deve contenere il token di accesso Cognito dell'utente autenticato come bearer token.
+- `none`: l'API HTTP accetta ogni richiesta.
+
+L'API HTTP termina qualsiasi richiesta che impiega più di 30 secondi, quindi una route che viene eseguita più a lungo deve restituire un risultato anticipato e completare il suo lavoro in background.
+
+Il generatore rifiuta un servizio che non può raggiungere. Il servizio deve avere `infra=ecs`, perché `infra=none` non crea alcun endpoint. Deve anche avere `ingress=http-api`, perché un servizio `private` è raggiungibile solo dall'interno del suo VPC.
+
+## Prerequisiti
+
+Prima di utilizzare questo generatore, assicurati di avere:
+
+1. Un sito web React (generato utilizzando il <Link path="guides/react-website">generatore `ts#website`</Link>)
+2. Un servizio container con `infra=ecs` e `ingress=http-api` (generato utilizzando il generatore <Link path="guides/ts-container">`ts#container`</Link> o <Link path="guides/py-container">`py#container`</Link>)
+3. Cognito Auth aggiunto tramite il <Link path="guides/react-website-auth">generatore `ts#website#auth`</Link>, se l'`auth` del servizio è `iam` o `cognito`
+
+## Utilizzo
+
+### Esegui il generatore
+
+<RunGenerator generator="connection" />
+
+Seleziona il tuo sito web React come progetto sorgente e il progetto contenente il tuo servizio container come progetto di destinazione. Se il progetto di destinazione contiene diversi componenti, imposta `targetComponent` sul nome del servizio.
+
+### Opzioni
+
+<GeneratorParameters generator="connection" />
+
+## Output del generatore
+
+Il generatore crea i seguenti file nel tuo sito web React:
+
+<FileTree>
+
+- src
+  - hooks
+    - use\<ServiceName>.tsx Hook che restituisce l'URL del servizio e un `fetch` che aggiunge l'autenticazione del servizio
+    - useSigV4.tsx Hook per firmare le richieste con SigV4 (solo `iam`)
+  - components
+    - RuntimeConfig/index.tsx Punta l'hook al servizio locale nello sviluppo locale
+
+</FileTree>
+
+`<ServiceName>` è il nome della classe del servizio, ad esempio `useOrders` per un servizio denominato `orders`. Il generatore aggiunge anche queste dipendenze al sito web:
+
+- `aws4fetch`, `oidc-client-ts`, `@aws-sdk/credential-provider-cognito-identity`, `react-oidc-context` e la dipendenza di sviluppo `@smithy/types` (`iam`)
+- `react-oidc-context` (`cognito`)
+
+## Utilizzo dell'hook
+
+L'hook restituisce l'`url` del servizio e una funzione `fetch`. `fetch` accetta un percorso relativo al servizio e le solite opzioni di `fetch`:
+
+```tsx
+import { useEffect, useState } from 'react';
+import { useMyService } from './hooks/useMyService';
+
+export const ServiceStatus = () => {
+  const myService = useMyService();
+  const [status, setStatus] = useState<number>();
+
+  useEffect(() => {
+    myService.fetch('/health').then((response) => setStatus(response.status));
+  }, [myService.fetch]);
+
+  return <p>Service status: {status ?? 'loading'}</p>;
+};
+```
+
+Il servizio distribuito scrive il suo URL nella <Link path="guides/runtime-config">configurazione runtime</Link> sotto `connection.services.<ServiceName>`, che il sito web legge da `runtime-config.json`.
+
+Il sito web chiama l'API HTTP dal browser, quindi le impostazioni CORS (cross-origin resource sharing) dell'API HTTP devono consentire l'origine del sito web. Il generatore non le modifica. Per impostazione predefinita, l'API HTTP accetta richieste da qualsiasi origine, con gli header `authorization`, `content-type` e SigV4 che l'hook invia. Per accettare richieste solo dal tuo sito web, chiama `myService.restrictCorsTo('https://<your website domain>')` in CDK. In Terraform, imposta `cors_allow_origins` nel blocco `module "ecs_service"` del modulo del tuo servizio. Per i dettagli, vedi <Link path="guides/ts-container#cors-and-throttling">CORS and Throttling</Link>.
+
+## Infrastruttura
+
+Per `auth=iam`, gli utenti autenticati del sito web necessitano del permesso di chiamare l'API HTTP del servizio. Il generatore non modifica il tuo stack o il modulo Terraform radice. Invece stampa il codice da aggiungere, che è mostrato di seguito per un servizio denominato `my-service`. Fino a quando non lo aggiungi, l'API HTTP rifiuta le richieste del sito web con 403 Forbidden. Per `cognito` e `none` non c'è nulla da aggiungere.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+Nell'esempio, `myService` è il tuo costrutto `MyService` e `identity` è il tuo costrutto `UserIdentity`:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myService.grantInvoke(identity.identityPool.authenticatedRole);
+```
+
+`grantInvoke` consente al ruolo autenticato del pool di identità di chiamare `execute-api:Invoke` sull'API HTTP del servizio.
+
+</Fragment>
+<Fragment slot="terraform">
+
+Nell'esempio, `module "my_service"` distribuisce il servizio e `module "user_identity"` distribuisce il pool di identità del tuo sito web:
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_role_policy" "authenticated_my_service_invoke" {
+  name = "authenticated-my-service-invoke"
+  role = module.user_identity.authenticated_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["execute-api:Invoke"]
+        Resource = ["${module.my_service.api_execution_arn}/*"]
+      },
+    ]
+  })
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+## Sviluppo locale
+
+<NxCommands commands={["dev <website-project-name>"]} />
+
+Il target `dev` del sito web avvia anche il target `<service-name>-serve` del servizio, e l'hook chiama il servizio su `http://localhost:<port>`. La porta è quella che il generatore container ha assegnato al servizio. Nello sviluppo locale, l'hook `useSigV4` non firma le richieste quando `runtime-config.json` non ha impostazioni Cognito.

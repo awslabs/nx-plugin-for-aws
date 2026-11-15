@@ -1,0 +1,142 @@
+---
+title: React 到容器服务
+description: 将 React 网站连接到 TypeScript 或 Python 容器服务
+when:
+  sourceType: ts#react-website
+  targetType:
+    - ts#container
+    - py#container
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 生成器让您的 React 网站可以调用使用 <Link path="guides/ts-container">`ts#container`</Link> 或 <Link path="guides/py-container">`py#container`</Link> 创建的容器服务。它添加了一个 React hook，该 hook 从运行时配置中读取服务的 URL，并为每个请求添加服务所需的身份验证。
+
+## 工作原理
+
+使用 `infra=ecs` 的容器服务运行在 Amazon ECS（Elastic Container Service）上，位于内部应用程序负载均衡器之后。使用默认的 `ingress=http-api` 时，Amazon API Gateway HTTP API（托管的 HTTPS 端点）通过 VPC 链接访问该负载均衡器，VPC 链接是 API Gateway 进入您 VPC 的私有连接。网站调用 HTTP API。
+
+服务的 `auth` 选项决定 HTTP API 如何检查每个请求：
+
+- `iam`（默认）：请求必须使用 SigV4（AWS 请求签名过程）进行签名。hook 使用您网站的 Cognito 身份池为已登录用户提供的临时 AWS 凭证对其进行签名。
+- `cognito`：请求必须包含已登录用户的 Cognito 访问令牌作为 bearer 令牌。
+- `none`：HTTP API 接受每个请求。
+
+HTTP API 会终止任何超过 30 秒的请求，因此运行时间较长的路由必须提前返回并在后台完成其工作。
+
+生成器会拒绝无法访问的服务。服务必须具有 `infra=ecs`，因为 `infra=none` 不会创建端点。它还必须具有 `ingress=http-api`，因为 `private` 服务只能从其 VPC 内部访问。
+
+## 前提条件
+
+在使用此生成器之前，请确保您具有：
+
+1. 一个 React 网站（使用 <Link path="guides/react-website">`ts#website` 生成器</Link>生成）
+2. 一个具有 `infra=ecs` 和 `ingress=http-api` 的容器服务（使用 <Link path="guides/ts-container">`ts#container`</Link> 或 <Link path="guides/py-container">`py#container`</Link> 生成器生成）
+3. 如果服务的 `auth` 是 `iam` 或 `cognito`，则通过 <Link path="guides/react-website-auth">`ts#website#auth` 生成器</Link>添加 Cognito Auth
+
+## 使用方法
+
+### 运行生成器
+
+<RunGenerator generator="connection" />
+
+选择您的 React 网站作为源项目，选择包含您的容器服务的项目作为目标项目。如果目标项目包含多个组件，请将 `targetComponent` 设置为服务的名称。
+
+### 选项
+
+<GeneratorParameters generator="connection" />
+
+## 生成器输出
+
+生成器在您的 React 网站中创建以下文件：
+
+<FileTree>
+
+- src
+  - hooks
+    - use\<ServiceName>.tsx Hook returning the service's URL and a `fetch` that adds the service's authentication
+    - useSigV4.tsx Hook for signing requests with SigV4 (`iam` only)
+  - components
+    - RuntimeConfig/index.tsx Points the hook at the local service in local development
+
+</FileTree>
+
+`<ServiceName>` 是服务的类名，例如，名为 `orders` 的服务对应 `useOrders`。生成器还会向网站添加以下依赖项：
+
+- `aws4fetch`、`oidc-client-ts`、`@aws-sdk/credential-provider-cognito-identity`、`react-oidc-context` 以及开发依赖项 `@smithy/types`（`iam`）
+- `react-oidc-context`（`cognito`）
+
+## 使用 Hook
+
+hook 返回服务的 `url` 和一个 `fetch` 函数。`fetch` 接受相对于服务的路径和常规的 `fetch` 选项：
+
+```tsx
+import { useEffect, useState } from 'react';
+import { useMyService } from './hooks/useMyService';
+
+export const ServiceStatus = () => {
+  const myService = useMyService();
+  const [status, setStatus] = useState<number>();
+
+  useEffect(() => {
+    myService.fetch('/health').then((response) => setStatus(response.status));
+  }, [myService.fetch]);
+
+  return <p>Service status: {status ?? 'loading'}</p>;
+};
+```
+
+已部署的服务将其 URL 写入 <Link path="guides/runtime-config">运行时配置</Link>的 `connection.services.<ServiceName>` 下，网站从 `runtime-config.json` 中读取它。
+
+网站从浏览器调用 HTTP API，因此 HTTP API 的 CORS（跨源资源共享）设置必须允许网站的源。生成器不会更改它们。默认情况下，HTTP API 接受来自任何源的请求，包括 hook 发送的 `authorization`、`content-type` 和 SigV4 标头。要仅接受来自您网站的请求，请在 CDK 中调用 `myService.restrictCorsTo('https://<your website domain>')`。在 Terraform 中，在服务模块的 `module "ecs_service"` 块中设置 `cors_allow_origins`。有关详细信息，请参阅 <Link path="guides/ts-container#cors-and-throttling">CORS 和限流</Link>。
+
+## 基础设施
+
+对于 `auth=iam`，网站的已登录用户需要权限来调用服务的 HTTP API。生成器不会更改您的堆栈或根 Terraform 模块。相反，它会打印要添加的代码，如下所示（针对名为 `my-service` 的服务）。在您添加它之前，HTTP API 会以 403 Forbidden 拒绝网站的请求。对于 `cognito` 和 `none`，无需添加任何内容。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+在示例中，`myService` 是您的 `MyService` 构造，`identity` 是您的 `UserIdentity` 构造：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myService.grantInvoke(identity.identityPool.authenticatedRole);
+```
+
+`grantInvoke` 允许身份池的已认证角色在服务的 HTTP API 上调用 `execute-api:Invoke`。
+
+</Fragment>
+<Fragment slot="terraform">
+
+在示例中，`module "my_service"` 部署服务，`module "user_identity"` 部署您网站的身份池：
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_role_policy" "authenticated_my_service_invoke" {
+  name = "authenticated-my-service-invoke"
+  role = module.user_identity.authenticated_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["execute-api:Invoke"]
+        Resource = ["${module.my_service.api_execution_arn}/*"]
+      },
+    ]
+  })
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+## 本地开发
+
+<NxCommands commands={["dev <website-project-name>"]} />
+
+网站的 `dev` 目标还会启动服务的 `<service-name>-serve` 目标，hook 在 `http://localhost:<port>` 调用服务。端口是容器生成器分配给服务的端口。在本地开发中，当 `runtime-config.json` 没有 Cognito 设置时，`useSigV4` hook 不会对请求进行签名。

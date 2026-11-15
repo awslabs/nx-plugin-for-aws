@@ -1,0 +1,129 @@
+---
+title: TypeScript Agent to Container Service
+description: TypeScript Agent를 TypeScript 또는 Python 컨테이너 서비스에 연결
+when:
+  sourceType: ts#agent
+  targetType:
+    - ts#container
+    - py#container
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 생성기는 <Link path="guides/ts-agent">TypeScript Agent</Link>가 <Link path="guides/ts-container">`ts#container`</Link> 또는 <Link path="guides/py-container">`py#container`</Link>로 만든 컨테이너 서비스를 호출할 수 있게 합니다. 공유 `agent-connection` 프로젝트에 클라이언트를 추가하여 런타임 구성에서 서비스의 URL을 읽고 에이전트 자체의 AWS 자격 증명으로 각 요청에 서명합니다.
+
+## 작동 방식
+
+`infra=ecs`를 사용하는 컨테이너 서비스는 내부 Application Load Balancer 뒤에서 Amazon ECS(Elastic Container Service)에서 실행됩니다. 기본값인 `ingress=http-api`를 사용하면 Amazon API Gateway HTTP API(관리형 HTTPS 엔드포인트)가 VPC 링크를 통해 해당 로드 밸런서에 도달하며, 이는 API Gateway가 VPC에 연결하는 프라이빗 연결입니다. 에이전트는 HTTP API를 호출합니다.
+
+클라이언트는 에이전트 역할의 자격 증명을 사용하여 AWS 요청 서명 프로세스인 SigV4로 각 요청에 서명합니다. HTTP API는 해당 역할이 `execute-api:Invoke`를 호출할 수 있을 때 요청을 수락합니다. HTTP API는 30초 이상 걸리는 요청을 종료하므로, 더 오래 실행되는 라우트는 조기에 반환하고 백그라운드에서 작업을 완료해야 합니다.
+
+생성기는 이 방식으로 도달할 수 없는 서비스를 거부합니다. 서비스는 `infra=ecs`를 가져야 하는데, `infra=none`은 엔드포인트를 생성하지 않기 때문입니다. `ingress=http-api`를 가져야 하는데, `private` 서비스는 VPC 내부에서만 도달할 수 있기 때문입니다. `auth=iam`을 가져야 하는데, 에이전트가 IAM 자격 증명으로 요청에 서명하고 보낼 Cognito 토큰이 없기 때문입니다.
+
+## 전제 조건
+
+이 생성기를 사용하기 전에 다음이 필요합니다:
+
+1. <Link path="guides/ts-agent">`ts#agent`</Link> 프로젝트
+2. `infra=ecs`, `ingress=http-api` 및 `auth=iam`을 가진 컨테이너 서비스 (<Link path="guides/ts-container">`ts#container`</Link> 또는 <Link path="guides/py-container">`py#container`</Link> 생성기를 사용하여 생성)
+
+## 사용법
+
+### 생성기 실행
+
+<RunGenerator generator="connection" />
+
+에이전트의 프로젝트를 소스로 선택하고 컨테이너 서비스를 포함하는 프로젝트를 타겟으로 선택합니다. 어느 프로젝트든 여러 컴포넌트를 포함하는 경우, `sourceComponent`를 에이전트의 이름으로, `targetComponent`를 서비스의 이름으로 설정합니다.
+
+### 옵션
+
+<GeneratorParameters generator="connection" />
+
+## 생성기 출력
+
+생성기는 공유 `agent-connection` 프로젝트에 다음 파일을 생성합니다:
+
+<FileTree>
+
+- packages/common/agent-connection
+  - src
+    - app
+      - \<service-name>-client.ts 런타임 구성에서 서비스의 URL을 읽고 SigV4로 요청에 서명하는 클라이언트
+    - index.ts 클라이언트를 내보냄
+
+</FileTree>
+
+`agent-connection` 프로젝트에 `@aws-lambda-powertools/parameters`, `@aws-sdk/credential-providers` 및 `aws4fetch`를 추가하고, 에이전트의 `<agent-name>-dev` 타겟이 서비스의 `<service-name>-serve` 타겟을 시작하도록 만듭니다.
+
+## 클라이언트 사용
+
+`<ServiceName>Client.create()`는 <Link path="guides/runtime-config">런타임 구성</Link>의 `connection` 네임스페이스에서 `services.<ServiceName>` 아래의 서비스 URL을 읽습니다. 클라이언트의 `fetch`는 서비스에 상대적인 경로를 받습니다. 생성기는 에이전트의 코드를 변경하지 않습니다. 모델이 서비스를 호출할 수 있도록 하려면 클라이언트를 도구로 래핑하세요:
+
+```ts title="packages/my-project/src/my-agent/agent.ts"
+import { Agent, tool } from '@strands-agents/sdk';
+import { MyServiceClient } from '@my-scope/agent-connection';
+import { z } from 'zod';
+
+export const getAgent = async () => {
+  const myService = await MyServiceClient.create();
+  const checkMyService = tool({
+    name: 'check_my_service',
+    description: 'Check whether the MyService container service is healthy',
+    inputSchema: z.object({}),
+    callback: async () => (await myService.fetch('/health')).status,
+  });
+
+  return new Agent({
+    tools: [checkMyService],
+  });
+};
+```
+
+`create()`는 `RUNTIME_CONFIG_APP_ID`가 설정되지 않았거나 런타임 구성에 서비스에 대한 항목이 없을 때 예외를 발생시킵니다.
+
+## 인프라
+
+에이전트의 역할은 서비스의 HTTP API를 호출할 권한이 필요합니다. 생성기는 스택이나 루트 Terraform 모듈을 변경하지 않습니다. 대신 추가할 코드를 출력하며, 이는 `my-agent`라는 에이전트와 `my-service`라는 서비스에 대해 아래에 표시됩니다. 이를 추가할 때까지 HTTP API는 에이전트의 요청을 403 Forbidden으로 거부합니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+예제에서 `myService`는 `MyService` 구성이고 `myAgent`는 `MyAgent` 구성입니다:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myService.grantInvoke(myAgent);
+```
+
+`grantInvoke`는 에이전트의 역할이 서비스의 HTTP API에서 `execute-api:Invoke`를 호출할 수 있도록 허용합니다.
+
+</Fragment>
+<Fragment slot="terraform">
+
+에이전트의 `additional_iam_policy_statements`에 문을 추가하되, 블록이 이미 나열하는 다른 문 옆에 추가합니다. 예제에서 `module "my_service"`는 서비스를 배포합니다:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+  # ...existing arguments...
+  additional_iam_policy_statements = [
+    {
+      Effect   = "Allow"
+      Action   = ["execute-api:Invoke"]
+      Resource = ["${module.my_service.api_execution_arn}/*"]
+    },
+  ]
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+## 로컬 개발
+
+<NxCommands commands={["<agent-name>-dev <project-name>"]} />
+
+이는 에이전트와 서비스의 `<service-name>-serve` 타겟을 시작합니다. 에이전트의 dev 타겟은 `LOCAL_DEV=true`를 설정하므로, 클라이언트는 서명 없이 `http://localhost:<port>`에서 서비스를 호출합니다. 포트는 컨테이너 생성기가 서비스에 할당한 포트입니다.

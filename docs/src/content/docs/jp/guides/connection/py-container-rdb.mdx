@@ -1,0 +1,153 @@
+---
+title: Python Container Service から Relational Database への接続
+description: Python コンテナサービスを Python Relational Database に接続する
+when:
+  sourceType: py#container
+  targetType: py#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` ジェネレーターは、<Link path="guides/py-container">Python コンテナサービス</Link>が<Link path="guides/py-rdb">Python Relational Database</Link>プロジェクトを使用できるようにします。データベースパッケージをサービスのプロジェクトの依存関係として追加し、Amazon Aurora への SSL 接続用にサービスの Docker イメージを準備します。
+
+## 仕組み
+
+`infra=ecs` を持つコンテナサービスは、VPC 内の Amazon ECS (Elastic Container Service) 上でタスクとして実行されます。各タスクは、サービスのタスクロール（権限を付与するまで権限を持たない IAM ロール）として実行され、サービスのセキュリティグループ（ポート 443 のアウトバウンドトラフィックのみを許可）に配置されます。データベースを使用するには、サービスはデフォルトでは持っていない 2 つのものが必要です：
+
+- `rds-db:connect` の IAM 権限。これにより、IAM 認証を使用してデータベースにサインインできます。
+- データベースポートのセキュリティグループルールペア：データベースのセキュリティグループのインバウンドルールと、サービスのセキュリティグループのアウトバウンドルール。アウトバウンドルールがないと、サービスはデータベースに到達できません。なぜなら、そのセキュリティグループはポート 443 のみを許可しているためです。
+
+ジェネレーターは `infra=none` を持つサービスを拒否します。なぜなら、そのようなサービスにはアクセスを付与するタスクロールがないためです。
+
+## 前提条件
+
+このジェネレーターを使用する前に、以下を確認してください：
+
+1. `infra=ecs` を持つコンテナサービス（<Link path="guides/py-container">`py#container`</Link>ジェネレーターを使用して生成）
+2. <Link path="guides/py-rdb">`py#rdb`</Link>プロジェクト
+
+## 使用方法
+
+### ジェネレーターの実行
+
+<RunGenerator generator="connection" />
+
+コンテナサービスを含むプロジェクトをソースとして、リレーショナルデータベースプロジェクトをターゲットとして選択します。ソースプロジェクトに複数のコンポーネントが含まれている場合は、`sourceComponent` をサービスの名前に設定します。
+
+### オプション
+
+<GeneratorParameters generator="connection" />
+
+## ジェネレーターの出力
+
+<FileTree>
+
+- packages/my\_project
+  - project.json `my-service-serve` からデータベースの `dev` ターゲットへの依存関係を追加
+  - pyproject.toml データベースパッケージをワークスペースの依存関係として追加
+  - my\_project
+    - my\_service
+      - Dockerfile Aurora への SSL 接続用に Amazon RDS CA バンドルをインストール
+
+</FileTree>
+
+## サービスでのデータベースの使用
+
+データベースパッケージから `session_context` をインポートし、リクエストを処理する場所で使用します：
+
+```python title="packages/my_project/my_project/my_service/orders.py"
+from sqlmodel import select
+from my_scope_my_database import session_context
+from my_scope_my_database.models.example import ExampleModel
+
+
+async def list_examples() -> list[dict]:
+    async with session_context() as session:
+        items = (await session.execute(select(ExampleModel))).scalars().all()
+        return [item.model_dump() for item in items]
+```
+
+データベースパッケージは、`RUNTIME_CONFIG_APP_ID` 環境変数を使用して、<Link path="guides/runtime-config">ランタイム設定</Link>からデータベースの接続詳細を読み取ります。
+
+生成されたコンテナサービスは `RUNTIME_CONFIG_APP_ID` を設定し、そのタスクロールにランタイム設定への読み取りアクセスを付与するため、自分で追加する必要はありません。Terraform では、<Link path="guides/py-container">コンテナガイド</Link>に示されているように、サービスのモジュールブロックは `appconfig_application_id` と `appconfig_application_arn` を渡す必要があります。
+
+## インフラストラクチャ
+
+ジェネレーターはスタックやルート Terraform モジュールを変更しません。代わりに、追加するコードを出力します。以下は、`my-service` という名前のサービスと `my-database` という名前のデータベースの例です。これを追加するまで、サービスはデータベースポートに到達できず、データベースはその IAM 認証を拒否します。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+この例では、`myService` は `MyService` コンストラクトで、`myDatabase` は `MyDatabase` コンストラクトです：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myDatabase.allowDefaultPortFrom(myService);
+myDatabase.grantConnect(myService.taskRole);
+```
+
+`allowDefaultPortFrom` は、データベースのセキュリティグループにインバウンドルールを追加し、サービスのセキュリティグループにアウトバウンドルールを追加します。`grantConnect` は、サービスのタスクロールに `rds-db:connect` を付与します。
+
+</Fragment>
+<Fragment slot="terraform">
+
+この例では、`module "my_service"` がサービスをデプロイし、`module "my_database"` がデータベースをデプロイします。`data "aws_region" "current"` と `data "aws_caller_identity" "current"` データソースは、生成された `providers.tf` で宣言されています：
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_role_policy" "my_service_my_database_connect" {
+  name = "my-service-my-database-connect"
+  role = module.my_service.task_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["rds-db:connect"]
+        Resource = ["arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"]
+      },
+    ]
+  })
+}
+
+resource "aws_vpc_security_group_ingress_rule" "my_service_to_my_database" {
+  description                  = "Allow the my-service container service to connect to the database"
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_service.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "my_service_to_my_database" {
+  description                  = "Allow the my-service container service to reach the database"
+  security_group_id            = module.my_service.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+### RDS Proxy を使用せずに接続する場合の SSL 要件
+
+サービスが RDS Proxy を使用せずに Aurora クラスターに直接接続する場合、Amazon RDS 認証局を信頼する必要があります。ジェネレーターは、`EXPOSE` 行の前に、システムトラストストアに Amazon RDS CA バンドルをインストールするために、サービスの Dockerfile に次の行を追加します：
+
+```dockerfile
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt
+RUN update-ca-certificates
+```
+
+RDS Proxy を使用する場合、RDS CA バンドルは必要ありません。
+
+## ローカル開発
+
+<NxCommands commands={["<service-name>-serve <project-name>"]} />
+
+これにより、サービスとデータベースのローカル Docker データベースが起動します。`LOCAL_DEV=true` が設定されている場合、データベースクライアントは Aurora ではなくローカルデータベースに接続します。

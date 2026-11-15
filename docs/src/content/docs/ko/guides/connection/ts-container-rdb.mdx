@@ -1,0 +1,154 @@
+---
+title: TypeScript Container Service에서 Relational Database로
+description: TypeScript 컨테이너 서비스를 Relational Database에 연결
+when:
+  sourceType: ts#container
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 생성기는 <Link path="guides/ts-container">TypeScript 컨테이너 서비스</Link>가 <Link path="guides/ts-rdb">Relational Database</Link> 프로젝트를 사용할 수 있게 합니다. 데이터베이스의 Prisma 클라이언트를 반환하는 모듈을 추가하고, Amazon Aurora에 대한 SSL 연결을 위해 서비스의 Docker 이미지를 준비합니다.
+
+## 작동 방식
+
+`infra=ecs`를 사용하는 컨테이너 서비스는 VPC의 Amazon ECS(Elastic Container Service)에서 태스크로 실행됩니다. 각 태스크는 서비스의 태스크 역할(권한을 부여하기 전까지는 권한이 없는 IAM 역할)로 실행되며, 포트 443에서만 아웃바운드 트래픽을 허용하는 서비스의 보안 그룹에 속합니다. 데이터베이스를 사용하려면 서비스에 기본적으로 없는 두 가지가 필요합니다:
+
+- `rds-db:connect`에 대한 IAM 권한 - IAM 인증으로 데이터베이스에 로그인할 수 있도록 합니다.
+- 데이터베이스 포트의 보안 그룹 규칙 쌍: 데이터베이스의 보안 그룹에 대한 인바운드 규칙과 서비스의 보안 그룹에 대한 아웃바운드 규칙. 아웃바운드 규칙이 없으면 서비스가 데이터베이스에 도달할 수 없습니다. 서비스의 보안 그룹은 포트 443만 허용하기 때문입니다.
+
+생성기는 `infra=none`인 서비스를 거부합니다. 이러한 서비스에는 액세스 권한을 부여할 태스크 역할이 없기 때문입니다.
+
+## 사전 요구 사항
+
+이 생성기를 사용하기 전에 다음이 있어야 합니다:
+
+1. `infra=ecs`를 사용하는 컨테이너 서비스 (<Link path="guides/ts-container">`ts#container`</Link> 생성기를 사용하여 생성)
+2. <Link path="guides/ts-rdb">`ts#rdb`</Link> 프로젝트
+
+## 사용법
+
+### 생성기 실행
+
+<RunGenerator generator="connection" />
+
+컨테이너 서비스가 포함된 프로젝트를 소스로 선택하고 관계형 데이터베이스 프로젝트를 대상으로 선택합니다. 소스 프로젝트에 여러 컴포넌트가 있는 경우 `sourceComponent`를 서비스 이름으로 설정합니다.
+
+### 옵션
+
+<GeneratorParameters generator="connection" />
+
+## 생성기 출력
+
+생성기는 서비스의 소스 디렉터리에서 다음 파일을 변경합니다:
+
+<FileTree>
+
+- packages/my-project/src/my-service
+  - my-database.ts 데이터베이스의 Prisma 클라이언트를 반환하는 `getMyDatabase`를 내보냄
+  - Dockerfile Aurora에 대한 SSL 연결을 위해 Amazon RDS CA 번들을 설치
+
+</FileTree>
+
+또한 서비스의 `<service-name>-serve` 타겟이 데이터베이스의 `dev` 타겟에 의존하도록 업데이트됩니다.
+
+## 서비스에서 데이터베이스 사용
+
+서비스 코드에서 getter를 가져와서 요청을 처리하는 곳에서 호출합니다:
+
+```ts title="packages/my-project/src/my-service/orders.ts"
+import { getMyDatabase } from './my-database.js';
+
+export const listOrders = async () => {
+  const myDatabase = await getMyDatabase();
+  return myDatabase.order.findMany();
+};
+```
+
+데이터베이스 클라이언트는 `RUNTIME_CONFIG_APP_ID` 환경 변수를 사용하여 <Link path="guides/runtime-config">런타임 구성</Link>에서 데이터베이스의 연결 세부 정보를 읽습니다.
+
+생성된 컨테이너 서비스는 `RUNTIME_CONFIG_APP_ID`를 설정하고 태스크 역할에 런타임 구성에 대한 읽기 액세스 권한을 부여하므로 직접 추가할 필요가 없습니다. Terraform에서 서비스의 모듈 블록은 <Link path="guides/ts-container">컨테이너 가이드</Link>에 표시된 대로 `appconfig_application_id`와 `appconfig_application_arn`을 전달해야 합니다.
+
+## 인프라
+
+생성기는 스택이나 루트 Terraform 모듈을 변경하지 않습니다. 대신 추가할 코드를 출력하며, 이는 `my-service`라는 서비스와 `my-database`라는 데이터베이스에 대해 아래에 표시됩니다. 이를 추가하기 전까지는 서비스가 데이터베이스 포트에 도달할 수 없고 데이터베이스가 IAM 인증을 거부합니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+예제에서 `myService`는 `MyService` 구성이고 `myDatabase`는 `MyDatabase` 구성입니다:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myDatabase.allowDefaultPortFrom(myService);
+myDatabase.grantConnect(myService.taskRole);
+```
+
+`allowDefaultPortFrom`은 데이터베이스의 보안 그룹에 인바운드 규칙을 추가하고 서비스의 보안 그룹에 아웃바운드 규칙을 추가합니다. `grantConnect`는 서비스의 태스크 역할에 `rds-db:connect`를 부여합니다.
+
+</Fragment>
+<Fragment slot="terraform">
+
+예제에서 `module "my_service"`는 서비스를 배포하고 `module "my_database"`는 데이터베이스를 배포합니다. `data "aws_region" "current"`와 `data "aws_caller_identity" "current"` 데이터 소스는 생성된 `providers.tf`에 선언되어 있습니다:
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_role_policy" "my_service_my_database_connect" {
+  name = "my-service-my-database-connect"
+  role = module.my_service.task_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["rds-db:connect"]
+        Resource = ["arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"]
+      },
+    ]
+  })
+}
+
+resource "aws_vpc_security_group_ingress_rule" "my_service_to_my_database" {
+  description                  = "Allow the my-service container service to connect to the database"
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_service.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "my_service_to_my_database" {
+  description                  = "Allow the my-service container service to reach the database"
+  security_group_id            = module.my_service.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+### RDS Proxy 없이 연결할 때의 SSL 요구 사항
+
+서비스가 RDS Proxy 없이 Aurora 클러스터에 직접 연결할 때 Node.js는 Amazon RDS 인증 기관을 신뢰해야 합니다. 생성기는 서비스의 Dockerfile에 `EXPOSE` 줄 앞에 이 단계를 추가합니다:
+
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \
+    -o /usr/local/share/ca-certificates/rds-bundle.crt && \
+    update-ca-certificates
+```
+
+Node.js가 번들을 읽을 수 있도록 서비스의 `NODE_EXTRA_CA_CERTS` 환경 변수를 `/usr/local/share/ca-certificates/rds-bundle.crt`로 설정합니다. RDS Proxy를 사용하는 경우에는 설정할 필요가 없습니다. 자세한 내용은 [Amazon RDS SSL/TLS 문서](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html)를 참조하세요.
+
+## 로컬 개발
+
+<NxCommands commands={["<service-name>-serve <project-name>"]} />
+
+이렇게 하면 서비스와 데이터베이스의 로컬 Docker 데이터베이스가 시작됩니다. `LOCAL_DEV=true`가 설정되면 Prisma 클라이언트는 Aurora 대신 로컬 데이터베이스에 연결합니다.

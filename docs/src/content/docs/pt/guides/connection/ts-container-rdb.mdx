@@ -1,0 +1,154 @@
+---
+title: Serviço de Container TypeScript para Banco de Dados Relacional
+description: Conecte um serviço de container TypeScript a um Banco de Dados Relacional
+when:
+  sourceType: ts#container
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+O gerador `connection` permite que um <Link path="guides/ts-container">serviço de container TypeScript</Link> use um projeto de <Link path="guides/ts-rdb">Banco de Dados Relacional</Link>. Ele adiciona um módulo que retorna o cliente Prisma do banco de dados e prepara a imagem Docker do serviço para conexões SSL com o Amazon Aurora.
+
+## Como isso funciona
+
+Um serviço de container com `infra=ecs` é executado como tarefas no Amazon ECS (Elastic Container Service) em sua VPC. Cada tarefa é executada como a função de tarefa do serviço, uma função IAM que não tem permissões até que você as conceda, e fica no grupo de segurança do serviço, que permite tráfego de saída apenas na porta 443. Para usar o banco de dados, o serviço precisa de duas coisas que não tem por padrão:
+
+- Permissão IAM para `rds-db:connect`, para que possa fazer login no banco de dados com autenticação IAM.
+- Um par de regras de grupo de segurança na porta do banco de dados: uma regra de entrada no grupo de segurança do banco de dados e uma regra de saída no grupo de segurança do serviço. Sem a regra de saída, o serviço não pode alcançar o banco de dados, porque seu grupo de segurança permite apenas a porta 443 de saída.
+
+O gerador rejeita um serviço com `infra=none`, porque tal serviço não tem função de tarefa para conceder acesso.
+
+## Pré-requisitos
+
+Antes de usar este gerador, certifique-se de ter:
+
+1. Um serviço de container com `infra=ecs` (gerado usando o gerador <Link path="guides/ts-container">`ts#container`</Link>)
+2. Um projeto <Link path="guides/ts-rdb">`ts#rdb`</Link>
+
+## Uso
+
+### Execute o Gerador
+
+<RunGenerator generator="connection" />
+
+Selecione o projeto contendo seu serviço de container como origem e seu projeto de banco de dados relacional como destino. Se o projeto de origem contiver vários componentes, defina `sourceComponent` com o nome do serviço.
+
+### Opções
+
+<GeneratorParameters generator="connection" />
+
+## Saída do Gerador
+
+O gerador altera os seguintes arquivos no diretório de origem do seu serviço:
+
+<FileTree>
+
+- packages/my-project/src/my-service
+  - my-database.ts Exports `getMyDatabase`, which returns the database's Prisma client
+  - Dockerfile Installs the Amazon RDS CA bundle for SSL connections to Aurora
+
+</FileTree>
+
+Além disso, o alvo `<service-name>-serve` do serviço é atualizado para depender do alvo `dev` do banco de dados.
+
+## Usando o Banco de Dados no Serviço
+
+Importe o getter no código do seu serviço e chame-o onde você lida com uma requisição:
+
+```ts title="packages/my-project/src/my-service/orders.ts"
+import { getMyDatabase } from './my-database.js';
+
+export const listOrders = async () => {
+  const myDatabase = await getMyDatabase();
+  return myDatabase.order.findMany();
+};
+```
+
+O cliente do banco de dados lê os detalhes de conexão do banco de dados da <Link path="guides/runtime-config">configuração de runtime</Link>, usando a variável de ambiente `RUNTIME_CONFIG_APP_ID`.
+
+O serviço de container gerado define `RUNTIME_CONFIG_APP_ID` e concede à sua função de tarefa acesso de leitura à configuração de runtime, então você não adiciona nenhum dos dois por conta própria. No Terraform, o bloco de módulo do serviço deve passar `appconfig_application_id` e `appconfig_application_arn`, conforme mostrado no <Link path="guides/ts-container">guia de container</Link>.
+
+## Infraestrutura
+
+O gerador não altera sua stack ou módulo raiz do Terraform. Em vez disso, ele imprime o código a ser adicionado, que é mostrado abaixo para um serviço chamado `my-service` e um banco de dados chamado `my-database`. Até que você o adicione, o serviço não pode alcançar a porta do banco de dados e o banco de dados recusa sua autenticação IAM.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+No exemplo, `myService` é seu construto `MyService` e `myDatabase` é seu construto `MyDatabase`:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myDatabase.allowDefaultPortFrom(myService);
+myDatabase.grantConnect(myService.taskRole);
+```
+
+`allowDefaultPortFrom` adiciona a regra de entrada no grupo de segurança do banco de dados e a regra de saída no grupo de segurança do serviço. `grantConnect` concede `rds-db:connect` à função de tarefa do serviço.
+
+</Fragment>
+<Fragment slot="terraform">
+
+No exemplo, `module "my_service"` implanta o serviço e `module "my_database"` implanta o banco de dados. As fontes de dados `data "aws_region" "current"` e `data "aws_caller_identity" "current"` são declaradas no `providers.tf` gerado:
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_role_policy" "my_service_my_database_connect" {
+  name = "my-service-my-database-connect"
+  role = module.my_service.task_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["rds-db:connect"]
+        Resource = ["arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"]
+      },
+    ]
+  })
+}
+
+resource "aws_vpc_security_group_ingress_rule" "my_service_to_my_database" {
+  description                  = "Allow the my-service container service to connect to the database"
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_service.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "my_service_to_my_database" {
+  description                  = "Allow the my-service container service to reach the database"
+  security_group_id            = module.my_service.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+### Requisitos SSL ao Conectar Sem RDS Proxy
+
+Quando o serviço se conecta ao cluster Aurora diretamente, sem RDS Proxy, o Node.js deve confiar na autoridade de certificação do Amazon RDS. O gerador adiciona esta etapa ao Dockerfile do serviço, antes de sua linha `EXPOSE`:
+
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \
+    -o /usr/local/share/ca-certificates/rds-bundle.crt && \
+    update-ca-certificates
+```
+
+Defina a variável de ambiente `NODE_EXTRA_CA_CERTS` do serviço como `/usr/local/share/ca-certificates/rds-bundle.crt`, para que o Node.js leia o pacote. Ao usar RDS Proxy, você não precisa defini-la. Para mais detalhes, consulte a [documentação SSL/TLS do Amazon RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html).
+
+## Desenvolvimento Local
+
+<NxCommands commands={["<service-name>-serve <project-name>"]} />
+
+Isso inicia o serviço e o banco de dados Docker local do banco de dados. Com `LOCAL_DEV=true` definido, o cliente Prisma se conecta ao banco de dados local em vez do Aurora.

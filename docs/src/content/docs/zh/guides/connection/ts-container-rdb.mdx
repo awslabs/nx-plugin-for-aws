@@ -1,0 +1,154 @@
+---
+title: TypeScript 容器服务到关系数据库
+description: 将 TypeScript 容器服务连接到关系数据库
+when:
+  sourceType: ts#container
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 生成器让 <Link path="guides/ts-container">TypeScript 容器服务</Link>使用<Link path="guides/ts-rdb">关系数据库</Link>项目。它添加一个返回数据库 Prisma 客户端的模块，并为服务的 Docker 镜像准备与 Amazon Aurora 的 SSL 连接。
+
+## 工作原理
+
+使用 `infra=ecs` 的容器服务在您的 VPC 中作为 Amazon ECS（Elastic Container Service）上的任务运行。每个任务以服务的任务角色运行，这是一个在您授予权限之前没有任何权限的 IAM 角色，并且位于服务的安全组中，该安全组仅允许端口 443 上的出站流量。要使用数据库，服务需要两个默认情况下没有的东西：
+
+- `rds-db:connect` 的 IAM 权限，以便它可以使用 IAM 身份验证登录数据库。
+- 数据库端口上的安全组规则对：数据库安全组上的入站规则和服务安全组上的出站规则。如果没有出站规则，服务无法访问数据库，因为其安全组仅允许端口 443 出站。
+
+生成器会拒绝 `infra=none` 的服务，因为这样的服务没有任务角色可以授予访问权限。
+
+## 前提条件
+
+在使用此生成器之前，请确保您有：
+
+1. 一个使用 `infra=ecs` 的容器服务（使用 <Link path="guides/ts-container">`ts#container`</Link> 生成器生成）
+2. 一个 <Link path="guides/ts-rdb">`ts#rdb`</Link> 项目
+
+## 用法
+
+### 运行生成器
+
+<RunGenerator generator="connection" />
+
+选择包含您的容器服务的项目作为源，选择您的关系数据库项目作为目标。如果源项目包含多个组件，请将 `sourceComponent` 设置为服务的名称。
+
+### 选项
+
+<GeneratorParameters generator="connection" />
+
+## 生成器输出
+
+生成器会更改服务源目录中的以下文件：
+
+<FileTree>
+
+- packages/my-project/src/my-service
+  - my-database.ts 导出 `getMyDatabase`，它返回数据库的 Prisma 客户端
+  - Dockerfile 安装 Amazon RDS CA 证书包以用于与 Aurora 的 SSL 连接
+
+</FileTree>
+
+此外，服务的 `<service-name>-serve` 目标会更新为依赖于数据库的 `dev` 目标。
+
+## 在服务中使用数据库
+
+在服务代码中导入 getter 并在处理请求的地方调用它：
+
+```ts title="packages/my-project/src/my-service/orders.ts"
+import { getMyDatabase } from './my-database.js';
+
+export const listOrders = async () => {
+  const myDatabase = await getMyDatabase();
+  return myDatabase.order.findMany();
+};
+```
+
+数据库客户端从<Link path="guides/runtime-config">运行时配置</Link>中读取数据库的连接详细信息，使用 `RUNTIME_CONFIG_APP_ID` 环境变量。
+
+生成的容器服务会设置 `RUNTIME_CONFIG_APP_ID` 并授予其任务角色对运行时配置的读取访问权限，因此您不需要自己添加这两者。在 Terraform 中，服务的模块块必须传递 `appconfig_application_id` 和 `appconfig_application_arn`，如<Link path="guides/ts-container">容器指南</Link>中所示。
+
+## 基础设施
+
+生成器不会更改您的堆栈或根 Terraform 模块。相反，它会打印要添加的代码，下面显示了名为 `my-service` 的服务和名为 `my-database` 的数据库的代码。在您添加它之前，服务无法访问数据库端口，数据库会拒绝其 IAM 身份验证。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+在示例中，`myService` 是您的 `MyService` 构造，`myDatabase` 是您的 `MyDatabase` 构造：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myDatabase.allowDefaultPortFrom(myService);
+myDatabase.grantConnect(myService.taskRole);
+```
+
+`allowDefaultPortFrom` 在数据库的安全组上添加入站规则，在服务的安全组上添加出站规则。`grantConnect` 向服务的任务角色授予 `rds-db:connect` 权限。
+
+</Fragment>
+<Fragment slot="terraform">
+
+在示例中，`module "my_service"` 部署服务，`module "my_database"` 部署数据库。`data "aws_region" "current"` 和 `data "aws_caller_identity" "current"` 数据源在生成的 `providers.tf` 中声明：
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_role_policy" "my_service_my_database_connect" {
+  name = "my-service-my-database-connect"
+  role = module.my_service.task_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["rds-db:connect"]
+        Resource = ["arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"]
+      },
+    ]
+  })
+}
+
+resource "aws_vpc_security_group_ingress_rule" "my_service_to_my_database" {
+  description                  = "Allow the my-service container service to connect to the database"
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_service.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "my_service_to_my_database" {
+  description                  = "Allow the my-service container service to reach the database"
+  security_group_id            = module.my_service.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+### 不使用 RDS Proxy 连接时的 SSL 要求
+
+当服务直接连接到 Aurora 集群而不使用 RDS Proxy 时，Node.js 必须信任 Amazon RDS 证书颁发机构。生成器会在服务的 Dockerfile 中的 `EXPOSE` 行之前添加此步骤：
+
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \
+    -o /usr/local/share/ca-certificates/rds-bundle.crt && \
+    update-ca-certificates
+```
+
+将服务的 `NODE_EXTRA_CA_CERTS` 环境变量设置为 `/usr/local/share/ca-certificates/rds-bundle.crt`，以便 Node.js 读取证书包。使用 RDS Proxy 时不需要设置它。有关更多详细信息，请参阅 [Amazon RDS SSL/TLS 文档](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html)。
+
+## 本地开发
+
+<NxCommands commands={["<service-name>-serve <project-name>"]} />
+
+这会启动服务和数据库的本地 Docker 数据库。设置 `LOCAL_DEV=true` 后，Prisma 客户端会连接到本地数据库而不是 Aurora。

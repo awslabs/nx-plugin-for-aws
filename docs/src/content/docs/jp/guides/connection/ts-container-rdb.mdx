@@ -1,0 +1,154 @@
+---
+title: TypeScript Container ServiceからRelational Databaseへの接続
+description: TypeScript container serviceをRelational Databaseに接続する
+when:
+  sourceType: ts#container
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection`ジェネレーターは、<Link path="guides/ts-container">TypeScript container service</Link>が<Link path="guides/ts-rdb">Relational Database</Link>プロジェクトを使用できるようにします。データベースのPrismaクライアントを返すモジュールを追加し、Amazon AuroraへのSSL接続用にサービスのDockerイメージを準備します。
+
+## 仕組み
+
+`infra=ecs`を持つコンテナサービスは、VPC内のAmazon ECS（Elastic Container Service）上でタスクとして実行されます。各タスクは、サービスのタスクロール（権限を付与するまで権限を持たないIAMロール）として実行され、サービスのセキュリティグループ（ポート443のアウトバウンドトラフィックのみを許可）に配置されます。データベースを使用するには、サービスはデフォルトでは持っていない2つのものが必要です：
+
+- `rds-db:connect`のIAM権限。これにより、IAM認証でデータベースにサインインできます。
+- データベースポート上のセキュリティグループルールペア：データベースのセキュリティグループのインバウンドルールと、サービスのセキュリティグループのアウトバウンドルール。アウトバウンドルールがないと、サービスはデータベースに到達できません。なぜなら、そのセキュリティグループはポート443のみを許可しているためです。
+
+ジェネレーターは`infra=none`のサービスを拒否します。なぜなら、そのようなサービスにはアクセスを付与するタスクロールがないためです。
+
+## 前提条件
+
+このジェネレーターを使用する前に、以下を確認してください：
+
+1. `infra=ecs`を持つコンテナサービス（<Link path="guides/ts-container">`ts#container`</Link>ジェネレーターを使用して生成）
+2. <Link path="guides/ts-rdb">`ts#rdb`</Link>プロジェクト
+
+## 使用方法
+
+### ジェネレーターの実行
+
+<RunGenerator generator="connection" />
+
+コンテナサービスを含むプロジェクトをソースとして選択し、リレーショナルデータベースプロジェクトをターゲットとして選択します。ソースプロジェクトに複数のコンポーネントが含まれている場合は、`sourceComponent`をサービスの名前に設定します。
+
+### オプション
+
+<GeneratorParameters generator="connection" />
+
+## ジェネレーターの出力
+
+ジェネレーターは、サービスのソースディレクトリ内の以下のファイルを変更します：
+
+<FileTree>
+
+- packages/my-project/src/my-service
+  - my-database.ts データベースのPrismaクライアントを返す`getMyDatabase`をエクスポート
+  - Dockerfile AuroraへのSSL接続用にAmazon RDS CAバンドルをインストール
+
+</FileTree>
+
+さらに、サービスの`<service-name>-serve`ターゲットは、データベースの`dev`ターゲットに依存するように更新されます。
+
+## サービス内でのデータベースの使用
+
+サービスのコードでゲッターをインポートし、リクエストを処理する場所で呼び出します：
+
+```ts title="packages/my-project/src/my-service/orders.ts"
+import { getMyDatabase } from './my-database.js';
+
+export const listOrders = async () => {
+  const myDatabase = await getMyDatabase();
+  return myDatabase.order.findMany();
+};
+```
+
+データベースクライアントは、`RUNTIME_CONFIG_APP_ID`環境変数を使用して、<Link path="guides/runtime-config">ランタイム設定</Link>からデータベースの接続詳細を読み取ります。
+
+生成されたコンテナサービスは`RUNTIME_CONFIG_APP_ID`を設定し、そのタスクロールにランタイム設定への読み取りアクセスを付与するため、自分で追加する必要はありません。Terraformでは、<Link path="guides/ts-container">コンテナガイド</Link>に示されているように、サービスのモジュールブロックは`appconfig_application_id`と`appconfig_application_arn`を渡す必要があります。
+
+## インフラストラクチャ
+
+ジェネレーターはスタックやルートTerraformモジュールを変更しません。代わりに、追加するコードを出力します。以下は、`my-service`という名前のサービスと`my-database`という名前のデータベースの例です。これを追加するまで、サービスはデータベースポートに到達できず、データベースはそのIAM認証を拒否します。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+この例では、`myService`は`MyService`コンストラクトで、`myDatabase`は`MyDatabase`コンストラクトです：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myDatabase.allowDefaultPortFrom(myService);
+myDatabase.grantConnect(myService.taskRole);
+```
+
+`allowDefaultPortFrom`は、データベースのセキュリティグループにインバウンドルールを追加し、サービスのセキュリティグループにアウトバウンドルールを追加します。`grantConnect`は、サービスのタスクロールに`rds-db:connect`を付与します。
+
+</Fragment>
+<Fragment slot="terraform">
+
+この例では、`module "my_service"`がサービスをデプロイし、`module "my_database"`がデータベースをデプロイします。`data "aws_region" "current"`と`data "aws_caller_identity" "current"`データソースは、生成された`providers.tf`で宣言されています：
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_role_policy" "my_service_my_database_connect" {
+  name = "my-service-my-database-connect"
+  role = module.my_service.task_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["rds-db:connect"]
+        Resource = ["arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"]
+      },
+    ]
+  })
+}
+
+resource "aws_vpc_security_group_ingress_rule" "my_service_to_my_database" {
+  description                  = "Allow the my-service container service to connect to the database"
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_service.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "my_service_to_my_database" {
+  description                  = "Allow the my-service container service to reach the database"
+  security_group_id            = module.my_service.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+### RDS Proxyを使用せずに接続する場合のSSL要件
+
+サービスがRDS Proxyを使用せずにAuroraクラスターに直接接続する場合、Node.jsはAmazon RDS認証局を信頼する必要があります。ジェネレーターは、サービスのDockerfileの`EXPOSE`行の前に、このステップを追加します：
+
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \
+    -o /usr/local/share/ca-certificates/rds-bundle.crt && \
+    update-ca-certificates
+```
+
+Node.jsがバンドルを読み取るように、サービスの`NODE_EXTRA_CA_CERTS`環境変数を`/usr/local/share/ca-certificates/rds-bundle.crt`に設定します。RDS Proxyを使用する場合は、設定する必要はありません。詳細については、[Amazon RDS SSL/TLSドキュメント](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html)を参照してください。
+
+## ローカル開発
+
+<NxCommands commands={["<service-name>-serve <project-name>"]} />
+
+これにより、サービスとデータベースのローカルDockerデータベースが起動します。`LOCAL_DEV=true`が設定されている場合、PrismaクライアントはAuroraの代わりにローカルデータベースに接続します。

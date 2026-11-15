@@ -1,0 +1,153 @@
+---
+title: Python Container Service tới Relational Database
+description: Kết nối Python container service với Python Relational Database
+when:
+  sourceType: py#container
+  targetType: py#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Generator `connection` cho phép <Link path="guides/py-container">Python container service</Link> sử dụng project <Link path="guides/py-rdb">Python Relational Database</Link>. Nó thêm package database làm dependency của project service, và chuẩn bị Docker image của service cho các kết nối SSL tới Amazon Aurora.
+
+## Cách hoạt động
+
+Container service với `infra=ecs` chạy dưới dạng các task trên Amazon ECS (Elastic Container Service) trong VPC của bạn. Mỗi task chạy với task role của service, một IAM role không có quyền nào cho đến khi bạn cấp chúng, và nằm trong security group của service, chỉ cho phép outbound traffic trên cổng 443. Để sử dụng database, service cần hai thứ mà nó không có theo mặc định:
+
+- Quyền IAM cho `rds-db:connect`, để nó có thể đăng nhập vào database với IAM authentication.
+- Một cặp security group rule trên cổng database: một inbound rule trên security group của database, và một outbound rule trên security group của service. Không có outbound rule thì service không thể tiếp cận database, vì security group của nó chỉ cho phép cổng 443 ra ngoài.
+
+Generator từ chối service với `infra=none`, vì service như vậy không có task role để cấp quyền truy cập.
+
+## Điều kiện tiên quyết
+
+Trước khi sử dụng generator này, hãy đảm bảo bạn có:
+
+1. Container service với `infra=ecs` (được tạo bằng generator <Link path="guides/py-container">`py#container`</Link>)
+2. Project <Link path="guides/py-rdb">`py#rdb`</Link>
+
+## Cách sử dụng
+
+### Chạy Generator
+
+<RunGenerator generator="connection" />
+
+Chọn project chứa container service của bạn làm source và project relational database của bạn làm target. Nếu project source chứa nhiều component, hãy đặt `sourceComponent` thành tên của service.
+
+### Tùy chọn
+
+<GeneratorParameters generator="connection" />
+
+## Kết quả từ Generator
+
+<FileTree>
+
+- packages/my\_project
+  - project.json Thêm dependency từ `my-service-serve` vào target `dev` của database
+  - pyproject.toml Thêm package database làm workspace dependency
+  - my\_project
+    - my\_service
+      - Dockerfile Cài đặt Amazon RDS CA bundle cho các kết nối SSL tới Aurora
+
+</FileTree>
+
+## Sử dụng Database trong Service
+
+Import `session_context` từ package database của bạn và sử dụng nó ở nơi bạn xử lý request:
+
+```python title="packages/my_project/my_project/my_service/orders.py"
+from sqlmodel import select
+from my_scope_my_database import session_context
+from my_scope_my_database.models.example import ExampleModel
+
+
+async def list_examples() -> list[dict]:
+    async with session_context() as session:
+        items = (await session.execute(select(ExampleModel))).scalars().all()
+        return [item.model_dump() for item in items]
+```
+
+Package database đọc các chi tiết kết nối của database từ <Link path="guides/runtime-config">runtime configuration</Link>, sử dụng biến môi trường `RUNTIME_CONFIG_APP_ID`.
+
+Container service được tạo ra đặt `RUNTIME_CONFIG_APP_ID` và cấp cho task role của nó quyền đọc runtime configuration, vì vậy bạn không cần tự thêm cả hai. Trong Terraform, module block của service phải truyền `appconfig_application_id` và `appconfig_application_arn`, như được hiển thị trong <Link path="guides/py-container">hướng dẫn container</Link>.
+
+## Infrastructure
+
+Generator không thay đổi stack hoặc root Terraform module của bạn. Thay vào đó, nó in ra code cần thêm, được hiển thị bên dưới cho service có tên `my-service` và database có tên `my-database`. Cho đến khi bạn thêm nó, service không thể tiếp cận cổng database và database từ chối IAM authentication của nó.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+Trong ví dụ, `myService` là construct `MyService` của bạn và `myDatabase` là construct `MyDatabase` của bạn:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myDatabase.allowDefaultPortFrom(myService);
+myDatabase.grantConnect(myService.taskRole);
+```
+
+`allowDefaultPortFrom` thêm inbound rule vào security group của database và outbound rule vào security group của service. `grantConnect` cấp quyền `rds-db:connect` cho task role của service.
+
+</Fragment>
+<Fragment slot="terraform">
+
+Trong ví dụ, `module "my_service"` triển khai service và `module "my_database"` triển khai database. Các data source `data "aws_region" "current"` và `data "aws_caller_identity" "current"` được khai báo trong `providers.tf` được tạo ra:
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_role_policy" "my_service_my_database_connect" {
+  name = "my-service-my-database-connect"
+  role = module.my_service.task_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["rds-db:connect"]
+        Resource = ["arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"]
+      },
+    ]
+  })
+}
+
+resource "aws_vpc_security_group_ingress_rule" "my_service_to_my_database" {
+  description                  = "Allow the my-service container service to connect to the database"
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_service.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "my_service_to_my_database" {
+  description                  = "Allow the my-service container service to reach the database"
+  security_group_id            = module.my_service.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+### Yêu cầu SSL khi Kết nối mà không có RDS Proxy
+
+Khi service kết nối trực tiếp với Aurora cluster, không thông qua RDS Proxy, nó phải tin tưởng Amazon RDS certificate authority. Generator thêm các dòng này vào Dockerfile của service, trước dòng `EXPOSE`, để cài đặt Amazon RDS CA bundle vào system trust store:
+
+```dockerfile
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt
+RUN update-ca-certificates
+```
+
+Khi sử dụng RDS Proxy, bạn không cần RDS CA bundle.
+
+## Phát triển Local
+
+<NxCommands commands={["<service-name>-serve <project-name>"]} />
+
+Lệnh này khởi động service và local Docker database của database. Với `LOCAL_DEV=true` được đặt, database client kết nối với local database thay vì Aurora.

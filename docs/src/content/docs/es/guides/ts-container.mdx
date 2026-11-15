@@ -1,0 +1,550 @@
+---
+title: Servicio de Contenedor TypeScript
+description: Agrega un servicio HTTP en contenedor a un proyecto TypeScript y ejecútalo en Amazon ECS
+generator: ts#container
+---
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import ArchitectureDiagram from '@components/architecture-diagram.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import OptionFilter from '@components/option-filter.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Snippet from '@components/snippet.astro';
+
+Este generador agrega un servicio HTTP en contenedor a un proyecto TypeScript existente. Obtienes un pequeño servidor HTTP con una ruta `GET /health`, un Dockerfile y targets para ejecutar el servidor localmente, construir su imagen y escanear la imagen. También obtienes código CDK o Terraform que ejecuta la imagen en [Amazon Elastic Container Service (Amazon ECS)](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html), el servicio de AWS que ejecuta y escala contenedores.
+
+El servicio se ejecuta en [AWS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html), que ejecuta cada contenedor sin servidores que debas administrar. Se ejecuta en tu propia VPC (nube privada virtual, una red aislada en tu cuenta de AWS), detrás de un [Application Load Balancer](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/introduction.html) (ALB) interno al que solo pueden acceder direcciones dentro de la VPC. Por defecto, una [API HTTP de Amazon API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) recibe solicitudes de los llamadores y las pasa al ALB a través de un enlace VPC (la conexión privada de API Gateway a una VPC). Los llamadores obtienen un endpoint HTTPS autenticado, y el balanceador de carga nunca se expone a internet.
+
+## Uso
+
+### Agregar un Servicio de Contenedor
+
+Puedes agregar un servicio de contenedor a un proyecto TypeScript de dos maneras:
+
+<RunGenerator generator="ts#container" />
+
+:::tip[Requisito Previo del Proyecto]
+Primero usa el generador <Link path="/guides/typescript-project">`ts#project`</Link> para crear un proyecto al que agregar tu servicio.
+:::
+
+### Opciones
+
+<GeneratorParameters generator="ts#container" />
+
+Las opciones `infra`, `ingress` y `auth` dependen unas de otras. Con `infra` establecido en `none`, el generador no proporciona infraestructura e ignora `ingress` y `auth` con una advertencia. `ingress` se aplica solo con `infra` establecido en `ecs`. `auth` se aplica solo con `ingress` establecido en `http-api`, porque un servicio `private` no tiene API HTTP para autenticar.
+
+## Salida del Generador
+
+El generador agrega los siguientes archivos a tu proyecto. La carpeta de origen se nombra según la opción `name`, o `service` si la omites:
+
+<FileTree>
+  - your-project/
+    - src/
+      - service/ (o el nombre que elegiste)
+        - server.ts Rutas HTTP: `GET /health` y la ruta de ejemplo `GET /hello`
+        - index.ts Punto de entrada que lee `PORT` e inicia el servidor. El bundle y el target `<name>-serve` inician desde este archivo
+        - Dockerfile Definición de la imagen del contenedor
+        - .dockerignore Archivos excluidos del contexto de construcción de la imagen
+    - rolldown.config.ts Actualizado con una entrada de bundle para `index.ts`
+    - project.json Actualizado con el target `bundle` y los targets `<name>-serve`, `<name>-docker` y `<name>-trivy` para tu servicio
+</FileTree>
+
+Los nombres de los targets comienzan con la opción `name`, o con `service` si la omites. Por ejemplo, los targets son `service-serve`, `service-docker` y `service-trivy` sin un nombre, y `orders-serve`, `orders-docker` y `orders-trivy` para `--name=orders`. El target `bundle` es compartido por cada punto de entrada empaquetado en el proyecto.
+
+<OptionFilter when={{ infra: 'ecs' }} description="Infraestructura del servicio ECS">
+### Infraestructura
+
+<Snippet name="shared-constructs" />
+
+Para desplegar tu servicio, se generan los siguientes archivos:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<FileTree>
+  - packages/common/constructs/src
+    - app
+      - services
+        - \<name>.ts Constructo CDK para tu servicio, con su imagen, `ingress` y `auth` configurados
+    - core
+      - container
+        - ecs-service.ts Constructo genérico para un servicio ECS en Fargate
+</FileTree>
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - app
+      - services
+        - \<name>
+          - \<name>.tf Módulo para tu servicio, que publica su imagen y escribe su URL en la configuración de runtime
+    - core
+      - container
+        - ecs-service
+          - ecs-service.tf Módulo genérico para un servicio ECS en Fargate
+          - variables.tf Entradas del módulo genérico
+          - outputs.tf Salidas del módulo genérico
+</FileTree>
+</Fragment>
+</Infrastructure>
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'none' }} description="No se proporciona infraestructura para infra=none">
+Si estableces `infra` en `none`, no se generan constructos CDK ni módulos Terraform, y el servicio solo se ejecuta localmente. Las opciones `ingress` y `auth` se ignoran en este modo.
+</OptionFilter>
+
+#### Arquitectura
+
+<ArchitectureDiagram />
+
+## Ejecutar tu Servicio Localmente
+
+El target `<name>-serve` ejecuta el servidor en tu máquina, sin un contenedor:
+
+<NxCommands commands={['run your-project:service-serve']} />
+
+El servidor escucha en el puerto de la variable de entorno `PORT`. El target `<name>-serve` lo establece en un puerto que el generador asigna, comenzando en 8081 y omitiendo puertos que otros proyectos en tu workspace ya usan. Dentro del contenedor, el servidor escucha en el puerto 8080.
+
+Verifica que el servidor esté activo con su ruta de salud, que devuelve el estado 200 y `{"status":"ok"}`:
+
+```bash
+curl http://localhost:<port>/health
+```
+
+El servidor también tiene una ruta de ejemplo que reemplazas con tus propias rutas. `GET /hello?name=<x>` devuelve `{"message":"Hello, <x>!"}`, y `name` tiene como valor predeterminado `world`. Cualquier otra ruta devuelve el estado 404.
+
+## Construir y Escanear la Imagen
+
+El target `<name>-docker` construye una imagen linux/arm64 de tu servicio. Ejecuta primero el target `bundle`, por lo que la imagen contiene el servidor empaquetado. Luego copia el `Dockerfile` y `.dockerignore` en la carpeta de salida del bundle, `dist/<project root>/bundle/container/<name>`, y construye la imagen con esa carpeta como contexto de construcción (los archivos que la construcción de la imagen puede leer). Usa el motor de contenedores con el que tu workspace está configurado, `docker` o [Finch](https://runfinch.com/). El target se ejecuta como parte del target agregado `docker`, que construye cada imagen en el proyecto.
+
+<NxCommands commands={['run your-project:service-docker']} />
+
+Solo el grupo de destino del balanceador de carga (la lista de tareas a las que el balanceador de carga envía solicitudes) verifica `GET /health`, para decidir si una tarea está lista para el tráfico. ECS ignora una instrucción `HEALTHCHECK` en el Dockerfile. Para más información sobre cómo se construyen y publican las imágenes, consulta <Link path="/guides/docker-bundling">Docker Bundling</Link>.
+
+### Escaneo de Imágenes
+
+<Snippet name="trivy-image-scan" parentHeading="Escaneo de Imágenes" />
+
+<OptionFilter when={{ infra: 'ecs' }} description="Desplegar el servicio ECS">
+## Desplegar tu Servicio
+
+### Agregar el Servicio a tu Infraestructura
+
+El constructo y el módulo nunca crean una VPC. Tú creas o importas una en tu stack o módulo raíz y la pasas. Las tareas y el balanceador de carga se ejecutan en subredes privadas con salida, que alcanzan los servicios de AWS a través de una puerta de enlace NAT (una puerta de enlace administrada que permite a las subredes privadas realizar conexiones salientes) o a través de endpoints de VPC (conexiones privadas desde tu VPC a los servicios de AWS).
+
+<Infrastructure>
+<Fragment slot="cdk">
+El constructo CDK se crea en `common/constructs` y se nombra según tu servicio. Ejemplo de uso con una nueva VPC:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyService } from '@my-scope/common-constructs';
+import { Stack, StackProps } from 'aws-cdk-lib';
+import { SubnetType, Vpc } from 'aws-cdk-lib/aws-ec2';
+import { Construct } from 'constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const vpc = new Vpc(this, 'Vpc', { natGateways: 1 });
+
+    new MyService(this, 'MyService', {
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    });
+  }
+}
+```
+
+Para usar una VPC existente, búscala con `Vpc.fromLookup(this, 'Vpc', { vpcId: '<vpc-id>' })` y pásala como `vpc`.
+</Fragment>
+<Fragment slot="terraform">
+El módulo Terraform se crea en `common/terraform`. La imagen del servicio se publica en el repositorio de activos compartido, así que instancia el módulo `core/asset-ecr` una vez por despliegue y pasa sus salidas a cada módulo de servicio. También pasa las salidas del módulo compartido `runtime_config_appconfig`, que contienen la aplicación AWS AppConfig de la que el servicio lee su <Link path="/guides/runtime-config">configuración de runtime</Link>:
+
+```hcl title="packages/infra/src/main.tf"
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
+}
+
+module "my_service" {
+  source = "../../common/terraform/src/app/services/my-service"
+
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = aws_subnet.private[*].id
+
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+  asset_ecr_repository_arn = module.asset_ecr.repository_arn
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+}
+```
+</Fragment>
+</Infrastructure>
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'ecs', ingress: 'http-api' }} description="Límites de solicitud de la API HTTP">
+### Límites de Solicitud
+
+API Gateway deja de esperar a tu servicio después de 30 segundos y devuelve un error al llamador. No puedes aumentar este tiempo de espera de integración. La carga útil de solicitud más grande que la API HTTP acepta es de 10 MB, y tampoco puedes aumentar este límite. Ambos valores provienen de la página [Cuotas de Amazon API Gateway para APIs HTTP](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-quotas.html).
+
+Por lo tanto, las solicitudes que se ejecutan durante más de 30 segundos y las respuestas que transmiten datos durante mucho tiempo no funcionan a través de la API HTTP. Para esas, establece `ingress` en `private` y llama al balanceador de carga interno desde dentro de la VPC.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'ecs' }} description="Redes, seguridad, llamadas, configuración avanzada, costo y destrucción">
+### Ejecutar sin una Puerta de Enlace NAT
+
+Cuando tus tareas se inician, ECS extrae la imagen y envía registros en su nombre. Tu código de servidor también puede llamar a servicios de AWS. En subredes privadas sin puerta de enlace NAT, cada una de estas llamadas necesita un endpoint de VPC. Sin los endpoints correctos, las tareas no se inician o se agotan cuando llaman a AWS.
+
+Crea estos endpoints en la VPC, reemplazando `<region>` con tu región de AWS:
+
+| Endpoint | Tipo | Qué lo usa |
+| --- | --- | --- |
+| `com.amazonaws.<region>.ecr.api` | Interface | ECS, para autenticarse con Amazon ECR y buscar la imagen |
+| `com.amazonaws.<region>.ecr.dkr` | Interface | ECS, para extraer la imagen de Amazon ECR |
+| `com.amazonaws.<region>.s3` | Gateway | ECS, para descargar capas de imagen, que Amazon ECR almacena en Amazon S3 |
+| `com.amazonaws.<region>.logs` | Interface | La salida de registro del contenedor, enviada a Amazon CloudWatch Logs |
+| `com.amazonaws.<region>.secretsmanager` | Interface | ECS, para leer los secretos que pasas al contenedor cuando se inicia una tarea |
+| `com.amazonaws.<region>.appconfigdata` | Interface | Tu código, para leer la <Link path="/guides/runtime-config">configuración de runtime</Link> de AWS AppConfig |
+| `com.amazonaws.<region>.sts` | Interface | Tu código, cuando solicita credenciales temporales de AWS STS (por ejemplo, para asumir otro rol) |
+
+Los endpoints de interfaz necesitan un grupo de seguridad que permita HTTPS (puerto 443) desde las tareas. Para obtener detalles sobre los endpoints de Amazon ECR, consulta [Endpoints de VPC de interfaz de Amazon ECR](https://docs.aws.amazon.com/AmazonECR/latest/userguide/vpc-endpoints.html).
+
+### Valores Predeterminados de Seguridad
+
+La infraestructura generada aplica estas configuraciones de forma predeterminada:
+
+- El balanceador de carga es interno. Ningún grupo de seguridad permite tráfico entrante desde `0.0.0.0/0` o `::/0`.
+- Las tareas se ejecutan en subredes privadas y nunca obtienen una dirección IP pública.
+- El balanceador de carga acepta tráfico solo desde el enlace VPC (`http-api`) o desde el rango de direcciones de la VPC (`private`). Las tareas aceptan tráfico solo desde el balanceador de carga, en el puerto del contenedor.
+- Las tareas solo pueden enviar tráfico saliente en el puerto 443. Las conexiones a bases de datos agregan el puerto de la base de datos.
+- El rol de tarea (el rol con el que se ejecuta tu código de servidor) solo puede leer la configuración de runtime de AWS AppConfig hasta que tú o una conexión otorguen más permisos.
+- El rol de ejecución (el rol que ECS usa para iniciar tu tarea) solo puede extraer la imagen del servicio, escribir en su grupo de registros y leer los secretos que enumeras.
+- Los secretos llegan al contenedor solo como referencias a AWS Secrets Manager o AWS Systems Manager Parameter Store, nunca como valores de entorno simples.
+- El contenedor tiene un sistema de archivos raíz de solo lectura y se ejecuta como uid 1000, un usuario no root. ECS Exec (acceso de shell a una tarea en ejecución) está desactivado.
+- Un despliegue que falla sus verificaciones de salud se detiene y revierte a la versión anterior.
+- La API HTTP escribe registros de acceso y limita las solicitudes. Se autentica con IAM a menos que elijas lo contrario.
+- Los registros se conservan durante un año.
+
+El código generado suprime estas verificaciones de [Checkov](https://www.checkov.io/) (Checkov escanea el código de infraestructura en busca de configuraciones inseguras) y establece la razón junto a cada supresión:
+
+- `CKV_AWS_91` solicita registros de acceso del balanceador de carga. Los registros de acceso de la API HTTP, o los registros de tu propio servicio, registran las solicitudes en su lugar.
+- `CKV_AWS_2` y `CKV_AWS_103` solicitan un listener HTTPS con TLS. El balanceador de carga escucha en HTTP simple porque es interno y solo los llamadores dentro de la VPC pueden alcanzarlo. Con `http-api`, TLS termina en API Gateway.
+
+El módulo Terraform también omite `CKV2_AWS_20` y `CKV_AWS_378` por la misma razón del listener HTTP, y `CKV_AWS_150` porque la protección contra eliminación del balanceador de carga está desactivada para que el servicio pueda ser destruido.
+
+### Llamar a tu Servicio
+
+La URL del servicio se escribe en la <Link path="/guides/runtime-config">configuración de runtime</Link> como `connection.services.<NameClassName>`, donde `<NameClassName>` es el nombre del servicio en PascalCase. Para `--name=orders` la clave es `Orders`. Sin un nombre, el nombre del servicio es `<project>-service`, por lo que para un proyecto llamado `my-project` la clave es `MyProjectService`. La carpeta de origen y el prefijo del target siguen siendo `service` en ese caso.
+
+<Tabs syncKey="auth">
+<TabItem label="IAM" _filter={{ ingress: 'http-api', auth: 'iam' }}>
+Los llamadores firman cada solicitud con [AWS Signature Version 4 (SigV4)](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv.html) para el servicio `execute-api`, usando credenciales de AWS que pueden llamar a la API. API Gateway rechaza una solicitud sin una firma válida antes de que llegue a tu servicio.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Otorga permiso a un rol o función para llamar al servicio con `grantInvoke`:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const service = new MyService(this, 'MyService', { vpc });
+service.grantInvoke(myFunction);
+```
+</Fragment>
+<Fragment slot="terraform">
+Otorga permiso a un rol para llamar al servicio con una política `execute-api:Invoke` en el ARN de ejecución de la API, que el módulo de tu servicio emite como `api_execution_arn`:
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_role_policy" "invoke_my_service" {
+  role = aws_iam_role.caller.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["execute-api:Invoke"]
+      Resource = ["${module.my_service.api_execution_arn}/*"]
+    }]
+  })
+}
+```
+</Fragment>
+</Infrastructure>
+</TabItem>
+<TabItem label="Cognito" _filter={{ ingress: 'http-api', auth: 'cognito' }}>
+Los llamadores envían un JSON Web Token (JWT) emitido por tu grupo de usuarios de Amazon Cognito en el encabezado `Authorization`. La API HTTP verifica que el token provenga del grupo de usuarios y haya sido emitido para uno de los clientes de aplicación aceptados.
+
+<Infrastructure>
+<Fragment slot="cdk">
+El constructo generado para un servicio Cognito no toma una prop `auth`. Pasa el grupo de usuarios y el cliente de aplicación en su prop requerida `identity` en su lugar:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+new MyService(this, 'MyService', {
+  vpc,
+  identity: { userPool, userPoolClient },
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+Establece las variables requeridas `user_pool_id` y `user_pool_client_ids` del módulo de tu servicio, `app/services/<name>/<name>.tf`. El módulo las pasa al módulo `ecs-service`.
+</Fragment>
+</Infrastructure>
+</TabItem>
+<TabItem label="None" _filter={{ ingress: 'http-api', auth: 'none' }}>
+La API HTTP acepta solicitudes sin autenticación. Cualquiera que conozca la URL puede llamar a tu servicio, así que verifica los llamadores en tu propio código.
+</TabItem>
+<TabItem label="Private" _filter={{ ingress: 'private' }}>
+Un servicio `private` no tiene API HTTP. Su URL es la dirección del balanceador de carga interno, a la que solo pueden acceder los llamadores dentro de la VPC. El balanceador de carga acepta tráfico desde el rango de direcciones de la VPC en su puerto de listener. Por ejemplo, llámalo desde una función Lambda u otro servicio ECS en la misma VPC.
+</TabItem>
+</Tabs>
+
+### Configuración Avanzada
+
+El servicio generado establece su nombre, `ingress` y `auth` por ti. Los ejemplos a continuación usan el constructo genérico `EcsService` y el módulo `ecs-service` directamente, para configuraciones que el servicio generado no pasa o para elegir `ingress` y `auth` por instancia.
+
+En CDK, tu paquete `common-constructs` exporta `EcsService` junto al constructo de tu servicio, por lo que lo importas de la misma manera: `import { EcsService } from '@my-scope/common-constructs'`. El constructo generado extiende `EcsService` y pasa todas las demás props, por ejemplo `cluster`, `loadBalancer`, `environment`, `secrets` y `grantTaskRole`. Su prop opcional `image` reemplaza la imagen construida desde tu proyecto. No tiene prop `auth`. Un servicio Cognito toma `identity` en su lugar, y otros servicios siempre usan el `auth` con el que fueron generados.
+
+En Terraform, el módulo de tu servicio te permite establecer solo algunas de las variables del módulo `ecs-service`: `vpc_id`, `subnet_ids`, `cluster_arn`, `environment`, `secrets`, `task_role_policy_statements` y `tags`, más `user_pool_id` y `user_pool_client_ids` para un servicio Cognito. Para establecer cualquier otra variable, edita el bloque `module "ecs_service"` en el módulo de tu servicio.
+
+#### Imagen Preconstruida
+
+Para ejecutar una imagen que ya está construida, por ejemplo de un registro público, pasa su URI. No se construye nada localmente. Para una imagen en un repositorio privado de Amazon ECR, CDK otorga al rol de ejecución acceso de extracción en ese repositorio. Terraform otorga acceso de extracción solo cuando también pasas el ARN del repositorio como `image_repository_arn`.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+new EcsService(this, 'Prebuilt', {
+  serviceName: 'Prebuilt',
+  vpc,
+  image: { imageUri: 'public.ecr.aws/my-org/my-image@sha256:<digest>' },
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl
+module "prebuilt" {
+  source = "../../common/terraform/src/core/container/ecs-service"
+
+  service_name = "Prebuilt"
+  vpc_id       = aws_vpc.main.id
+  subnet_ids   = aws_subnet.private[*].id
+  image_uri    = "public.ecr.aws/my-org/my-image@sha256:<digest>"
+  # For an image in a private Amazon ECR repository, also pass:
+  # image_repository_arn = aws_ecr_repository.my_image.arn
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+#### Worker sin Balanceador de Carga
+
+Un worker lee de una cola o ejecuta trabajos en segundo plano, y nada lo llama. Desactiva el balanceador de carga para obtener un servicio sin balanceador de carga, sin API HTTP y sin URL.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+new EcsService(this, 'Worker', {
+  serviceName: 'Worker',
+  vpc,
+  image: { directory: '<path to the folder with the Dockerfile>' },
+  loadBalancer: false,
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+Al igual que con una imagen preconstruida, Terraform otorga acceso de extracción en un repositorio privado de Amazon ECR solo cuando pasas `image_repository_arn`.
+
+```hcl
+module "worker" {
+  source = "../../common/terraform/src/core/container/ecs-service"
+
+  service_name  = "Worker"
+  vpc_id        = aws_vpc.main.id
+  subnet_ids    = aws_subnet.private[*].id
+  image_uri     = "<image uri pinned by digest>"
+  load_balancer = false
+  # For an image in a private Amazon ECR repository, also pass:
+  # image_repository_arn = aws_ecr_repository.my_image.arn
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+#### Varios Servicios en un Stack
+
+Cada servicio crea su propio clúster ECS a menos que pases uno. Para ejecutar varios servicios en un clúster, pasa el mismo clúster a cada uno.
+
+Cada servicio de API HTTP crea su propio enlace VPC, incluso cuando los servicios comparten un clúster. API Gateway permite 10 enlaces VPC por cuenta por región de forma predeterminada, y puedes solicitar un aumento.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+const cluster = new Cluster(this, 'Cluster', { vpc });
+
+new MyService(this, 'MyService', { vpc, cluster });
+new MyOtherService(this, 'MyOtherService', { vpc, cluster });
+```
+
+</Fragment>
+<Fragment slot="terraform">
+Pasa el mismo `cluster_arn` a cada módulo `ecs-service`. La salida `cluster_arn` del primer servicio te da uno:
+
+```hcl
+cluster_arn = module.my_service.cluster_arn
+```
+
+</Fragment>
+</Infrastructure>
+
+#### Variables de Entorno y Secretos
+
+Las configuraciones simples van en `environment`. Nunca pongas valores secretos allí, porque cualquiera que pueda leer la definición de tarea puede leerlos. Pasa los secretos como referencias en su lugar. El rol de ejecución solo puede leer los secretos que enumeras.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+new EcsService(this, 'MyService', {
+  // ...
+  environment: { LOG_LEVEL: 'info' },
+  secrets: { API_KEY: Secret.fromSecretsManager(apiKeySecret) },
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl
+environment = { LOG_LEVEL = "info" }
+secrets     = { API_KEY = aws_secretsmanager_secret.api_key.arn }
+```
+
+</Fragment>
+</Infrastructure>
+
+#### Dimensionamiento y Escalado
+
+Cada tarea obtiene 256 unidades de CPU (un cuarto de una vCPU) y 512 MiB de memoria de forma predeterminada. El servicio inicia una tarea, y el autoescalado mantiene entre una y dos tareas en ejecución, agregando tareas cuando el uso promedio de CPU supera el 70%.
+
+| Configuración | Prop CDK | Variable Terraform | Predeterminado |
+| --- | --- | --- | --- |
+| Unidades de CPU por tarea | `cpu` | `cpu` | 256 |
+| Memoria por tarea (MiB) | `memoryLimitMiB` | `memory` | 512 |
+| Tareas al inicio | `desiredCount` | `desired_count` | 1 |
+| Mínimo de tareas | `minCapacity` | `min_capacity` | 1 |
+| Máximo de tareas | `maxCapacity` | `max_capacity` | 2 |
+| CPU promedio objetivo (%) | `targetCpuUtilizationPercent` | `target_cpu_utilization` | 70 |
+
+#### Permisos del Rol de Tarea
+
+El rol de tarea del constructo o módulo de tu servicio comienza con acceso de lectura solo a la configuración de runtime. Agrega los permisos que tu código necesita:
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+new EcsService(this, 'MyService', {
+  // ...
+  grantTaskRole: (taskRole) => myTable.grantReadData(taskRole),
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl
+task_role_policy_statements = [{
+  Effect   = "Allow"
+  Action   = ["dynamodb:GetItem", "dynamodb:Query"]
+  Resource = [aws_dynamodb_table.my_table.arn]
+}]
+```
+
+</Fragment>
+</Infrastructure>
+
+#### Usuario del Contenedor
+
+La definición de tarea ejecuta el contenedor como uid 1000, un usuario no root. Esto coincide con el usuario `node` que establece el Dockerfile proporcionado. Para ejecutar como otro usuario, establece la prop `user` de CDK o la variable `container_user` de Terraform. Terraform rechaza `0` y `root`.
+
+| Configuración | Prop CDK | Variable Terraform | Predeterminado |
+| --- | --- | --- | --- |
+| Usuario con el que se ejecuta el contenedor | `user` | `container_user` | `'1000'` (CDK), `"1000:1000"` (Terraform) |
+
+#### CORS y Limitación
+
+Estas configuraciones se aplican solo con `ingress` establecido en `http-api`. CORS (intercambio de recursos de origen cruzado) decide qué sitios web pueden llamar a tu servicio desde un navegador. De forma predeterminada, la API HTTP acepta solicitudes del navegador desde cualquier origen, con cualquier método y con los encabezados `authorization`, `content-type`, `x-amz-content-sha256`, `x-amz-date` y `x-amz-security-token`. Los últimos tres son los encabezados que agrega una firma SigV4. La API HTTP también limita las solicitudes a una tasa constante de 10,000 por segundo, con ráfagas de hasta 5,000.
+
+| Configuración | CDK | Variable Terraform | Predeterminado |
+| --- | --- | --- | --- |
+| Orígenes CORS permitidos | Método `restrictCorsTo(...origins)`, o prop `corsPreflight` | `cors_allow_origins` | cualquier origen (`["*"]`) |
+| Otras configuraciones CORS | Prop `corsPreflight` | none | cualquier método, y los encabezados anteriores |
+| Limitación | Prop `throttle` | none | `{ rateLimit: 10000, burstLimit: 5000 }` |
+
+Una prop `corsPreflight` reemplaza todo el valor predeterminado, así que enumera cada encabezado que tus llamadores envían. El método `restrictCorsTo` mantiene las otras configuraciones CORS y cambia solo los orígenes permitidos:
+
+```ts
+const service = new MyService(this, 'MyService', { vpc });
+service.restrictCorsTo('https://app.example.com');
+```
+
+En Terraform, `cors_allow_origins` y `container_user` son variables del módulo `ecs-service`. El módulo de tu servicio no las pasa, así que establécelas en su bloque `module "ecs_service"`. Los valores de limitación están fijos en `ecs-service.tf`.
+
+### Costo
+
+Un servicio de contenedor factura mientras está inactivo, a diferencia de una función Lambda. Estas partes facturan por hora, independientemente de si alguien llama al servicio o no:
+
+- Tareas Fargate, por vCPU y por GB de memoria. `desiredCount` y `minCapacity` mantienen al menos una tarea en ejecución.
+- El Application Load Balancer, por hora y por unidad de capacidad del balanceador de carga.
+- Endpoints de VPC de interfaz, por hora en cada zona de disponibilidad, o una puerta de enlace NAT, por hora y por GB de datos que procesa.
+- Almacenamiento de registros en CloudWatch Logs y almacenamiento de imágenes en Amazon ECR.
+
+La API HTTP factura por solicitud. Para estimar el costo para tu región y tráfico, usa la [Calculadora de Precios de AWS](https://calculator.aws/).
+
+### Destruir tu Servicio
+
+Para eliminar el servicio, destruye el stack o la configuración de Terraform que lo contiene:
+
+<Infrastructure>
+<Fragment slot="cdk">
+Ejecuta el target `destroy` de tu proyecto de infraestructura, que ejecuta `cdk destroy`:
+
+<NxCommands commands={['run infra:destroy']} />
+</Fragment>
+<Fragment slot="terraform">
+Ejecuta el target `destroy` de tu proyecto de infraestructura:
+
+<NxCommands commands={['run infra:destroy']} />
+</Fragment>
+</Infrastructure>
+
+Luego verifica en la consola de AWS o con la CLI de AWS que estos se hayan eliminado: el servicio y clúster ECS, el balanceador de carga y su grupo de destino, la API HTTP y su enlace VPC, y el grupo de registros del servicio. Las imágenes permanecen en Amazon ECR, en el repositorio de activos de CDK o el repositorio compartido `asset-ecr`. Elimínalas si ya no las necesitas. La VPC es tuya, por lo que destruir el servicio la deja en su lugar.
+</OptionFilter>
+
+## Conectar tu Servicio
+
+Usa el generador <Link path="/guides/connection">`connection`</Link> para conectar tu servicio a otros proyectos en tu workspace:
+
+<RunGenerator generator="connection" />
+
+Un sitio web o un agente puede llamar a tu servicio, y tu servicio puede usar una base de datos relacional o una tabla de DynamoDB. Cada conexión tiene su propia guía:
+
+- <Link path="guides/connection/react-container">React a Servicio de Contenedor</Link>
+- <Link path="guides/connection/ts-agent-container">Agente TypeScript a Servicio de Contenedor</Link>
+- <Link path="guides/connection/py-agent-container">Agente Python a Servicio de Contenedor</Link>
+- <Link path="guides/connection/ts-container-rdb">Servicio de Contenedor TypeScript a Base de Datos Relacional</Link>
+- <Link path="guides/connection/ts-container-dynamodb">Servicio de Contenedor TypeScript a DynamoDB</Link>
+
+Cada conexión también tiene condiciones:
+
+- Un sitio web o un agente solo puede conectarse a un servicio con `ingress` establecido en `http-api`.
+- Un agente también solo puede conectarse a un servicio con `auth` establecido en `iam`.
+- Una conexión de base de datos o DynamoDB necesita un servicio con `infra` establecido en `ecs`.

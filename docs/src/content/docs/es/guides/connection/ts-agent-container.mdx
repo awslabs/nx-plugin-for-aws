@@ -1,0 +1,129 @@
+---
+title: TypeScript Agent a Servicio de Contenedor
+description: Conectar un TypeScript Agent a un servicio de contenedor TypeScript o Python
+when:
+  sourceType: ts#agent
+  targetType:
+    - ts#container
+    - py#container
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+El generador `connection` permite que un <Link path="guides/ts-agent">TypeScript Agent</Link> llame a un servicio de contenedor creado con <Link path="guides/ts-container">`ts#container`</Link> o <Link path="guides/py-container">`py#container`</Link>. Agrega un cliente al proyecto compartido `agent-connection` que lee la URL del servicio desde la configuración de tiempo de ejecución y firma cada solicitud con las credenciales de AWS propias del agente.
+
+## Cómo funciona esto
+
+Un servicio de contenedor con `infra=ecs` se ejecuta en Amazon ECS (Elastic Container Service) detrás de un Application Load Balancer interno. Con el valor predeterminado `ingress=http-api`, una Amazon API Gateway HTTP API (un endpoint HTTPS administrado) alcanza ese balanceador de carga a través de un VPC link, que es la conexión privada de API Gateway a tu VPC. El agente llama a la HTTP API.
+
+El cliente firma cada solicitud con SigV4, el proceso de firma de solicitudes de AWS, utilizando las credenciales del rol del agente. La HTTP API acepta la solicitud cuando ese rol puede llamar a `execute-api:Invoke` en ella. La HTTP API finaliza cualquier solicitud que tarde más de 30 segundos, por lo que una ruta que se ejecute más tiempo debe retornar temprano y finalizar su trabajo en segundo plano.
+
+El generador rechaza un servicio al que no puede llegar de esta manera. El servicio debe tener `infra=ecs`, porque `infra=none` no crea ningún endpoint. Debe tener `ingress=http-api`, porque un servicio `private` es accesible solo desde dentro de su VPC. Debe tener `auth=iam`, porque el agente firma sus solicitudes con credenciales IAM y no tiene ningún token Cognito para enviar.
+
+## Requisitos previos
+
+Antes de usar este generador, asegúrate de tener:
+
+1. Un proyecto <Link path="guides/ts-agent">`ts#agent`</Link>
+2. Un servicio de contenedor con `infra=ecs`, `ingress=http-api` y `auth=iam` (generado usando el generador <Link path="guides/ts-container">`ts#container`</Link> o <Link path="guides/py-container">`py#container`</Link>)
+
+## Uso
+
+### Ejecutar el Generador
+
+<RunGenerator generator="connection" />
+
+Selecciona el proyecto de tu agente como origen y el proyecto que contiene tu servicio de contenedor como destino. Si cualquiera de los proyectos contiene varios componentes, establece `sourceComponent` al nombre del agente y `targetComponent` al nombre del servicio.
+
+### Opciones
+
+<GeneratorParameters generator="connection" />
+
+## Salida del Generador
+
+El generador crea los siguientes archivos en el proyecto compartido `agent-connection`:
+
+<FileTree>
+
+- packages/common/agent-connection
+  - src
+    - app
+      - \<service-name>-client.ts Cliente que lee la URL del servicio desde la configuración de tiempo de ejecución y firma solicitudes con SigV4
+    - index.ts Exporta el cliente
+
+</FileTree>
+
+Agrega `@aws-lambda-powertools/parameters`, `@aws-sdk/credential-providers` y `aws4fetch` al proyecto `agent-connection`, y hace que el target `<agent-name>-dev` del agente inicie el target `<service-name>-serve` del servicio.
+
+## Usar el Cliente
+
+`<ServiceName>Client.create()` lee la URL del servicio desde el namespace `connection` de la <Link path="guides/runtime-config">configuración de tiempo de ejecución</Link>, bajo `services.<ServiceName>`. El `fetch` del cliente toma una ruta relativa al servicio. El generador no cambia el código de tu agente. Para permitir que el modelo llame al servicio, envuelve el cliente en una herramienta:
+
+```ts title="packages/my-project/src/my-agent/agent.ts"
+import { Agent, tool } from '@strands-agents/sdk';
+import { MyServiceClient } from '@my-scope/agent-connection';
+import { z } from 'zod';
+
+export const getAgent = async () => {
+  const myService = await MyServiceClient.create();
+  const checkMyService = tool({
+    name: 'check_my_service',
+    description: 'Check whether the MyService container service is healthy',
+    inputSchema: z.object({}),
+    callback: async () => (await myService.fetch('/health')).status,
+  });
+
+  return new Agent({
+    tools: [checkMyService],
+  });
+};
+```
+
+`create()` lanza una excepción cuando `RUNTIME_CONFIG_APP_ID` no está establecido o cuando la configuración de tiempo de ejecución no tiene una entrada para el servicio.
+
+## Infraestructura
+
+El rol del agente necesita permiso para llamar a la HTTP API del servicio. El generador no cambia tu stack o módulo raíz de Terraform. En su lugar, imprime el código a agregar, que se muestra a continuación para un agente llamado `my-agent` y un servicio llamado `my-service`. Hasta que lo agregues, la HTTP API rechaza las solicitudes del agente con 403 Forbidden.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+En el ejemplo, `myService` es tu constructo `MyService` y `myAgent` es tu constructo `MyAgent`:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myService.grantInvoke(myAgent);
+```
+
+`grantInvoke` permite que el rol del agente llame a `execute-api:Invoke` en la HTTP API del servicio.
+
+</Fragment>
+<Fragment slot="terraform">
+
+Agrega la declaración a los `additional_iam_policy_statements` del agente, junto a cualquier declaración que el bloque ya liste. En el ejemplo, `module "my_service"` despliega el servicio:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+  # ...existing arguments...
+  additional_iam_policy_statements = [
+    {
+      Effect   = "Allow"
+      Action   = ["execute-api:Invoke"]
+      Resource = ["${module.my_service.api_execution_arn}/*"]
+    },
+  ]
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+## Desarrollo Local
+
+<NxCommands commands={["<agent-name>-dev <project-name>"]} />
+
+Esto inicia el agente y el target `<service-name>-serve` del servicio. El target dev del agente establece `LOCAL_DEV=true`, por lo que el cliente llama al servicio en `http://localhost:<port>` sin firmar. El puerto es el que el generador de contenedor asignó al servicio.

@@ -1,0 +1,120 @@
+---
+title: Python Container Service から DynamoDB へ
+description: Python コンテナサービスを Python DynamoDB プロジェクトに接続する
+when:
+  sourceType: py#container
+  targetType: py#dynamodb
+---
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` ジェネレーターは、<Link path="guides/py-container">Python コンテナサービス</Link>が<Link path="guides/py-dynamodb">Python DynamoDB</Link> プロジェクトを使用できるようにします。DynamoDB パッケージをサービスのプロジェクトの依存関係として追加し、サービスと DynamoDB Local が一緒に起動するようにローカル開発を設定し、サービスに必要な権限を出力します。
+
+## 仕組み
+
+`infra=ecs` を持つコンテナサービスは、Amazon ECS (Elastic Container Service) 上でタスクとして実行されます。各タスクはサービスのタスクロール（追加の権限を付与するまでランタイム設定の読み取りのみが可能な IAM ロール）として実行されます。テーブルの読み取りと書き込みを行うには、タスクロールにテーブルとそのインデックスに対する DynamoDB アクション、およびテーブルの AWS KMS 暗号化キーの使用が必要です。
+
+ジェネレーターは `infra=none` を持つサービスを拒否します。これは、そのようなサービスにはアクセスを許可するタスクロールがないためです。
+
+## 前提条件
+
+このジェネレーターを使用する前に、以下を確認してください：
+
+1. `infra=ecs` を持つコンテナサービス（<Link path="guides/py-container">`py#container`</Link> ジェネレーターを使用して生成）
+2. <Link path="guides/py-dynamodb">`py#dynamodb`</Link> プロジェクト
+
+## 使用方法
+
+### ジェネレーターの実行
+
+<RunGenerator generator="connection" />
+
+コンテナサービスを含むプロジェクトをソースとして選択し、DynamoDB プロジェクトをターゲットとして選択します。ソースプロジェクトに複数のコンポーネントが含まれている場合は、`sourceComponent` をサービスの名前に設定します。
+
+### オプション
+
+<GeneratorParameters generator="connection" />
+
+## ジェネレーターの出力
+
+ジェネレーターは、DynamoDB パッケージをサービスプロジェクトの `pyproject.toml` にワークスペース依存関係として追加し、`project.json` 内のサービスの `<service-name>-serve` ターゲットを更新して DynamoDB プロジェクトの `dev` ターゲットに依存するようにします。
+
+## サービスでの DynamoDB の使用
+
+DynamoDB パッケージからエンティティクラスをインポートし、リクエストを処理する場所で使用します：
+
+```python title="packages/my_project/my_project/my_service/examples.py"
+from my_scope_my_table.entities.example import ExampleModel
+
+
+def list_examples() -> list[dict]:
+    return [item.attribute_values for item in ExampleModel.scan()]
+```
+
+## インフラストラクチャ
+
+ジェネレーターはスタックやルート Terraform モジュールを変更しません。代わりに、追加するコードを出力します。以下は、`my-service` という名前のサービスと `my-table` という名前のテーブルの例です。これを追加するまで、サービスからテーブルへのリクエストは拒否されます。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+この例では、`myService` は `MyService` コンストラクトで、`myTable` は `MyTable` コンストラクトです：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myTable.grantReadWriteData(myService.taskRole);
+```
+
+`grantReadWriteData` は、DynamoDB と KMS の両方の権限をサービスのタスクロールに付与します。
+
+</Fragment>
+<Fragment slot="terraform">
+
+この例では、`module "my_service"` がサービスをデプロイし、`module "my_table"` がテーブルをデプロイします：
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_role_policy" "my_service_my_table_access" {
+  name = "my-service-my-table-access"
+  role = module.my_service.task_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:Scan",
+          "dynamodb:BatchGetItem", "dynamodb:BatchWriteItem",
+        ]
+        Resource = [
+          module.my_table.table_arn,
+          "${module.my_table.table_arn}/index/*",
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey",
+        ]
+        Resource = [module.my_table.kms_key_arn]
+      },
+    ]
+  })
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+## ローカル開発
+
+<NxCommands commands={["<service-name>-serve <project-name>"]} />
+
+これにより、サービスと DynamoDB Local が起動します。`LOCAL_DEV=true` が設定されている場合、`is_local()` は `True` を返し、PynamoDB エンティティは AWS の代わりに DynamoDB Local に接続します。

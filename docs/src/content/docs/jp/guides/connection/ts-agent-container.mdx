@@ -1,0 +1,129 @@
+---
+title: TypeScript Agent から Container Service への接続
+description: TypeScript Agent を TypeScript または Python コンテナサービスに接続する
+when:
+  sourceType: ts#agent
+  targetType:
+    - ts#container
+    - py#container
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` ジェネレーターは、<Link path="guides/ts-agent">TypeScript Agent</Link> が <Link path="guides/ts-container">`ts#container`</Link> または <Link path="guides/py-container">`py#container`</Link> で作成されたコンテナサービスを呼び出せるようにします。共有の `agent-connection` プロジェクトにクライアントを追加し、ランタイム設定からサービスの URL を読み取り、エージェント自身の AWS 認証情報で各リクエストに署名します。
+
+## 仕組み
+
+`infra=ecs` を持つコンテナサービスは、内部 Application Load Balancer の背後で Amazon ECS (Elastic Container Service) 上で実行されます。デフォルトの `ingress=http-api` では、Amazon API Gateway HTTP API（マネージド HTTPS エンドポイント）が VPC リンクを通じてそのロードバランサーに到達します。VPC リンクは API Gateway の VPC へのプライベート接続です。エージェントは HTTP API を呼び出します。
+
+クライアントは、エージェントのロールの認証情報を使用して、AWS リクエスト署名プロセスである SigV4 で各リクエストに署名します。HTTP API は、そのロールが `execute-api:Invoke` を呼び出せる場合にリクエストを受け入れます。HTTP API は 30 秒以上かかるリクエストを終了するため、より長く実行されるルートは早期に戻り、バックグラウンドで作業を完了する必要があります。
+
+ジェネレーターは、この方法で到達できないサービスを拒否します。サービスは `infra=ecs` である必要があります。`infra=none` はエンドポイントを作成しないためです。`ingress=http-api` である必要があります。`private` サービスは VPC 内部からのみ到達可能なためです。`auth=iam` である必要があります。エージェントは IAM 認証情報でリクエストに署名し、送信する Cognito トークンを持たないためです。
+
+## 前提条件
+
+このジェネレーターを使用する前に、以下を確認してください：
+
+1. <Link path="guides/ts-agent">`ts#agent`</Link> プロジェクト
+2. `infra=ecs`、`ingress=http-api`、`auth=iam` を持つコンテナサービス（<Link path="guides/ts-container">`ts#container`</Link> または <Link path="guides/py-container">`py#container`</Link> ジェネレーターを使用して生成）
+
+## 使用方法
+
+### ジェネレーターの実行
+
+<RunGenerator generator="connection" />
+
+エージェントのプロジェクトをソースとして、コンテナサービスを含むプロジェクトをターゲットとして選択します。いずれかのプロジェクトに複数のコンポーネントが含まれている場合は、`sourceComponent` をエージェントの名前に、`targetComponent` をサービスの名前に設定します。
+
+### オプション
+
+<GeneratorParameters generator="connection" />
+
+## ジェネレーターの出力
+
+ジェネレーターは、共有の `agent-connection` プロジェクトに以下のファイルを作成します：
+
+<FileTree>
+
+- packages/common/agent-connection
+  - src
+    - app
+      - \<service-name>-client.ts Client that reads the service's URL from runtime configuration and signs requests with SigV4
+    - index.ts Exports the client
+
+</FileTree>
+
+`agent-connection` プロジェクトに `@aws-lambda-powertools/parameters`、`@aws-sdk/credential-providers`、`aws4fetch` を追加し、エージェントの `<agent-name>-dev` ターゲットがサービスの `<service-name>-serve` ターゲットを起動するようにします。
+
+## クライアントの使用
+
+`<ServiceName>Client.create()` は、<Link path="guides/runtime-config">ランタイム設定</Link>の `connection` 名前空間から、`services.<ServiceName>` の下にあるサービスの URL を読み取ります。クライアントの `fetch` は、サービスに対する相対パスを受け取ります。ジェネレーターはエージェントのコードを変更しません。モデルがサービスを呼び出せるようにするには、クライアントをツールでラップします：
+
+```ts title="packages/my-project/src/my-agent/agent.ts"
+import { Agent, tool } from '@strands-agents/sdk';
+import { MyServiceClient } from '@my-scope/agent-connection';
+import { z } from 'zod';
+
+export const getAgent = async () => {
+  const myService = await MyServiceClient.create();
+  const checkMyService = tool({
+    name: 'check_my_service',
+    description: 'Check whether the MyService container service is healthy',
+    inputSchema: z.object({}),
+    callback: async () => (await myService.fetch('/health')).status,
+  });
+
+  return new Agent({
+    tools: [checkMyService],
+  });
+};
+```
+
+`create()` は、`RUNTIME_CONFIG_APP_ID` が設定されていない場合、またはランタイム設定にサービスのエントリがない場合にスローします。
+
+## インフラストラクチャ
+
+エージェントのロールには、サービスの HTTP API を呼び出す権限が必要です。ジェネレーターはスタックやルート Terraform モジュールを変更しません。代わりに、追加するコードを出力します。以下は、`my-agent` という名前のエージェントと `my-service` という名前のサービスの例です。これを追加するまで、HTTP API はエージェントのリクエストを 403 Forbidden で拒否します。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+この例では、`myService` は `MyService` コンストラクトで、`myAgent` は `MyAgent` コンストラクトです：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myService.grantInvoke(myAgent);
+```
+
+`grantInvoke` は、エージェントのロールがサービスの HTTP API で `execute-api:Invoke` を呼び出すことを許可します。
+
+</Fragment>
+<Fragment slot="terraform">
+
+エージェントの `additional_iam_policy_statements` にステートメントを追加します。ブロックが既にリストしているステートメントの隣に配置します。この例では、`module "my_service"` がサービスをデプロイします：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+  # ...existing arguments...
+  additional_iam_policy_statements = [
+    {
+      Effect   = "Allow"
+      Action   = ["execute-api:Invoke"]
+      Resource = ["${module.my_service.api_execution_arn}/*"]
+    },
+  ]
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+## ローカル開発
+
+<NxCommands commands={["<agent-name>-dev <project-name>"]} />
+
+これにより、エージェントとサービスの `<service-name>-serve` ターゲットが起動します。エージェントの dev ターゲットは `LOCAL_DEV=true` を設定するため、クライアントは署名なしで `http://localhost:<port>` でサービスを呼び出します。ポートは、コンテナジェネレーターがサービスに割り当てたものです。

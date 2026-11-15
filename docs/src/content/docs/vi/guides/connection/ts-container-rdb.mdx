@@ -1,0 +1,154 @@
+---
+title: Dịch vụ Container TypeScript đến Cơ sở dữ liệu Quan hệ
+description: Kết nối một dịch vụ container TypeScript với Cơ sở dữ liệu Quan hệ
+when:
+  sourceType: ts#container
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Generator `connection` cho phép một <Link path="guides/ts-container">dịch vụ container TypeScript</Link> sử dụng dự án <Link path="guides/ts-rdb">Cơ sở dữ liệu Quan hệ</Link>. Nó thêm một module trả về Prisma client của cơ sở dữ liệu và chuẩn bị Docker image của dịch vụ cho các kết nối SSL đến Amazon Aurora.
+
+## Cách hoạt động
+
+Một dịch vụ container với `infra=ecs` chạy dưới dạng các task trên Amazon ECS (Elastic Container Service) trong VPC của bạn. Mỗi task chạy với vai trò task của dịch vụ, một vai trò IAM không có quyền nào cho đến khi bạn cấp chúng, và nằm trong nhóm bảo mật của dịch vụ, chỉ cho phép lưu lượng đi ra trên cổng 443. Để sử dụng cơ sở dữ liệu, dịch vụ cần hai thứ mà nó không có theo mặc định:
+
+- Quyền IAM cho `rds-db:connect`, để nó có thể đăng nhập vào cơ sở dữ liệu bằng xác thực IAM.
+- Một cặp quy tắc nhóm bảo mật trên cổng cơ sở dữ liệu: một quy tắc inbound trên nhóm bảo mật của cơ sở dữ liệu và một quy tắc outbound trên nhóm bảo mật của dịch vụ. Không có quy tắc outbound, dịch vụ không thể tiếp cận cơ sở dữ liệu, vì nhóm bảo mật của nó chỉ cho phép cổng 443 ra ngoài.
+
+Generator từ chối một dịch vụ với `infra=none`, vì dịch vụ như vậy không có vai trò task để cấp quyền truy cập.
+
+## Điều kiện tiên quyết
+
+Trước khi sử dụng generator này, hãy đảm bảo bạn có:
+
+1. Một dịch vụ container với `infra=ecs` (được tạo bằng generator <Link path="guides/ts-container">`ts#container`</Link>)
+2. Một dự án <Link path="guides/ts-rdb">`ts#rdb`</Link>
+
+## Cách sử dụng
+
+### Chạy Generator
+
+<RunGenerator generator="connection" />
+
+Chọn dự án chứa dịch vụ container của bạn làm nguồn và dự án cơ sở dữ liệu quan hệ của bạn làm đích. Nếu dự án nguồn chứa nhiều component, hãy đặt `sourceComponent` thành tên của dịch vụ.
+
+### Tùy chọn
+
+<GeneratorParameters generator="connection" />
+
+## Đầu ra của Generator
+
+Generator thay đổi các tệp sau trong thư mục nguồn của dịch vụ:
+
+<FileTree>
+
+- packages/my-project/src/my-service
+  - my-database.ts Xuất `getMyDatabase`, trả về Prisma client của cơ sở dữ liệu
+  - Dockerfile Cài đặt gói CA của Amazon RDS cho các kết nối SSL đến Aurora
+
+</FileTree>
+
+Ngoài ra, target `<service-name>-serve` của dịch vụ được cập nhật để phụ thuộc vào target `dev` của cơ sở dữ liệu.
+
+## Sử dụng Cơ sở dữ liệu trong Dịch vụ
+
+Import getter trong code của dịch vụ và gọi nó ở nơi bạn xử lý một request:
+
+```ts title="packages/my-project/src/my-service/orders.ts"
+import { getMyDatabase } from './my-database.js';
+
+export const listOrders = async () => {
+  const myDatabase = await getMyDatabase();
+  return myDatabase.order.findMany();
+};
+```
+
+Database client đọc các chi tiết kết nối của cơ sở dữ liệu từ <Link path="guides/runtime-config">runtime configuration</Link>, sử dụng biến môi trường `RUNTIME_CONFIG_APP_ID`.
+
+Dịch vụ container được tạo ra đặt `RUNTIME_CONFIG_APP_ID` và cấp cho vai trò task của nó quyền đọc runtime configuration, vì vậy bạn không cần tự thêm cả hai. Trong Terraform, khối module của dịch vụ phải truyền `appconfig_application_id` và `appconfig_application_arn`, như được hiển thị trong <Link path="guides/ts-container">hướng dẫn container</Link>.
+
+## Hạ tầng
+
+Generator không thay đổi stack hoặc module Terraform gốc của bạn. Thay vào đó, nó in ra code cần thêm, được hiển thị bên dưới cho một dịch vụ có tên `my-service` và một cơ sở dữ liệu có tên `my-database`. Cho đến khi bạn thêm nó, dịch vụ không thể tiếp cận cổng cơ sở dữ liệu và cơ sở dữ liệu từ chối xác thực IAM của nó.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+Trong ví dụ, `myService` là construct `MyService` của bạn và `myDatabase` là construct `MyDatabase` của bạn:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myDatabase.allowDefaultPortFrom(myService);
+myDatabase.grantConnect(myService.taskRole);
+```
+
+`allowDefaultPortFrom` thêm quy tắc inbound trên nhóm bảo mật của cơ sở dữ liệu và quy tắc outbound trên nhóm bảo mật của dịch vụ. `grantConnect` cấp `rds-db:connect` cho vai trò task của dịch vụ.
+
+</Fragment>
+<Fragment slot="terraform">
+
+Trong ví dụ, `module "my_service"` triển khai dịch vụ và `module "my_database"` triển khai cơ sở dữ liệu. Các data source `data "aws_region" "current"` và `data "aws_caller_identity" "current"` được khai báo trong `providers.tf` được tạo ra:
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_role_policy" "my_service_my_database_connect" {
+  name = "my-service-my-database-connect"
+  role = module.my_service.task_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["rds-db:connect"]
+        Resource = ["arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"]
+      },
+    ]
+  })
+}
+
+resource "aws_vpc_security_group_ingress_rule" "my_service_to_my_database" {
+  description                  = "Allow the my-service container service to connect to the database"
+  security_group_id            = module.my_database.security_group_id
+  referenced_security_group_id = module.my_service.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "my_service_to_my_database" {
+  description                  = "Allow the my-service container service to reach the database"
+  security_group_id            = module.my_service.security_group_id
+  referenced_security_group_id = module.my_database.security_group_id
+  from_port                    = module.my_database.cluster_port
+  to_port                      = module.my_database.cluster_port
+  ip_protocol                  = "tcp"
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+### Yêu cầu SSL khi Kết nối mà không có RDS Proxy
+
+Khi dịch vụ kết nối trực tiếp đến cụm Aurora, không thông qua RDS Proxy, Node.js phải tin tưởng certificate authority của Amazon RDS. Generator thêm bước này vào Dockerfile của dịch vụ, trước dòng `EXPOSE`:
+
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \
+    -o /usr/local/share/ca-certificates/rds-bundle.crt && \
+    update-ca-certificates
+```
+
+Đặt biến môi trường `NODE_EXTRA_CA_CERTS` của dịch vụ thành `/usr/local/share/ca-certificates/rds-bundle.crt`, để Node.js đọc gói này. Khi sử dụng RDS Proxy, bạn không cần đặt nó. Để biết thêm chi tiết, xem [tài liệu Amazon RDS SSL/TLS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html).
+
+## Phát triển Cục bộ
+
+<NxCommands commands={["<service-name>-serve <project-name>"]} />
+
+Lệnh này khởi động dịch vụ và cơ sở dữ liệu Docker cục bộ của cơ sở dữ liệu. Với `LOCAL_DEV=true` được đặt, Prisma client kết nối đến cơ sở dữ liệu cục bộ thay vì Aurora.
