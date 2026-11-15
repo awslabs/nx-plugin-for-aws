@@ -114,11 +114,28 @@ describe('py#container generator', () => {
     });
 
     it.each([
-      ['cdk', 'packages/common/constructs/project.json'],
-      ['terraform', 'packages/common/terraform/project.json'],
+      [
+        'cdk',
+        'packages/common/constructs/project.json',
+        [
+          'packages/common/constructs/src/app/services/index.ts',
+          'packages/common/constructs/src/app/services/my-proj-service.ts',
+          'packages/common/constructs/src/core/container/ecs-service.ts',
+        ],
+      ],
+      [
+        'terraform',
+        'packages/common/terraform/project.json',
+        [
+          'packages/common/terraform/src/app/services/my-proj-service/my-proj-service.tf',
+          'packages/common/terraform/src/core/container/ecs-service/ecs-service.tf',
+          'packages/common/terraform/src/core/container/ecs-service/outputs.tf',
+          'packages/common/terraform/src/core/container/ecs-service/variables.tf',
+        ],
+      ],
     ] as const)(
       'should vend the service with infra=ecs and iac=%s',
-      async (iac, infraProjectJson) => {
+      async (iac, infraProjectJson, infraFiles) => {
         await pyContainerGenerator(tree, { project: PROJECT, iac });
 
         snapshotTreeDir(tree, ROOT);
@@ -131,13 +148,13 @@ describe('py#container generator', () => {
           ),
         ).toHaveLength(1);
 
-        // The dispatcher bodies are stubs at the contract and write no files;
-        // these assertions change when the CDK and Terraform bodies land.
+        // The shared ECS service construct or module and the per-service file
+        // that the infra dispatcher vends for the chosen IaC provider.
         expect(
           allPaths(tree).filter(
             (p) => p.includes('core/container') || p.includes('app/services'),
           ),
-        ).toEqual([]);
+        ).toEqual(infraFiles);
       },
     );
   });
