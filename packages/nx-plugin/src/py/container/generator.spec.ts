@@ -171,7 +171,12 @@ describe('py#container generator', () => {
     const dockerfile = tree.read(`${SRC}/service/Dockerfile`, 'utf-8');
     expect(dockerfile).toContain(`FROM ${BASE_IMAGES.python}`);
     expect(dockerfile).toContain('pip uninstall -y pip');
-    expect(dockerfile).toContain('USER 10001');
+    // The image's user must be the uid the ECS task definition sets: EcsService
+    // defaults `user` to '1000' and the Terraform module `container_user` to
+    // '1000:1000'. Another uid would run the task as a user the image lacks.
+    expect(dockerfile).toContain('--gid 1000 app');
+    expect(dockerfile).toContain('--uid 1000 --gid app');
+    expect(dockerfile).toContain('USER 1000:1000');
     expect(dockerfile).toContain(`EXPOSE ${CONTAINER_PORT}`);
     expect(dockerfile).toContain(
       'CMD ["python", "-m", "proj_my_proj.service.main"]',
