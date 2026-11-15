@@ -218,6 +218,42 @@ describe('addContainerServiceTerraformModules', () => {
     expect(entry).toContain('"Orders" = module.ecs_service.url');
   });
 
+  it('should give the service RUNTIME_CONFIG_APP_ID and read access to runtime config', async () => {
+    await render();
+
+    const app = read(APP_FILE);
+    for (const name of [
+      'appconfig_application_id',
+      'appconfig_application_arn',
+    ]) {
+      const [variable] = blocksOf(app, `variable "${name}"`);
+      expect(variable, name).toBeDefined();
+      expect(variable).toContain('type        = string');
+      // Required, as in the agent module: a container without runtime config
+      // fails at plan time instead of at runtime.
+      expect(variable).not.toMatch(/^\s*default\s*=/m);
+    }
+    const [ecsService] = blocksOf(app, 'module "ecs_service"');
+    expect(ecsService).toMatch(/^\s*environment\s*=\s*local\.environment$/m);
+    expect(ecsService).toMatch(
+      /^\s*task_role_policy_statements\s*=\s*local\.task_role_policy_statements$/m,
+    );
+    const [locals] = topLevelBlocks(app).filter(
+      (block) =>
+        block.startsWith('locals {') && block.includes('RUNTIME_CONFIG_APP_ID'),
+    );
+    expect(locals).toMatch(
+      /^\s*environment\s*=\s*merge\(\{\n\s*RUNTIME_CONFIG_APP_ID = var\.appconfig_application_id\n\s*\}, var\.environment\)$/m,
+    );
+    expect(locals).toMatch(/^\s*task_role_policy_statements\s*=\s*concat\(\[/m);
+    expect(locals).toContain('"appconfig:StartConfigurationSession"');
+    expect(locals).toContain('"appconfig:GetLatestConfiguration"');
+    expect(locals).toMatch(
+      /Resource = \["\$\{var\.appconfig_application_arn\}\/\*"\]/,
+    );
+    expect(locals).toMatch(/\], var\.task_role_policy_statements\)$/m);
+  });
+
   it.each(VARIANTS)(
     'should open no security group to the internet for ingress=$ingress auth=$auth',
     async (variant) => {

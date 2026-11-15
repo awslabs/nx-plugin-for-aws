@@ -14,6 +14,7 @@ import {
   EcsServiceImage<% if (collides) { %> as <%= coreImage %><% } %>,
   EcsServiceProps<% if (collides) { %> as <%= coreProps %><% } %>,
 } from '../../core/container/ecs-service<% if (esm) { %>.js<% } %>';
+import { RuntimeConfig } from '../../core/runtime-config<% if (esm) { %>.js<% } %>';
 import { findWorkspaceRoot } from '../../core/workspace<% if (esm) { %>.js<% } %>';
 
 const dockerBuildContextDir = path.join(
@@ -43,18 +44,25 @@ export type <%= nameClassName %>Props = Omit<
 };
 
 /**
- * The <%= nameClassName %> container service on Amazon ECS.
+ * The <%= nameClassName %> container service on Amazon ECS. The container gets
+ * `RUNTIME_CONFIG_APP_ID` and its task role may read runtime configuration
+ * from AWS AppConfig.
  */
 export class <%= nameClassName %> extends <%= coreService %> {
   constructor(scope: Construct, id: string, props: <%= nameClassName %>Props) {
 <%_ if (ingress === 'http-api' && auth === 'cognito') { _%>
     const { identity, ...rest } = props;
 <%_ } _%>
+    const rc = RuntimeConfig.ensure(scope);
     super(scope, id, {
       containerPort: <%= containerPort %>,
       ...<% if (ingress === 'http-api' && auth === 'cognito') { %>rest<% } else { %>props<% } %>,
       serviceName: '<%= nameClassName %>',
       image: props.image ?? { directory: dockerBuildContextDir },
+      environment: {
+        RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
+        ...props.environment,
+      },
       ...(props.loadBalancer === false
         ? {}
         : {
@@ -72,5 +80,7 @@ export class <%= nameClassName %> extends <%= coreService %> {
 <%_ } _%>
           }),
     });
+
+    rc.grantReadAppConfig(this.taskRole);
   }
 }

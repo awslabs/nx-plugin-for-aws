@@ -242,6 +242,14 @@ interface EcsServiceModuleShape {
   ) => EcsServiceInstance;
 }
 
+interface ServiceModuleShape {
+  readonly Orders: new (
+    scope: import('constructs').Construct,
+    id: string,
+    props: Record<string, unknown>,
+  ) => EcsServiceInstance;
+}
+
 interface RuntimeConfigModuleShape {
   readonly RuntimeConfig: {
     ensure: (scope: import('constructs').Construct) => {
@@ -269,6 +277,7 @@ describe('EcsService synth', () => {
   let assertions: typeof import('aws-cdk-lib/assertions');
   let EcsServiceModule: EcsServiceModuleShape;
   let RuntimeConfigModule: RuntimeConfigModuleShape;
+  let ServiceModule: ServiceModuleShape;
   let appCount = 0;
 
   beforeAll(async () => {
@@ -295,6 +304,19 @@ describe('EcsService synth', () => {
         .split('../checkov.js')
         .join(pathToFileURL(modulePath('checkov')).href),
     );
+    writeFileSync(modulePath('workspace'), transpile('core/workspace.ts'));
+    // The per-service subclass, with its core imports pointed at the
+    // transpiled modules above.
+    writeFileSync(
+      modulePath('orders'),
+      transpile('app/services/orders.ts')
+        .split('../../core/container/ecs-service.js')
+        .join(pathToFileURL(modulePath('ecs-service')).href)
+        .split('../../core/runtime-config.js')
+        .join(pathToFileURL(modulePath('runtime-config')).href)
+        .split('../../core/workspace.js')
+        .join(pathToFileURL(modulePath('workspace')).href),
+    );
     mkdirSync(IMAGE_DIR, { recursive: true });
     writeFileSync(join(IMAGE_DIR, 'Dockerfile'), 'FROM scratch\n');
 
@@ -311,6 +333,7 @@ describe('EcsService synth', () => {
     RuntimeConfigModule = await import(
       pathToFileURL(modulePath('runtime-config')).href
     );
+    ServiceModule = await import(pathToFileURL(modulePath('orders')).href);
   });
 
   afterAll(() => {
@@ -859,6 +882,83 @@ describe('EcsService synth', () => {
           .services,
       ).sort(),
     ).toEqual(['One', 'Two']);
+  });
+
+  describe('service construct', () => {
+    // Synthesizes the vended per-service subclass (`app/services/orders.ts`).
+    const newOrders = (props: Record<string, unknown> = {}) => {
+      const env = newStack();
+      const service = new ServiceModule.Orders(env.stack, 'Orders', {
+        vpc: env.vpc,
+        image: { directory: IMAGE_DIR },
+        ...props,
+      });
+      return { ...env, service, out: synth(env.stack) };
+    };
+
+    it('should pass RUNTIME_CONFIG_APP_ID to the container', () => {
+      const { stack, out } = newOrders({ environment: { FOO: 'bar' } });
+
+      const [container] = taskDefinitionOf(out.resources).ContainerDefinitions;
+      expect(container.Environment).toContainEqual({
+        Name: 'RUNTIME_CONFIG_APP_ID',
+        Value: stack.resolve(
+          RuntimeConfigModule.RuntimeConfig.ensure(stack)
+            .appConfigApplicationId,
+        ),
+      });
+      expect(container.Environment).toContainEqual({
+        Name: 'FOO',
+        Value: 'bar',
+      });
+      expect(container.Environment).toContainEqual({
+        Name: 'PORT',
+        Value: '8080',
+      });
+    });
+
+    it('should let the task role read runtime config from AppConfig, and keep grantTaskRole', () => {
+      const grantTaskRole = vi.fn(
+        (role: import('aws-cdk-lib/aws-iam').IRole) => {
+          role.addToPrincipalPolicy(
+            new iam.PolicyStatement({
+              actions: ['s3:GetObject'],
+              resources: ['arn:aws:s3:::bucket/*'],
+            }),
+          );
+        },
+      );
+      const { stack, service, out } = newOrders({ grantTaskRole });
+
+      expect(grantTaskRole).toHaveBeenCalledWith(service.taskRole);
+      const taskRoleId = taskDefinitionOf(out.resources).TaskRoleArn[
+        'Fn::GetAtt'
+      ][0];
+      const statements = policyStatementsForRole(out.resources, taskRoleId);
+      const appConfigRead = statements.filter((s) =>
+        asArray(s.Action).includes('appconfig:GetLatestConfiguration'),
+      );
+      expect(appConfigRead).toHaveLength(1);
+      expect(asArray(appConfigRead[0].Action).sort()).toEqual([
+        'appconfig:GetLatestConfiguration',
+        'appconfig:StartConfigurationSession',
+      ]);
+      const appRef = stack.resolve(
+        RuntimeConfigModule.RuntimeConfig.ensure(stack).appConfigApplicationId,
+      );
+      expect(JSON.stringify(appConfigRead[0].Resource)).toContain(
+        ':appconfig:',
+      );
+      expect(JSON.stringify(appConfigRead[0].Resource)).toContain(
+        JSON.stringify(appRef),
+      );
+      expect(statements).toContainEqual(
+        expect.objectContaining({
+          Action: 's3:GetObject',
+          Resource: 'arn:aws:s3:::bucket/*',
+        }),
+      );
+    });
   });
 
   it.each<[string, Record<string, unknown>, RegExp]>([

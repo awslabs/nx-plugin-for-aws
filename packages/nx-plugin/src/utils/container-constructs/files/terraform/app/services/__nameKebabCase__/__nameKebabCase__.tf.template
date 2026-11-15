@@ -37,6 +37,16 @@ variable "asset_ecr_repository_arn" {
   type        = string
 }
 
+variable "appconfig_application_id" {
+  description = "ID of the shared runtime-config AppConfig application (from `core/runtime-config/appconfig.application_id`). The service reads its runtime configuration from this application."
+  type        = string
+}
+
+variable "appconfig_application_arn" {
+  description = "ARN of the shared runtime-config AppConfig application (from `core/runtime-config/appconfig.application_arn`). Used to scope the IAM read permission granted to the task role."
+  type        = string
+}
+
 <%_ if (ingress === 'http-api' && auth === 'cognito') { _%>
 variable "user_pool_id" {
   description = "Cognito User Pool ID for authentication"
@@ -118,6 +128,25 @@ resource "null_resource" "docker_publish" {
   }
 }
 
+locals {
+  # The service reads its runtime configuration from this AppConfig application
+  environment = merge({
+    RUNTIME_CONFIG_APP_ID = var.appconfig_application_id
+  }, var.environment)
+
+  # Grant read access to the runtime-config AppConfig application
+  task_role_policy_statements = concat([
+    {
+      Effect = "Allow"
+      Action = [
+        "appconfig:StartConfigurationSession",
+        "appconfig:GetLatestConfiguration"
+      ]
+      Resource = ["${var.appconfig_application_arn}/*"]
+    }
+  ], var.task_role_policy_statements)
+}
+
 module "ecs_service" {
   source = "../../../core/container/ecs-service"
 
@@ -128,9 +157,9 @@ module "ecs_service" {
   image_uri                   = "${null_resource.docker_publish.triggers.repository_url}:${null_resource.docker_publish.triggers.image_tag}"
   image_repository_arn        = var.asset_ecr_repository_arn
   container_port              = <%= containerPort %>
-  environment                 = var.environment
+  environment                 = local.environment
   secrets                     = var.secrets
-  task_role_policy_statements = var.task_role_policy_statements
+  task_role_policy_statements = local.task_role_policy_statements
   ingress                     = "<%= ingress %>"
 <%_ if (ingress === 'http-api') { _%>
   auth                        = "<%= auth %>"
