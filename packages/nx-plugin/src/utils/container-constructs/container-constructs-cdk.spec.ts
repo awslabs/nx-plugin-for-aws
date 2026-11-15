@@ -414,6 +414,15 @@ describe('EcsService synth', () => {
       out = synth(env.stack);
     });
 
+    it('should give the read-only container a writable /tmp', () => {
+      const taskDefinition = taskDefinitionOf(out.resources);
+      expect(taskDefinition.Volumes).toEqual([{ Name: 'tmp' }]);
+      const [container] = taskDefinition.ContainerDefinitions;
+      expect(container.MountPoints).toEqual([
+        { SourceVolume: 'tmp', ContainerPath: '/tmp', ReadOnly: false },
+      ]);
+    });
+
     it('should run an arm64 Fargate task with a read-only root and a non-root user', () => {
       const taskDefinition = taskDefinitionOf(out.resources);
       expect(taskDefinition.RuntimePlatform).toEqual({
