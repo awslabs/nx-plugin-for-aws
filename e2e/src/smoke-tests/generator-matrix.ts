@@ -239,13 +239,20 @@ export const runGeneratorMatrix = async (
     `generate @aws/nx-plugin:ts#agent#guardrails --project=ts-project --agent=agent --no-interactive`,
     opts,
   );
-  // Container services on ECS: the default HTTP API ingress, and a private one.
+  // Container services on ECS: the default HTTP API ingress (with the default
+  // iam auth) for each language, and a private Python one. Websites and agents
+  // can only connect to an HTTP API service, so the Python HTTP API service
+  // is their Python target and the private one is a data connection source.
   await runCLI(
     `generate @aws/nx-plugin:ts#container --project=ts-project --name=my-ts-container --no-interactive${deferFlag}`,
     opts,
   );
   await runCLI(
     `generate @aws/nx-plugin:py#container --project=py_project --name=my-py-container --ingress=private --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:py#container --project=py_project --name=my-py-api-container --no-interactive${deferFlag}`,
     opts,
   );
   await runCLI(
@@ -539,6 +546,49 @@ export const runGeneratorMatrix = async (
   );
   await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-mcp-server --targetProject=py_postgres_db --no-interactive${deferFlag}`,
+    opts,
+  );
+
+  // Container service connections: website and agents -> each HTTP API
+  // service, and each service -> its language's rdb and DynamoDB project.
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website --targetProject=ts-project --targetComponent=my-ts-container --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website --targetProject=py_project --targetComponent=my-py-api-container --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=ts-project --sourceComponent=agent --targetProject=ts-project --targetComponent=my-ts-container --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=ts-project --sourceComponent=agent --targetProject=py_project --targetComponent=my-py-api-container --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-agent --targetProject=ts-project --targetComponent=my-ts-container --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-agent --targetProject=py_project --targetComponent=my-py-api-container --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=ts-project --sourceComponent=my-ts-container --targetProject=postgres-db --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-container --targetProject=py_postgres_db --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=ts-project --sourceComponent=my-ts-container --targetProject=@e2e-test/my-table --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-container --targetProject=my_py_table --no-interactive${deferFlag}`,
     opts,
   );
 
