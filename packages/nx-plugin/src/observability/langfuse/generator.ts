@@ -38,6 +38,7 @@ import {
   readProjectConfigurationUnqualified,
   updateComponentGeneratorMetadata,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
@@ -52,6 +53,7 @@ export interface LangfuseMetadata {
   readonly host: string;
   readonly secretArn: string;
   readonly configHash: string;
+  readonly localConfigHash: string;
   readonly packageCommand: string;
 }
 
@@ -65,6 +67,7 @@ export const DEPENDENCIES = declareDependencies<LangfuseMetadata>()({
     { name: 'opentelemetry-exporter-otlp-proto-http' },
     { name: 'opentelemetry-sdk-extension-aws' },
     { name: 'opentelemetry-propagator-aws-xray' },
+    { name: 'uvicorn' },
   ],
 });
 
@@ -126,6 +129,7 @@ export const observabilityLangfuseGenerator = async (
   tree: Tree,
   options: ObservabilityLangfuseGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   if ('mode' in options) {
     throw new Error(
       'observability#langfuse does not accept --mode. To restore CloudWatch, revert the Langfuse setup commit, then rebuild and redeploy.',
@@ -181,6 +185,7 @@ export const observabilityLangfuseGenerator = async (
     `${kebabCase(agent.rc)}.ts`,
   );
   const config = joinPathFragments(constructDir, 'langfuse-observability.ts');
+  const localConfig = joinPathFragments(agentDir, 'langfuse_dev.py');
   const init = joinPathFragments(agentDir, 'init.py');
   const packageDir = joinPathFragments(project.root, 'package', agentFolder);
   const runtimeFiles = [
@@ -196,13 +201,42 @@ export const observabilityLangfuseGenerator = async (
       'The generated agent package target was not recognized. Restore it before enabling Langfuse.',
     );
   }
-  if (previous) {
+  const localMain = joinPathFragments(...agent.path.split(/[\\/]/), 'main.py');
+  const stockLocalCommand = `uv run fastapi dev ${localMain} --port ${agent.port}`;
+  const localCommand = `uv run uvicorn ${agentModule}.langfuse_dev:app --reload --port ${agent.port}`;
+  const localTargets = ['dev', 'serve'].map((suffix) => {
+    const target = project.targets?.[`${agent.name}-${suffix}`];
     if (
-      !tree.exists(config) ||
-      (!unchanged && digest(tree.read(config, 'utf-8')) !== previous.configHash)
+      target?.executor !== 'nx:run-commands' ||
+      target.options?.cwd !== '{projectRoot}' ||
+      !Array.isArray(target.options.commands) ||
+      target.options.commands.filter(
+        (command: unknown) =>
+          command === stockLocalCommand ||
+          (previous && command === localCommand),
+      ).length !== 1
     ) {
       throw new Error(
-        `The generated configuration ${config} was customized or removed. Reconcile it before changing observability options.`,
+        `The generated ${agent.name}-${suffix} target was customized or removed. Reconcile its command before enabling Langfuse.`,
+      );
+    }
+    return target;
+  });
+  if (previous) {
+    if (!previous.localConfigHash) {
+      throw new Error(
+        'This experimental Langfuse setup predates local trace export. Revert its setup commit and re-run the updated generator, preserving any customizations separately.',
+      );
+    }
+    if (
+      !tree.exists(config) ||
+      !tree.exists(localConfig) ||
+      (!unchanged &&
+        (digest(tree.read(config, 'utf-8')) !== previous.configHash ||
+          digest(tree.read(localConfig, 'utf-8')) !== previous.localConfigHash))
+    ) {
+      throw new Error(
+        `The generated configuration ${config} or ${localConfig} was customized or removed. Reconcile it before changing observability options.`,
       );
     }
     if (
@@ -225,22 +259,36 @@ export const observabilityLangfuseGenerator = async (
         tree,
         init,
         'language python\n`app = FastAPI($args)` where { $args <: contains `**langfuse_fastapi_options()` }',
+      )) ||
+      !(await matchGritQL(
+        tree,
+        localConfig,
+        'language python\n`initialize($service, local_config=$config)`',
+      )) ||
+      !(await matchGritQL(
+        tree,
+        localConfig,
+        'language python\n`app.add_middleware(LangfuseMiddleware)`',
       ))
     ) {
       throw new Error(
-        'The Langfuse runtime wiring was customized or removed. Reconcile the CDK construct and FastAPI initialization before re-running this generator.',
+        'The Langfuse runtime wiring was customized or removed. Reconcile the CDK construct, local entrypoint, and FastAPI initialization before re-running this generator.',
       );
     }
     if (
       unchanged &&
       runtimeFiles.every((file) => tree.exists(file)) &&
-      packageTarget.options.commands.includes(previous.packageCommand)
+      packageTarget.options.commands.includes(previous.packageCommand) &&
+      localTargets.every((target) =>
+        target.options.commands.includes(localCommand),
+      )
     ) {
       return () => {};
     }
   } else {
     for (const file of [
       config,
+      localConfig,
       joinPathFragments(agentDir, 'langfuse_telemetry.py'),
       joinPathFragments(packageDir, 'langfuse_main.py'),
     ]) {
@@ -283,6 +331,11 @@ export const observabilityLangfuseGenerator = async (
     }
   }
 
+  const preservedConfigs = unchanged
+    ? [config, localConfig].map(
+        (file) => [file, tree.read(file, 'utf-8')] as const,
+      )
+    : [];
   generateFiles(
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'runtime'),
@@ -308,6 +361,16 @@ export const observabilityLangfuseGenerator = async (
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
   if (!unchanged) {
+    generateFiles(
+      tree,
+      joinPathFragments(import.meta.dirname, 'files', 'local'),
+      agentDir,
+      {
+        agentModule,
+        host: JSON.stringify(host),
+        secretArn: JSON.stringify(secretArn),
+      },
+    );
     generateFiles(
       tree,
       joinPathFragments(import.meta.dirname, 'files', 'cdk'),
@@ -361,16 +424,23 @@ export const observabilityLangfuseGenerator = async (
   );
   if (!packageTarget.options.commands.includes(copy)) {
     packageTarget.options.commands.push(copy);
-    updateProjectConfiguration(tree, project.name, project);
   }
+  for (const target of localTargets) {
+    target.options.commands = target.options.commands.map((command: unknown) =>
+      command === stockLocalCommand ? localCommand : command,
+    );
+  }
+  updateProjectConfiguration(tree, project.name, project);
   if (!unchanged) {
     // Hash formatted configuration so later runs can detect user edits.
     await formatFilesInSubtree(tree, constructDir);
+    await formatFilesInSubtree(tree, localConfig);
     const metadata: LangfuseMetadata = {
       mode: 'langfuse',
       host,
       secretArn,
       configHash: digest(tree.read(config, 'utf-8')),
+      localConfigHash: digest(tree.read(localConfig, 'utf-8')),
       packageCommand: copy,
     };
     addPyDependencies(tree, DEPENDENCIES, {
@@ -398,6 +468,9 @@ export const observabilityLangfuseGenerator = async (
     ]);
   }
   await formatFilesInSubtree(tree, undefined, { ignore: preservedFiles });
+  for (const [file, content] of preservedConfigs) {
+    tree.write(file, content);
+  }
   return () =>
     installDependencies(tree, options.preferInstallDependencies, {
       languages: ['python'],

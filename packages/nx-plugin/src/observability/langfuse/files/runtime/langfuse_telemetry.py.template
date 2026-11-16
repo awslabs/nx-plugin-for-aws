@@ -85,14 +85,14 @@ class LangfuseContentExporter(SpanExporter):
         return self.exporter.force_flush(timeout_millis)
 
 
-def initialize(service_name: str = "agent") -> None:
+def initialize(service_name: str = "agent", *, local_config: dict[str, str] | None = None) -> None:
     global _client, _provider
     if _client is not None:
         return
     if not isinstance(trace.get_tracer_provider(), trace.ProxyTracerProvider):
         raise RuntimeError("Langfuse requires the plain entrypoint and DISABLE_ADOT_OBSERVABILITY=true.")
     try:
-        entry = get_agentcore_runtime_config()["langfuse"]["<%- agentNameClassName %>"]
+        entry = local_config if local_config is not None else get_agentcore_runtime_config()["langfuse"]["<%- agentNameClassName %>"]
         arn = entry["secretArn"]
         host = entry["host"].rstrip("/")
         url = urlsplit(host)
@@ -111,8 +111,9 @@ def initialize(service_name: str = "agent") -> None:
             aws_code = "unavailable"
         logger.warning("Langfuse startup failed (%s, AWS error code: %s).", type(error).__name__, aws_code)
         raise RuntimeError(
-            "Could not load Langfuse credentials. Check runtime config at agentcore.langfuse.<%- agentNameClassName %>, "
-            "the secret ARN, IAM access, and JSON field names."
+            "Could not load Langfuse credentials. Check langfuse_dev.py for local runs or runtime config at "
+            "agentcore.langfuse.<%- agentNameClassName %> for deployed runs, the secret ARN, AWS credentials, "
+            "IAM access, and JSON field names."
         ) from None
 
     os.environ["OTEL_SEMCONV_STABILITY_OPT_IN"] = (
