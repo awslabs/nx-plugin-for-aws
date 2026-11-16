@@ -19,6 +19,7 @@ import {
   invokeIamApiNoAuthDenied,
 } from './deploy-invocations';
 import { applyInfra } from './terraform-apply';
+import { terraformStateBucketExists } from './terraform-state-bucket';
 
 function readTerraformOutputs(projectRoot: string): Record<string, string> {
   const raw = execSync('terraform output -json', {
@@ -207,7 +208,13 @@ describe('smoke test - container-deploy', () => {
           tsServiceUrl = findOutput('TsServiceUrl');
           pyServiceUrl = findOutput('PyServiceUrl');
         } else {
-          await runCLI(`bootstrap infra --output-style=stream`, opts);
+          // `bootstrap` re-applies the shared state bucket and rewrites its
+          // bootstrap.tfstate, so run it only when the bucket is missing.
+          if (await terraformStateBucketExists()) {
+            console.log('Terraform state bucket exists; skipping bootstrap');
+          } else {
+            await runCLI(`bootstrap infra --output-style=stream`, opts);
+          }
           await applyInfra(opts);
           const outputs = readTerraformOutputs(projectRoot);
           console.log('Terraform outputs:', outputs);
