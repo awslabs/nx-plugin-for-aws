@@ -946,6 +946,9 @@ locals {
   log_group_name     = "/aws/ecs/\${local.name}"
   api_log_group_name = "/aws/apigateway/\${local.name}"
 
+  # ECS Container Insights writes performance events to this log group.
+  container_insights_log_group_name = "/aws/ecs/containerinsights/\${local.name}/performance"
+
   ssm_secret_arns = distinct([
     for arn in values(var.secrets) : arn if can(regex("^arn:[^:]+:ssm:", arn))
   ])
@@ -994,7 +997,8 @@ resource "aws_kms_key" "logs" {
           ArnLike = {
             "kms:EncryptionContext:aws:logs:arn" = [
               "arn:\${local.partition}:logs:\${local.region}:\${local.account_id}:log-group:\${local.log_group_name}",
-              "arn:\${local.partition}:logs:\${local.region}:\${local.account_id}:log-group:\${local.api_log_group_name}"
+              "arn:\${local.partition}:logs:\${local.region}:\${local.account_id}:log-group:\${local.api_log_group_name}",
+              "arn:\${local.partition}:logs:\${local.region}:\${local.account_id}:log-group:\${local.container_insights_log_group_name}"
             ]
           }
         }
@@ -1023,6 +1027,17 @@ resource "aws_cloudwatch_log_group" "api" {
   tags = var.tags
 }
 
+# Created before the cluster so that ECS writes to it, and destroy removes it.
+resource "aws_cloudwatch_log_group" "container_insights" {
+  count = local.create_cluster ? 1 : 0
+
+  name              = local.container_insights_log_group_name
+  retention_in_days = var.log_retention_days
+  kms_key_id        = aws_kms_key.logs.arn
+
+  tags = var.tags
+}
+
 resource "aws_ecs_cluster" "this" {
   count = local.create_cluster ? 1 : 0
 
@@ -1034,6 +1049,8 @@ resource "aws_ecs_cluster" "this" {
   }
 
   tags = var.tags
+
+  depends_on = [aws_cloudwatch_log_group.container_insights]
 }
 
 resource "aws_iam_role" "execution" {
@@ -1741,7 +1758,7 @@ variable "user_pool_client_ids" {
 }
 
 variable "log_retention_days" {
-  description = "Retention of the container log group, in days."
+  description = "Retention of the container, API access and Container Insights log groups, in days."
   type        = number
   default     = 365
 }

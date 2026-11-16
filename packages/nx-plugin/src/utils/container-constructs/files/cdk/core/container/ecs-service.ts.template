@@ -1,4 +1,4 @@
-import { CfnOutput, Duration, Stack } from 'aws-cdk-lib';
+import { CfnOutput, Duration, Names, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import {
   CfnApi,
   CorsHttpMethod,
@@ -135,7 +135,8 @@ export interface EcsServiceProps {
    * Cluster to run in. Pass the same cluster to several services to run them
    * in one cluster.
    *
-   * @default a new cluster with Container Insights on
+   * @default a new cluster with Container Insights on, and its Container
+   * Insights log group, which the stack deletes on destroy
    */
   readonly cluster?: ICluster;
   /**
@@ -318,12 +319,13 @@ export class EcsService extends Construct implements IConnectable {
     };
     const logRetention = props.logRetention ?? RetentionDays.ONE_YEAR;
 
+    const logsKey = new Key(this, 'LogsKey', { enableKeyRotation: true });
+    logsKey.grantEncryptDecrypt(
+      new ServicePrincipal(`logs.${Stack.of(this).region}.amazonaws.com`),
+    );
+
     this.cluster =
-      props.cluster ??
-      new Cluster(this, 'Cluster', {
-        vpc,
-        containerInsightsV2: ContainerInsights.ENABLED,
-      });
+      props.cluster ?? this.createCluster(vpc, logsKey, logRetention);
 
     this.taskDefinition = new FargateTaskDefinition(this, 'TaskDefinition', {
       cpu: props.cpu ?? 256,
@@ -336,10 +338,6 @@ export class EcsService extends Construct implements IConnectable {
     this.taskRole = this.taskDefinition.taskRole;
     props.grantTaskRole?.(this.taskRole);
 
-    const logsKey = new Key(this, 'LogsKey', { enableKeyRotation: true });
-    logsKey.grantEncryptDecrypt(
-      new ServicePrincipal(`logs.${Stack.of(this).region}.amazonaws.com`),
-    );
     const logGroup = new LogGroup(this, 'Logs', {
       encryptionKey: logsKey,
       retention: logRetention,
@@ -538,6 +536,40 @@ export class EcsService extends Construct implements IConnectable {
       exposeHeaders: this.corsPreflight.exposeHeaders,
       maxAge: this.corsPreflight.maxAge?.toSeconds(),
     };
+  }
+
+  /**
+   * Creates a cluster with Container Insights on, and the log group Container
+   * Insights writes to, so that destroying the stack removes it.
+   */
+  private createCluster(
+    vpc: IVpc,
+    logsKey: Key,
+    logRetention: RetentionDays,
+  ): Cluster {
+    // The log group name contains the cluster name, so the cluster name must
+    // be known at synth time.
+    const clusterName = Names.uniqueResourceName(this, {
+      maxLength: 255,
+      separator: '-',
+      allowedSpecialCharacters: '-_',
+    });
+    const insightsLogGroup = new LogGroup(this, 'ContainerInsightsLogs', {
+      logGroupName: `/aws/ecs/containerinsights/${clusterName}/performance`,
+      retention: logRetention,
+      encryptionKey: logsKey,
+      // ECS creates this log group itself if it is missing, so retaining it
+      // on delete would orphan it.
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+    const cluster = new Cluster(this, 'Cluster', {
+      vpc,
+      clusterName,
+      containerInsightsV2: ContainerInsights.ENABLED,
+    });
+    // The log group must exist before ECS starts writing performance events.
+    cluster.node.addDependency(insightsLogGroup);
+    return cluster;
   }
 
   private containerImage(image: EcsServiceImage): ContainerImage {

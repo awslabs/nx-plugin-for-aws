@@ -297,6 +297,39 @@ describe('addContainerServiceTerraformModules', () => {
     expect(core).toContain('cpu_architecture        = "ARM64"');
   });
 
+  it('should manage the Container Insights log group so destroy removes it', async () => {
+    await render();
+
+    const core = read(CORE_FILES.module);
+    expect(core).toMatch(
+      /^\s*container_insights_log_group_name = "\/aws\/ecs\/containerinsights\/\$\{local\.name\}\/performance"$/m,
+    );
+    const [logGroup] = blocksOf(
+      core,
+      'resource "aws_cloudwatch_log_group" "container_insights"',
+    );
+    expect(logGroup).toBeDefined();
+    expect(logGroup).toContain('count = local.create_cluster ? 1 : 0');
+    expect(logGroup).toMatch(
+      /^\s*name\s*=\s*local\.container_insights_log_group_name$/m,
+    );
+    expect(logGroup).toMatch(
+      /^\s*retention_in_days\s*=\s*var\.log_retention_days$/m,
+    );
+    expect(logGroup).toMatch(/^\s*kms_key_id\s*=\s*aws_kms_key\.logs\.arn$/m);
+
+    const [cluster] = blocksOf(core, 'resource "aws_ecs_cluster" "this"');
+    expect(cluster).toMatch(/^\s*name\s*=\s*local\.name$/m);
+    expect(cluster).toContain(
+      'depends_on = [aws_cloudwatch_log_group.container_insights]',
+    );
+
+    const [key] = blocksOf(core, 'resource "aws_kms_key" "logs"');
+    expect(key).toMatch(
+      /log-group:\$\{local\.container_insights_log_group_name\}"/,
+    );
+  });
+
   it('should give the task role no permissions by default', async () => {
     await render();
 

@@ -263,6 +263,9 @@ interface CfnResourceJson {
   readonly Type: string;
   readonly Properties: Record<string, any>;
   readonly Metadata?: Record<string, any>;
+  readonly DependsOn?: string[];
+  readonly DeletionPolicy?: string;
+  readonly UpdateReplacePolicy?: string;
 }
 
 describe('EcsService synth', () => {
@@ -463,6 +466,28 @@ describe('EcsService synth', () => {
       ]);
     });
 
+    it('should manage the Container Insights log group so destroy removes it', () => {
+      const [[, cluster]] = out.ofType('AWS::ECS::Cluster');
+      const clusterName = cluster.Properties.ClusterName;
+      expect(typeof clusterName).toBe('string');
+      expect(clusterName).toMatch(/^[A-Za-z0-9_-]{1,255}$/);
+
+      const insightsLogGroups = out
+        .ofType('AWS::Logs::LogGroup')
+        .filter(
+          ([, logGroup]) =>
+            logGroup.Properties.LogGroupName ===
+            `/aws/ecs/containerinsights/${clusterName}/performance`,
+        );
+      expect(insightsLogGroups).toHaveLength(1);
+      const [[logGroupId, logGroup]] = insightsLogGroups;
+      expect(logGroup.DeletionPolicy).toBe('Delete');
+      expect(logGroup.UpdateReplacePolicy).toBe('Delete');
+      expect(logGroup.Properties.RetentionInDays).toBe(365);
+      expect(logGroup.Properties.KmsKeyId).toBeDefined();
+      expect(cluster.DependsOn).toContain(logGroupId);
+    });
+
     it('should create an internal load balancer that drops invalid headers', () => {
       const [[, alb]] = out.ofType('AWS::ElasticLoadBalancingV2::LoadBalancer');
       expect(alb.Properties.Scheme).toBe('internal');
@@ -628,7 +653,8 @@ describe('EcsService synth', () => {
 
     it('should keep logs for a year, encrypted with a rotated KMS key', () => {
       const logGroups = out.ofType('AWS::Logs::LogGroup');
-      expect(logGroups).toHaveLength(2);
+      // Container logs, HTTP API access logs and Container Insights logs.
+      expect(logGroups).toHaveLength(3);
       for (const [, logGroup] of logGroups) {
         expect(logGroup.Properties.RetentionInDays).toBe(365);
         expect(logGroup.Properties.KmsKeyId).toBeDefined();
@@ -865,6 +891,31 @@ describe('EcsService synth', () => {
     ]);
   });
 
+  it('should give each new cluster its own name and Container Insights log group', () => {
+    const env = newStack();
+    newService({}, env);
+    new EcsServiceModule.EcsService(env.stack, 'Payments', {
+      serviceName: 'Payments',
+      vpc: env.vpc,
+      image: { directory: IMAGE_DIR },
+    });
+    const { ofType } = synth(env.stack);
+
+    const names = ofType('AWS::ECS::Cluster').map(
+      ([, cluster]) => cluster.Properties.ClusterName,
+    );
+    expect(names).toHaveLength(2);
+    expect(new Set(names).size).toBe(2);
+    const logGroupNames = ofType('AWS::Logs::LogGroup').map(
+      ([, logGroup]) => logGroup.Properties.LogGroupName,
+    );
+    for (const name of names) {
+      expect(logGroupNames).toContain(
+        `/aws/ecs/containerinsights/${name}/performance`,
+      );
+    }
+  });
+
   it('should share a cluster that is passed in', () => {
     const env = newStack();
     const cluster = new ecs.Cluster(env.stack, 'Shared', { vpc: env.vpc });
@@ -885,6 +936,14 @@ describe('EcsService synth', () => {
 
     expect(ofType('AWS::ECS::Cluster')).toHaveLength(1);
     expect(ofType('AWS::ECS::Service')).toHaveLength(2);
+    // The caller owns a cluster that is passed in, and its log groups.
+    expect(
+      ofType('AWS::Logs::LogGroup').filter(([, logGroup]) =>
+        String(logGroup.Properties.LogGroupName ?? '').startsWith(
+          '/aws/ecs/containerinsights/',
+        ),
+      ),
+    ).toHaveLength(0);
     expect(
       Object.keys(
         RuntimeConfigModule.RuntimeConfig.ensure(env.stack).get('connection')
