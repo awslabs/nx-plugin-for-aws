@@ -1,10 +1,10 @@
 ---
 title: Python 容器服务
-description: 向 Python 项目添加容器化 HTTP 服务并在 Amazon ECS 上运行
+description: 向 Python 项目添加容器化服务并在 Amazon ECS 上私密运行
 generator: py#container
 ---
 
-import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import { FileTree } from '@astrojs/starlight/components';
 import ArchitectureDiagram from '@components/architecture-diagram.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import Infrastructure from '@components/infrastructure.astro';
@@ -14,9 +14,13 @@ import OptionFilter from '@components/option-filter.astro';
 import RunGenerator from '@components/run-generator.astro';
 import Snippet from '@components/snippet.astro';
 
-此生成器向现有 Python 项目添加容器化 HTTP 服务。您将获得一个小型 [FastAPI](https://fastapi.tiangolo.com/) 服务器，由 [uvicorn](https://www.uvicorn.org/) Web 服务器运行，带有 `GET /health` 路由、Dockerfile 以及用于在本地运行服务器、构建镜像和扫描镜像的目标。您还将获得在 [Amazon Elastic Container Service (Amazon ECS)](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html)（运行和扩展容器的 AWS 服务）上运行镜像的 CDK 或 Terraform 代码。
+此生成器向现有 Python 项目添加容器化 HTTP 服务。您将获得一个小型 [FastAPI](https://fastapi.tiangolo.com/) 服务器，由 [uvicorn](https://www.uvicorn.org/) Web 服务器运行，带有 `GET /health` 路由和示例路由 `GET /echo`、Dockerfile 以及用于在本地运行服务器、构建镜像和扫描镜像的目标。您还将获得在 [Amazon Elastic Container Service (Amazon ECS)](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html)（运行和扩展容器的 AWS 服务）上运行镜像的 CDK 或 Terraform 代码。
 
-该服务运行在 [AWS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) 上，它无需您管理服务器即可运行每个容器。它运行在您自己的 VPC（虚拟私有云，AWS 账户中的隔离网络）中，位于内部 [Application Load Balancer](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/introduction.html) (ALB) 后面，只有 VPC 内的地址才能访问。默认情况下，[Amazon API Gateway HTTP API](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) 接收来自调用者的请求，并通过 VPC 链接（API Gateway 到 VPC 的私有连接）将它们传递给 ALB。调用者获得经过身份验证的 HTTPS 端点，负载均衡器永远不会面向互联网。
+## 工作原理
+
+该服务运行在 [AWS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) 上，它无需您管理服务器即可运行每个容器。您容器的每个运行副本都是一个 ECS 任务。任务运行在您自己的 VPC（虚拟私有云，AWS 账户中的隔离网络）中。安全组（附加到任务的一组防火墙规则）控制哪些网络流量可以到达它们和离开它们。
+
+该服务是私有的。它没有负载均衡器、没有 API 也没有公共 IP 地址。其安全组没有入站规则，因此在您允许调用者之前，没有任何东西可以打开到服务的连接。该服务仍然可以进行出站调用，例如到数据库或其他 AWS 服务。
 
 ## 用法
 
@@ -34,7 +38,7 @@ import Snippet from '@components/snippet.astro';
 
 <GeneratorParameters generator="py#container" />
 
-`infra`、`ingress` 和 `auth` 选项相互依赖。当 `infra` 设置为 `none` 时，生成器不提供基础设施，并会忽略 `ingress` 和 `auth` 并发出警告。`ingress` 仅在 `infra` 设置为 `ecs` 时适用。`auth` 仅在 `ingress` 设置为 `http-api` 时适用，因为 `private` 服务没有 HTTP API 需要进行身份验证。
+当 `infra` 设置为 `none` 时，生成器不提供基础设施，服务仅在本地运行。
 
 ## 生成器输出
 
@@ -67,7 +71,7 @@ import Snippet from '@components/snippet.astro';
   - packages/common/constructs/src
     - app
       - services
-        - \<name>.ts 您服务的 CDK 构造，设置了其镜像、`ingress` 和 `auth`
+        - \<name>.ts 您服务的 CDK 构造，带有其镜像
     - core
       - container
         - ecs-service.ts Fargate 上 ECS 服务的通用构造
@@ -79,7 +83,7 @@ import Snippet from '@components/snippet.astro';
     - app
       - services
         - \<name>
-          - \<name>.tf 您服务的模块，发布其镜像并将其 URL 写入运行时配置
+          - \<name>.tf 您服务的模块，发布其镜像
     - core
       - container
         - ecs-service
@@ -89,10 +93,12 @@ import Snippet from '@components/snippet.astro';
 </FileTree>
 </Fragment>
 </Infrastructure>
+
+构造和模块创建一个带有 Container Insights（集群容器的 CloudWatch 指标）的 ECS 集群、任务定义、服务、任务角色和执行角色、使用 AWS Key Management Service (AWS KMS) 密钥加密的日志组、基于 CPU 的自动扩展以及服务的安全组。
 </OptionFilter>
 
 <OptionFilter when={{ infra: 'none' }} description="infra=none 时不提供基础设施">
-如果将 `infra` 设置为 `none`，则不会生成 CDK 构造或 Terraform 模块，服务仅在本地运行。在此模式下会忽略 `ingress` 和 `auth` 选项。
+如果将 `infra` 设置为 `none`，则不会生成 CDK 构造或 Terraform 模块，服务仅在本地运行。
 </OptionFilter>
 
 #### 架构
@@ -106,6 +112,8 @@ import Snippet from '@components/snippet.astro';
 <NxCommands commands={['run your-project:service-serve']} />
 
 服务器监听 `PORT` 环境变量中的端口。`<name>-serve` 目标将其设置为生成器分配的端口，从 8081 开始，跳过工作区中其他项目已使用的端口。在容器内，服务器监听端口 8080。
+
+服务器监听 `HOST` 环境变量中的地址，默认为 `127.0.0.1`，因此 `<name>-serve` 目标仅接受来自您自己机器的连接。镜像设置 `HOST=0.0.0.0`，因此在任务内部，服务器监听任务自己的网络接口。任务的安全组仍然决定谁可以连接。
 
 使用其健康检查路由检查服务器是否启动，它返回状态 200 和 `{"status":"ok"}`：
 
@@ -121,7 +129,7 @@ curl http://localhost:<port>/health
 
 <NxCommands commands={['run your-project:service-docker']} />
 
-只有负载均衡器的目标组（负载均衡器向其发送请求的任务列表）检查 `GET /health`，以决定任务是否准备好接收流量。ECS 忽略 Dockerfile 中的 `HEALTHCHECK` 指令。有关如何构建和发布镜像的更多信息，请参阅 <Link path="/guides/docker-bundling">Docker 打包</Link>。
+在 ECS 上，健康检查命令在容器内运行，并在容器端口上调用 `GET /health`。它不需要入站访问。ECS 会替换健康检查持续失败的任务。ECS 忽略 Dockerfile 中的 `HEALTHCHECK` 指令。有关如何构建和发布镜像的更多信息，请参阅 <Link path="/guides/docker-bundling">Docker 打包</Link>。
 
 ### 镜像扫描
 
@@ -132,7 +140,7 @@ curl http://localhost:<port>/health
 
 ### 将服务添加到您的基础设施
 
-构造和模块从不创建 VPC。您在堆栈或根模块中创建或导入一个并传递它。任务和负载均衡器在具有出口的私有子网中运行，通过 NAT 网关（允许私有子网进行出站连接的托管网关）或通过 VPC 端点（从您的 VPC 到 AWS 服务的私有连接）访问 AWS 服务。
+构造和模块从不创建 VPC。您在堆栈或根模块中创建或导入一个并传递它。任务在具有出口的私有子网中运行，通过 NAT 网关（允许私有子网进行出站连接的托管网关）或通过 VPC 端点（从您的 VPC 到 AWS 服务的私有连接）访问 AWS 服务。
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -183,17 +191,7 @@ module "my_service" {
 ```
 </Fragment>
 </Infrastructure>
-</OptionFilter>
 
-<OptionFilter when={{ infra: 'ecs', ingress: 'http-api' }} description="HTTP API 请求限制">
-### 请求限制
-
-API Gateway 在 30 秒后停止等待您的服务并向调用者返回错误。您无法提高此集成超时。HTTP API 接受的最大请求负载为 10 MB，您也无法提高此限制。这两个值都来自 [Amazon API Gateway HTTP API 配额](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-quotas.html)页面。
-
-因此，运行时间超过 30 秒的请求以及长时间流式传输数据的响应无法通过 HTTP API 工作。对于这些情况，将 `ingress` 设置为 `private` 并从 VPC 内部调用内部负载均衡器。
-</OptionFilter>
-
-<OptionFilter when={{ infra: 'ecs' }} description="网络、安全、调用、高级配置、成本和销毁">
 ### 在没有 NAT 网关的情况下运行
 
 当您的任务启动时，ECS 代表它们拉取镜像并发送日志。您的服务器代码也可能调用 AWS 服务。在没有 NAT 网关的私有子网中，这些调用中的每一个都需要一个 VPC 端点。如果没有正确的端点，任务将无法启动或在调用 AWS 时超时。
@@ -216,95 +214,60 @@ API Gateway 在 30 秒后停止等待您的服务并向调用者返回错误。�
 
 生成的基础设施默认应用这些设置：
 
-- 负载均衡器是内部的。没有安全组允许来自 `0.0.0.0/0` 或 `::/0` 的入站流量。
+- 服务的安全组没有入站规则。在您添加规则之前，VPC 内部或外部的任何调用者都无法连接到任务。
 - 任务在私有子网中运行，永远不会获得公共 IP 地址。
-- 负载均衡器仅接受来自 VPC 链接（`http-api`）或来自 VPC 地址范围（`private`）的流量。任务仅接受来自负载均衡器在容器端口上的流量。
+- 生成器不会在服务前面创建负载均衡器和 API。
 - 任务只能在端口 443 上发送出站流量。与数据库的连接会添加数据库端口。
 - 任务角色（您的服务器代码运行的角色）只能从 AWS AppConfig 读取运行时配置，直到您或连接授予更多权限。
 - 执行角色（ECS 用于启动任务的角色）只能拉取服务的镜像、写入其日志组并读取您列出的密钥。
 - 密钥仅作为对 AWS Secrets Manager 或 AWS Systems Manager Parameter Store 的引用到达容器，永远不会作为纯环境值。
-- 容器具有只读根文件系统，并以 uid 1000（非 root 用户）运行。ECS Exec（对运行中任务的 shell 访问）已关闭。
+- 容器具有只读根文件系统和可写的 `/tmp` 文件夹，并以 uid 1000（非 root 用户）运行。ECS Exec（对运行中任务的 shell 访问）已关闭。
 - 健康检查失败的部署会停止并回滚到以前的版本。
-- HTTP API 写入访问日志并限制请求。除非您另外选择，否则它使用 IAM 进行身份验证。
-- 日志保留一年。
+- 日志组使用 AWS KMS 密钥加密，日志保留一年。
 
-生成的代码抑制这些 [Checkov](https://www.checkov.io/) 检查（Checkov 扫描基础设施代码以查找不安全的设置），并在每个抑制旁边说明原因：
+### 让调用者访问您的服务
 
-- `CKV_AWS_91` 要求负载均衡器访问日志。HTTP API 访问日志或您服务自己的日志会记录请求。
-- `CKV_AWS_2` 和 `CKV_AWS_103` 要求带有 TLS 的 HTTPS 侦听器。负载均衡器侦听纯 HTTP，因为它是内部的，只有 VPC 内的调用者才能访问它。使用 `http-api` 时，TLS 在 API Gateway 处终止。
-
-Terraform 模块还因相同的 HTTP 侦听器原因跳过 `CKV2_AWS_20` 和 `CKV_AWS_378`，以及 `CKV_AWS_150`，因为负载均衡器删除保护已关闭，以便可以销毁服务。
-
-### 调用您的服务
-
-服务的 URL 写入<Link path="/guides/runtime-config">运行时配置</Link>为 `connection.services.<NameClassName>`，其中 `<NameClassName>` 是 PascalCase 格式的服务名称。对于 `--name=orders`，键是 `Orders`。没有名称时，服务名称是 `<project>-service`，因此对于名为 `my-project` 的项目，键是 `MyProjectService`。在这种情况下，源文件夹和目标前缀仍然是 `service`。
-
-<Tabs syncKey="auth">
-<TabItem label="IAM" _filter={{ ingress: 'http-api', auth: 'iam' }}>
-调用者使用 [AWS Signature Version 4 (SigV4)](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv.html) 为 `execute-api` 服务签署每个请求，使用可以调用 API 的 AWS 凭证。API Gateway 在请求到达您的服务之前拒绝没有有效签名的请求。
+生成的服务无法被调用。如果 VPC 中的另一个工作负载需要调用它，例如 Lambda 函数或另一个 ECS 服务，您需要自己向服务的安全组添加入站规则。生成器不添加入站规则。通过其安全组在容器端口上允许一个命名的调用者，永远不要允许地址范围。
 
 <Infrastructure>
 <Fragment slot="cdk">
-使用 `grantInvoke` 授予角色或函数调用服务的权限：
+构造实现了 `IConnectable`，因此通过其 `connections` 允许调用者的安全组：
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-const service = new MyService(this, 'MyService', { vpc });
-service.grantInvoke(myFunction);
+import { Port } from 'aws-cdk-lib/aws-ec2';
+
+const svc = new MyService(this, 'MyService', { vpc });
+svc.connections.allowFrom(callerSecurityGroup, Port.tcp(8080));
 ```
+
+如果调用者的安全组在您的 CDK 应用中定义并限制出站流量，`allowFrom` 还会向其添加匹配的出站规则。
 </Fragment>
 <Fragment slot="terraform">
-使用 API 执行 ARN 上的 `execute-api:Invoke` 策略授予角色调用服务的权限，您的服务模块将其输出为 `api_execution_arn`：
+向服务的安全组添加入站规则，您的服务模块将其输出为 `security_group_id`，以调用者的安全组作为源：
 
 ```hcl title="packages/infra/src/main.tf"
-resource "aws_iam_role_policy" "invoke_my_service" {
-  role = aws_iam_role.caller.id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["execute-api:Invoke"]
-      Resource = ["${module.my_service.api_execution_arn}/*"]
-    }]
-  })
+resource "aws_vpc_security_group_ingress_rule" "caller_to_my_service" {
+  security_group_id            = module.my_service.security_group_id
+  referenced_security_group_id = aws_security_group.caller.id
+  from_port                    = 8080
+  to_port                      = 8080
+  ip_protocol                  = "tcp"
 }
 ```
+
+如果调用者的安全组限制出站流量，还要在调用者的组上添加一个 `aws_vpc_security_group_egress_rule` 到服务的安全组。
 </Fragment>
 </Infrastructure>
-</TabItem>
-<TabItem label="Cognito" _filter={{ ingress: 'http-api', auth: 'cognito' }}>
-调用者在 `Authorization` 标头中发送由您的 Amazon Cognito 用户池颁发的 JSON Web Token (JWT)。HTTP API 检查令牌是否来自用户池并颁发给接受的应用客户端之一。
 
-<Infrastructure>
-<Fragment slot="cdk">
-为 Cognito 服务生成的构造不接受 `auth` 属性。而是在其必需的 `identity` 属性中传递用户池和应用客户端：
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-new MyService(this, 'MyService', {
-  vpc,
-  identity: { userPool, userPoolClient },
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-设置您服务模块 `app/services/<name>/<name>.tf` 的必需 `user_pool_id` 和 `user_pool_client_ids` 变量。该模块将它们传递给 `ecs-service` 模块。
-</Fragment>
-</Infrastructure>
-</TabItem>
-<TabItem label="None" _filter={{ ingress: 'http-api', auth: 'none' }}>
-HTTP API 接受没有身份验证的请求。任何知道 URL 的人都可以调用您的服务，因此请在您自己的代码中检查调用者。
-</TabItem>
-<TabItem label="Private" _filter={{ ingress: 'private' }}>
-`private` 服务没有 HTTP API。其 URL 是内部负载均衡器的地址，只有 VPC 内的调用者才能访问。负载均衡器在其侦听器端口上接受来自 VPC 地址范围的流量。例如，从同一 VPC 中的 Lambda 函数或另一个 ECS 服务调用它。
-</TabItem>
-</Tabs>
+调用者连接到任务的私有 IP 地址。生成器不设置服务发现，当 ECS 替换任务时，任务的地址会改变。要为调用者提供稳定的名称，请自己设置服务发现，例如使用 [Amazon ECS Service Connect](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-connect.html)。
 
 ### 高级配置
 
-生成的服务为您设置其名称、`ingress` 和 `auth`。下面的示例直接使用通用 `EcsService` 构造和 `ecs-service` 模块，用于生成的服务不传递的设置或为每个实例选择 `ingress` 和 `auth`。
+生成的服务为您设置其名称和镜像。下面的示例直接使用通用 `EcsService` 构造和 `ecs-service` 模块，用于生成的服务不传递的设置。
 
-在 CDK 中，您的 `common-constructs` 包在您服务的构造旁边导出 `EcsService`，因此您以相同的方式导入它：`import { EcsService } from '@my-scope/common-constructs'`。生成的构造扩展 `EcsService` 并传递所有其他属性，例如 `cluster`、`loadBalancer`、`environment`、`secrets` 和 `grantTaskRole`。其可选的 `image` 属性替换从您的项目构建的镜像。它没有 `auth` 属性。Cognito 服务改为接受 `identity`，其他服务始终使用它们生成时使用的 `auth`。
+在 CDK 中，您的 `common-constructs` 包在您服务的构造旁边导出 `EcsService`，因此您以相同的方式导入它：`import { EcsService } from '@my-scope/common-constructs'`。生成的构造扩展 `EcsService` 并传递所有其他属性，例如 `cluster`、`environment`、`secrets` 和 `grantTaskRole`。其可选的 `image` 属性替换从您的项目构建的镜像。
 
-在 Terraform 中，您的服务模块只允许您设置 `ecs-service` 模块的某些变量：`vpc_id`、`subnet_ids`、`cluster_arn`、`environment`、`secrets`、`task_role_policy_statements` 和 `tags`，以及 Cognito 服务的 `user_pool_id` 和 `user_pool_client_ids`。要设置任何其他变量，请编辑您服务模块中的 `module "ecs_service"` 块。
+在 Terraform 中，您的服务模块只允许您设置 `ecs-service` 模块的某些变量：`vpc_id`、`subnet_ids`、`cluster_arn`、`environment`、`secrets`、`task_role_policy_statements` 和 `tags`。要设置任何其他变量，请编辑您服务模块中的 `module "ecs_service"` 块。
 
 #### 预构建镜像
 
@@ -340,48 +303,9 @@ module "prebuilt" {
 </Fragment>
 </Infrastructure>
 
-#### 没有负载均衡器的工作器
-
-工作器从队列读取或运行后台作业，没有任何东西调用它。关闭负载均衡器以获得没有负载均衡器、没有 HTTP API 和没有 URL 的服务。
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts
-new EcsService(this, 'Worker', {
-  serviceName: 'Worker',
-  vpc,
-  image: { directory: '<path to the folder with the Dockerfile>' },
-  loadBalancer: false,
-});
-```
-
-</Fragment>
-<Fragment slot="terraform">
-与预构建镜像一样，Terraform 仅在您传递 `image_repository_arn` 时才授予对私有 Amazon ECR 存储库的拉取访问权限。
-
-```hcl
-module "worker" {
-  source = "../../common/terraform/src/core/container/ecs-service"
-
-  service_name  = "Worker"
-  vpc_id        = aws_vpc.main.id
-  subnet_ids    = aws_subnet.private[*].id
-  image_uri     = "<image uri pinned by digest>"
-  load_balancer = false
-  # For an image in a private Amazon ECR repository, also pass:
-  # image_repository_arn = aws_ecr_repository.my_image.arn
-}
-```
-
-</Fragment>
-</Infrastructure>
-
 #### 一个堆栈中的多个服务
 
 除非您传入一个集群，否则每个服务都会创建自己的 ECS 集群。要在一个集群中运行多个服务，请将相同的集群传递给每个服务。
-
-即使服务共享集群，每个 HTTP API 服务也会创建自己的 VPC 链接。默认情况下，API Gateway 允许每个账户每个区域 10 个 VPC 链接，您可以请求增加。
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -479,35 +403,17 @@ task_role_policy_statements = [{
 | --- | --- | --- | --- |
 | 容器运行的用户 | `user` | `container_user` | `'1000'` (CDK), `"1000:1000"` (Terraform) |
 
-#### CORS 和限流
-
-这些设置仅在 `ingress` 设置为 `http-api` 时适用。CORS（跨源资源共享）决定哪些网站可以从浏览器调用您的服务。默认情况下，HTTP API 接受来自任何源的浏览器请求，使用任何方法，并使用 `authorization`、`content-type`、`x-amz-content-sha256`、`x-amz-date` 和 `x-amz-security-token` 标头。最后三个是 SigV4 签名添加的标头。HTTP API 还将请求限制为每秒 10,000 个的稳定速率，突发最多 5,000 个。
-
-| 设置 | CDK | Terraform 变量 | 默认值 |
-| --- | --- | --- | --- |
-| 允许的 CORS 源 | `restrictCorsTo(...origins)` 方法，或 `corsPreflight` 属性 | `cors_allow_origins` | 任何源 (`["*"]`) |
-| 其他 CORS 设置 | `corsPreflight` 属性 | 无 | 任何方法，以及上述标头 |
-| 限流 | `throttle` 属性 | 无 | `{ rateLimit: 10000, burstLimit: 5000 }` |
-
-`corsPreflight` 属性替换整个默认值，因此列出调用者发送的每个标头。`restrictCorsTo` 方法保留其他 CORS 设置，仅更改允许的源：
-
-```ts
-const service = new MyService(this, 'MyService', { vpc });
-service.restrictCorsTo('https://app.example.com');
-```
-
-在 Terraform 中，`cors_allow_origins` 和 `container_user` 是 `ecs-service` 模块的变量。您的服务模块不传递它们，因此在其 `module "ecs_service"` 块中设置它们。限流值在 `ecs-service.tf` 中固定。
+在 Terraform 中，`container_user` 是 `ecs-service` 模块的变量。您的服务模块不传递它，因此在其 `module "ecs_service"` 块中设置它。
 
 ### 成本
 
 容器服务在空闲时计费，不像 Lambda 函数。无论是否有人调用服务，这些部分都按小时计费：
 
 - Fargate 任务，按 vCPU 和每 GB 内存计费。`desiredCount` 和 `minCapacity` 至少保持一个任务运行。
-- Application Load Balancer，按小时和每个负载均衡器容量单元计费。
 - 接口 VPC 端点，在每个可用区按小时计费，或 NAT 网关，按小时和每 GB 处理的数据计费。
 - CloudWatch Logs 中的日志存储和 Amazon ECR 中的镜像存储。
 
-HTTP API 按请求计费。要估算您的区域和流量的成本，请使用 [AWS 定价计算器](https://calculator.aws/)。
+要估算您的区域和流量的成本，请使用 [AWS 定价计算器](https://calculator.aws/)。
 
 ### 销毁您的服务
 
@@ -526,7 +432,7 @@ HTTP API 按请求计费。要估算您的区域和流量的成本，请使用 [
 </Fragment>
 </Infrastructure>
 
-然后在 AWS 控制台或使用 AWS CLI 检查这些是否已消失：ECS 服务和集群、负载均衡器及其目标组、HTTP API 及其 VPC 链接以及服务的日志组。镜像保留在 Amazon ECR 中，在 CDK 资产存储库或共享 `asset-ecr` 存储库中。如果您不再需要它们，请删除它们。VPC 是您的，因此销毁服务会将其保留在原处。
+然后在 AWS 控制台或使用 AWS CLI 检查 ECS 服务和集群是否已消失。使用 Terraform，destroy 还会删除服务的日志组并安排其 AWS KMS 密钥在 7 天后删除。使用 CDK，destroy 会保留服务的日志组和其 AWS KMS 密钥，因为 CDK 会保留日志组和密钥，除非删除策略另有说明。如果您不再需要日志，请自己删除它们。镜像保留在 Amazon ECR 中，在 CDK 资产存储库或共享 `asset-ecr` 存储库中。如果您不再需要它们，请删除它们。VPC 是您的，因此销毁服务会将其保留在原处。
 </OptionFilter>
 
 ## 连接您的服务
@@ -535,16 +441,9 @@ HTTP API 按请求计费。要估算您的区域和流量的成本，请使用 [
 
 <RunGenerator generator="connection" />
 
-网站或代理可以调用您的服务，您的服务可以使用关系数据库或 DynamoDB 表。每个连接都有自己的指南：
+您的服务可以使用关系数据库或 DynamoDB 表。每个连接都有自己的指南：
 
-- <Link path="guides/connection/react-container">React 到容器服务</Link>
-- <Link path="guides/connection/ts-agent-container">TypeScript 代理到容器服务</Link>
-- <Link path="guides/connection/py-agent-container">Python 代理到容器服务</Link>
 - <Link path="guides/connection/py-container-rdb">Python 容器服务到关系数据库</Link>
 - <Link path="guides/connection/py-container-dynamodb">Python 容器服务到 DynamoDB</Link>
 
-每个连接也有条件：
-
-- 网站或代理只能连接到 `ingress` 设置为 `http-api` 的服务。
-- 代理也只能连接到 `auth` 设置为 `iam` 的服务。
-- 数据库或 DynamoDB 连接需要 `infra` 设置为 `ecs` 的服务。
+连接需要 `infra` 设置为 `ecs` 的服务。

@@ -1,10 +1,10 @@
 ---
 title: TypeScript Container Service
-description: Aggiungi un servizio HTTP containerizzato a un progetto TypeScript ed eseguilo su Amazon ECS
+description: Aggiungi un servizio containerizzato a un progetto TypeScript ed eseguilo privatamente su Amazon ECS
 generator: ts#container
 ---
 
-import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import { FileTree } from '@astrojs/starlight/components';
 import ArchitectureDiagram from '@components/architecture-diagram.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import Infrastructure from '@components/infrastructure.astro';
@@ -14,9 +14,13 @@ import OptionFilter from '@components/option-filter.astro';
 import RunGenerator from '@components/run-generator.astro';
 import Snippet from '@components/snippet.astro';
 
-Questo generatore aggiunge un servizio HTTP containerizzato a un progetto TypeScript esistente. Ottieni un piccolo server HTTP con una route `GET /health`, un Dockerfile e target per eseguire il server localmente, costruire la sua immagine e scansionare l'immagine. Ottieni anche codice CDK o Terraform che esegue l'immagine su [Amazon Elastic Container Service (Amazon ECS)](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html), il servizio AWS che esegue e scala i container.
+Questo generatore aggiunge un servizio HTTP containerizzato a un progetto TypeScript esistente. Ottieni un piccolo server HTTP con una route `GET /health` e una route di esempio `GET /hello`, un Dockerfile e target per eseguire il server localmente, costruire la sua immagine e scansionare l'immagine. Ottieni anche codice CDK o Terraform che esegue l'immagine su [Amazon Elastic Container Service (Amazon ECS)](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html), il servizio AWS che esegue e scala i container.
 
-Il servizio viene eseguito su [AWS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html), che esegue ogni container senza server da gestire. Viene eseguito nel tuo VPC (virtual private cloud, una rete isolata nel tuo account AWS), dietro un [Application Load Balancer](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/introduction.html) (ALB) interno che solo gli indirizzi all'interno del VPC possono raggiungere. Per impostazione predefinita, un'[Amazon API Gateway HTTP API](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) riceve le richieste dai chiamanti e le passa all'ALB attraverso un VPC link (la connessione privata di API Gateway in un VPC). I chiamanti ottengono un endpoint HTTPS autenticato e il load balancer non è mai esposto a Internet.
+## Come Funziona
+
+Il servizio viene eseguito su [AWS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html), che esegue ogni container senza server da gestire. Ogni copia in esecuzione del tuo container è un task ECS. I task vengono eseguiti nel tuo VPC (virtual private cloud, una rete isolata nel tuo account AWS). Un security group (un insieme di regole firewall collegate ai task) controlla quale traffico di rete può raggiungerli e lasciarli.
+
+Il servizio è privato. Non ha load balancer, nessuna API e nessun indirizzo IP pubblico. Il suo security group non ha regole in entrata, quindi nulla può aprire una connessione al servizio finché non consenti un chiamante. Il servizio può comunque effettuare chiamate in uscita, ad esempio a un database o ad altri servizi AWS.
 
 ## Utilizzo
 
@@ -34,7 +38,7 @@ Prima usa il generatore <Link path="/guides/typescript-project">`ts#project`</Li
 
 <GeneratorParameters generator="ts#container" />
 
-Le opzioni `infra`, `ingress` e `auth` dipendono l'una dall'altra. Con `infra` impostato su `none` il generatore non produce infrastruttura e ignora `ingress` e `auth` con un avviso. `ingress` si applica solo con `infra` impostato su `ecs`. `auth` si applica solo con `ingress` impostato su `http-api`, perché un servizio `private` non ha un'HTTP API da autenticare.
+Con `infra` impostato su `none` il generatore non produce infrastruttura e il servizio viene eseguito solo localmente.
 
 ## Output del Generatore
 
@@ -67,7 +71,7 @@ Per il deployment del tuo servizio, vengono generati i seguenti file:
   - packages/common/constructs/src
     - app
       - services
-        - \<name>.ts Costrutto CDK per il tuo servizio, con la sua immagine, `ingress` e `auth` impostati
+        - \<name>.ts Costrutto CDK per il tuo servizio, con la sua immagine
     - core
       - container
         - ecs-service.ts Costrutto generico per un servizio ECS su Fargate
@@ -79,7 +83,7 @@ Per il deployment del tuo servizio, vengono generati i seguenti file:
     - app
       - services
         - \<name>
-          - \<name>.tf Modulo per il tuo servizio, che pubblica la sua immagine e scrive il suo URL nella configurazione runtime
+          - \<name>.tf Modulo per il tuo servizio, che pubblica la sua immagine
     - core
       - container
         - ecs-service
@@ -89,10 +93,12 @@ Per il deployment del tuo servizio, vengono generati i seguenti file:
 </FileTree>
 </Fragment>
 </Infrastructure>
+
+Il costrutto e il modulo creano un cluster ECS con Container Insights (metriche CloudWatch per i container del cluster), una definizione del task, il servizio, un task role e un execution role, un log group crittografato con una chiave AWS Key Management Service (AWS KMS), autoscaling basato sulla CPU e il security group del servizio.
 </OptionFilter>
 
 <OptionFilter when={{ infra: 'none' }} description="Nessuna infrastruttura viene prodotta per infra=none">
-Se imposti `infra` su `none`, non vengono generati costrutti CDK o moduli Terraform e il servizio viene eseguito solo localmente. Le opzioni `ingress` e `auth` vengono ignorate in questa modalità.
+Se imposti `infra` su `none`, non vengono generati costrutti CDK o moduli Terraform e il servizio viene eseguito solo localmente.
 </OptionFilter>
 
 #### Architettura
@@ -106,6 +112,8 @@ Il target `<name>-serve` esegue il server sulla tua macchina, senza un container
 <NxCommands commands={['run your-project:service-serve']} />
 
 Il server ascolta sulla porta nella variabile d'ambiente `PORT`. Il target `<name>-serve` la imposta su una porta che il generatore assegna, partendo da 8081 e saltando le porte che altri progetti nel tuo workspace già utilizzano. All'interno del container il server ascolta sulla porta 8080.
+
+Il server ascolta sull'indirizzo nella variabile d'ambiente `HOST`, che per impostazione predefinita è `127.0.0.1`, quindi il target `<name>-serve` accetta connessioni solo dalla tua macchina. L'immagine imposta `HOST=0.0.0.0`, quindi all'interno di un task il server ascolta sull'interfaccia di rete del task stesso. Il security group del task decide comunque chi può connettersi.
 
 Verifica che il server sia attivo con la sua route di health, che restituisce lo stato 200 e `{"status":"ok"}`:
 
@@ -121,7 +129,7 @@ Il target `<name>-docker` costruisce un'immagine linux/arm64 del tuo servizio. E
 
 <NxCommands commands={['run your-project:service-docker']} />
 
-Solo il target group del load balancer (l'elenco dei task a cui il load balancer invia le richieste) controlla `GET /health`, per decidere se un task è pronto per il traffico. ECS ignora un'istruzione `HEALTHCHECK` nel Dockerfile. Per maggiori informazioni su come vengono costruite e pubblicate le immagini, vedi <Link path="/guides/docker-bundling">Docker Bundling</Link>.
+Su ECS, un comando di health check viene eseguito all'interno del container e chiama `GET /health` sulla porta del container. Non necessita di accesso in entrata. ECS sostituisce un task il cui health check continua a fallire. ECS ignora un'istruzione `HEALTHCHECK` nel Dockerfile. Per maggiori informazioni su come vengono costruite e pubblicate le immagini, vedi <Link path="/guides/docker-bundling">Docker Bundling</Link>.
 
 ### Scansione dell'Immagine
 
@@ -132,7 +140,7 @@ Solo il target group del load balancer (l'elenco dei task a cui il load balancer
 
 ### Aggiungere il Servizio alla Tua Infrastruttura
 
-Il costrutto e il modulo non creano mai un VPC. Ne crei o importi uno nel tuo stack o modulo root e lo passi. I task e il load balancer vengono eseguiti in subnet private con egress, che raggiungono i servizi AWS attraverso un NAT gateway (un gateway gestito che consente alle subnet private di effettuare connessioni in uscita) o attraverso VPC endpoint (connessioni private dal tuo VPC ai servizi AWS).
+Il costrutto e il modulo non creano mai un VPC. Ne crei o importi uno nel tuo stack o modulo root e lo passi. I task vengono eseguiti in subnet private con egress, che raggiungono i servizi AWS attraverso un NAT gateway (un gateway gestito che consente alle subnet private di effettuare connessioni in uscita) o attraverso VPC endpoint (connessioni private dal tuo VPC ai servizi AWS).
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -183,17 +191,7 @@ module "my_service" {
 ```
 </Fragment>
 </Infrastructure>
-</OptionFilter>
 
-<OptionFilter when={{ infra: 'ecs', ingress: 'http-api' }} description="Limiti delle richieste HTTP API">
-### Limiti delle Richieste
-
-API Gateway smette di attendere il tuo servizio dopo 30 secondi e restituisce un errore al chiamante. Non puoi aumentare questo timeout di integrazione. Il payload di richiesta più grande che l'HTTP API accetta è 10 MB e non puoi aumentare neanche questo limite. Entrambi i valori provengono dalla pagina [Amazon API Gateway quotas for HTTP APIs](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-quotas.html).
-
-Quindi le richieste che durano più di 30 secondi e le risposte che trasmettono dati per un lungo periodo non funzionano attraverso l'HTTP API. Per quelle, imposta `ingress` su `private` e chiama il load balancer interno dall'interno del VPC.
-</OptionFilter>
-
-<OptionFilter when={{ infra: 'ecs' }} description="Networking, sicurezza, chiamate, configurazione avanzata, costi e distruzione">
 ### Esecuzione Senza un NAT Gateway
 
 Quando i tuoi task si avviano, ECS estrae l'immagine e invia i log per loro conto. Il codice del tuo server potrebbe anche chiamare i servizi AWS. Nelle subnet private senza NAT gateway, ognuna di queste chiamate necessita di un VPC endpoint. Senza gli endpoint giusti, i task non riescono ad avviarsi o vanno in timeout quando chiamano AWS.
@@ -216,95 +214,60 @@ Gli endpoint di interfaccia necessitano di un security group che consenta HTTPS 
 
 L'infrastruttura generata applica queste impostazioni per impostazione predefinita:
 
-- Il load balancer è interno. Nessun security group consente il traffico in entrata da `0.0.0.0/0` o `::/0`.
+- Il security group del servizio non ha regole in entrata. Nessun chiamante all'interno o all'esterno del VPC può connettersi ai task finché non aggiungi una regola.
 - I task vengono eseguiti in subnet private e non ottengono mai un indirizzo IP pubblico.
-- Il load balancer accetta traffico solo dal VPC link (`http-api`) o dall'intervallo di indirizzi del VPC (`private`). I task accettano traffico solo dal load balancer, sulla porta del container.
+- Il generatore non crea load balancer né API davanti al servizio.
 - I task possono inviare traffico in uscita solo sulla porta 443. Le connessioni ai database aggiungono la porta del database.
 - Il task role (il ruolo con cui viene eseguito il codice del tuo server) può solo leggere la configurazione runtime da AWS AppConfig finché tu o una connessione non concedete di più.
 - L'execution role (il ruolo che ECS utilizza per avviare il tuo task) può solo estrarre l'immagine del servizio, scrivere nel suo log group e leggere i segreti che elenchi.
 - I segreti raggiungono il container solo come riferimenti ad AWS Secrets Manager o AWS Systems Manager Parameter Store, mai come valori di ambiente in chiaro.
-- Il container ha un file system root di sola lettura e viene eseguito come uid 1000, un utente non root. ECS Exec (accesso shell in un task in esecuzione) è disattivato.
+- Il container ha un file system root di sola lettura con una cartella `/tmp` scrivibile, e viene eseguito come uid 1000, un utente non root. ECS Exec (accesso shell in un task in esecuzione) è disattivato.
 - Un deployment che non supera i controlli di salute si ferma e torna alla versione precedente.
-- L'HTTP API scrive log di accesso e limita le richieste. Si autentica con IAM a meno che tu non scelga diversamente.
-- I log vengono conservati per un anno.
+- Il log group è crittografato con una chiave AWS KMS e i log vengono conservati per un anno.
 
-Il codice generato sopprime questi controlli [Checkov](https://www.checkov.io/) (Checkov scansiona il codice dell'infrastruttura per impostazioni non sicure) e indica il motivo accanto a ogni soppressione:
+### Consentire a un Chiamante di Raggiungere il Tuo Servizio
 
-- `CKV_AWS_91` richiede i log di accesso del load balancer. I log di accesso dell'HTTP API, o i log del tuo servizio, registrano invece le richieste.
-- `CKV_AWS_2` e `CKV_AWS_103` richiedono un listener HTTPS con TLS. Il load balancer ascolta su HTTP semplice perché è interno e solo i chiamanti all'interno del VPC possono raggiungerlo. Con `http-api`, TLS termina su API Gateway.
-
-Il modulo Terraform salta anche `CKV2_AWS_20` e `CKV_AWS_378` per lo stesso motivo del listener HTTP, e `CKV_AWS_150` perché la protezione dalla cancellazione del load balancer è disattivata in modo che il servizio possa essere distrutto.
-
-### Chiamare il Tuo Servizio
-
-L'URL del servizio viene scritto nella <Link path="/guides/runtime-config">configurazione runtime</Link> come `connection.services.<NameClassName>`, dove `<NameClassName>` è il nome del servizio in PascalCase. Per `--name=orders` la chiave è `Orders`. Senza un nome, il nome del servizio è `<project>-service`, quindi per un progetto chiamato `my-project` la chiave è `MyProjectService`. La cartella sorgente e il prefisso del target sono ancora `service` in quel caso.
-
-<Tabs syncKey="auth">
-<TabItem label="IAM" _filter={{ ingress: 'http-api', auth: 'iam' }}>
-I chiamanti firmano ogni richiesta con [AWS Signature Version 4 (SigV4)](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv.html) per il servizio `execute-api`, utilizzando credenziali AWS che possono chiamare l'API. API Gateway rifiuta una richiesta senza una firma valida prima che raggiunga il tuo servizio.
+Nulla può chiamare il servizio come generato. Se un altro workload nel VPC deve chiamarlo, ad esempio una funzione Lambda o un altro servizio ECS, aggiungi tu stesso una regola in entrata al security group del servizio. Il generatore non aggiunge regole in entrata. Consenti un chiamante nominato tramite il suo security group, sulla porta del container, e non consentire mai un intervallo di indirizzi.
 
 <Infrastructure>
 <Fragment slot="cdk">
-Concedi a un ruolo o a una funzione il permesso di chiamare il servizio con `grantInvoke`:
+Il costrutto implementa `IConnectable`, quindi consenti il security group del chiamante attraverso le sue `connections`:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-const service = new MyService(this, 'MyService', { vpc });
-service.grantInvoke(myFunction);
+import { Port } from 'aws-cdk-lib/aws-ec2';
+
+const svc = new MyService(this, 'MyService', { vpc });
+svc.connections.allowFrom(callerSecurityGroup, Port.tcp(8080));
 ```
+
+Se il security group del chiamante è definito nella tua app CDK e limita il traffico in uscita, `allowFrom` aggiunge anche la regola in uscita corrispondente ad esso.
 </Fragment>
 <Fragment slot="terraform">
-Concedi a un ruolo il permesso di chiamare il servizio con una policy `execute-api:Invoke` sull'ARN di esecuzione dell'API, che il modulo del tuo servizio restituisce come `api_execution_arn`:
+Aggiungi una regola in entrata al security group del servizio, che il modulo del tuo servizio restituisce come `security_group_id`, con il security group del chiamante come sorgente:
 
 ```hcl title="packages/infra/src/main.tf"
-resource "aws_iam_role_policy" "invoke_my_service" {
-  role = aws_iam_role.caller.id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["execute-api:Invoke"]
-      Resource = ["${module.my_service.api_execution_arn}/*"]
-    }]
-  })
+resource "aws_vpc_security_group_ingress_rule" "caller_to_my_service" {
+  security_group_id            = module.my_service.security_group_id
+  referenced_security_group_id = aws_security_group.caller.id
+  from_port                    = 8080
+  to_port                      = 8080
+  ip_protocol                  = "tcp"
 }
 ```
+
+Se il security group del chiamante limita il traffico in uscita, aggiungi anche un `aws_vpc_security_group_egress_rule` sul gruppo del chiamante verso il security group del servizio.
 </Fragment>
 </Infrastructure>
-</TabItem>
-<TabItem label="Cognito" _filter={{ ingress: 'http-api', auth: 'cognito' }}>
-I chiamanti inviano un JSON Web Token (JWT) emesso dal tuo pool di utenti Amazon Cognito nell'header `Authorization`. L'HTTP API verifica che il token provenga dal pool di utenti e sia stato emesso per uno dei client app accettati.
 
-<Infrastructure>
-<Fragment slot="cdk">
-Il costrutto generato per un servizio Cognito non accetta una prop `auth`. Passa invece il pool di utenti e il client app nella sua prop `identity` richiesta:
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-new MyService(this, 'MyService', {
-  vpc,
-  identity: { userPool, userPoolClient },
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-Imposta le variabili richieste `user_pool_id` e `user_pool_client_ids` del modulo del tuo servizio, `app/services/<name>/<name>.tf`. Il modulo le passa al modulo `ecs-service`.
-</Fragment>
-</Infrastructure>
-</TabItem>
-<TabItem label="None" _filter={{ ingress: 'http-api', auth: 'none' }}>
-L'HTTP API accetta richieste senza autenticazione. Chiunque conosca l'URL può chiamare il tuo servizio, quindi controlla i chiamanti nel tuo codice.
-</TabItem>
-<TabItem label="Private" _filter={{ ingress: 'private' }}>
-Un servizio `private` non ha un'HTTP API. Il suo URL è l'indirizzo del load balancer interno, che solo i chiamanti all'interno del VPC possono raggiungere. Il load balancer accetta traffico dall'intervallo di indirizzi del VPC sulla sua porta di ascolto. Ad esempio, chiamalo da una funzione Lambda o da un altro servizio ECS nello stesso VPC.
-</TabItem>
-</Tabs>
+Il chiamante si connette all'indirizzo IP privato di un task. Il generatore non configura service discovery e l'indirizzo di un task cambia quando ECS sostituisce il task. Per dare ai chiamanti un nome stabile, configura tu stesso il service discovery, ad esempio con [Amazon ECS Service Connect](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-connect.html).
 
 ### Configurazione Avanzata
 
-Il servizio generato imposta il suo nome, `ingress` e `auth` per te. Gli esempi seguenti utilizzano direttamente il costrutto generico `EcsService` e il modulo `ecs-service`, per impostazioni che il servizio generato non passa o per scegliere `ingress` e `auth` per istanza.
+Il servizio generato imposta il suo nome e la sua immagine per te. Gli esempi seguenti utilizzano direttamente il costrutto generico `EcsService` e il modulo `ecs-service`, per impostazioni che il servizio generato non passa.
 
-In CDK, il tuo package `common-constructs` esporta `EcsService` accanto al costrutto del tuo servizio, quindi lo importi allo stesso modo: `import { EcsService } from '@my-scope/common-constructs'`. Il costrutto generato estende `EcsService` e passa ogni altra prop, ad esempio `cluster`, `loadBalancer`, `environment`, `secrets` e `grantTaskRole`. La sua prop opzionale `image` sostituisce l'immagine costruita dal tuo progetto. Non ha una prop `auth`. Un servizio Cognito prende invece `identity` e altri servizi utilizzano sempre l'`auth` con cui sono stati generati.
+In CDK, il tuo package `common-constructs` esporta `EcsService` accanto al costrutto del tuo servizio, quindi lo importi allo stesso modo: `import { EcsService } from '@my-scope/common-constructs'`. Il costrutto generato estende `EcsService` e passa ogni altra prop, ad esempio `cluster`, `environment`, `secrets` e `grantTaskRole`. La sua prop opzionale `image` sostituisce l'immagine costruita dal tuo progetto.
 
-In Terraform, il modulo del tuo servizio ti consente di impostare solo alcune delle variabili del modulo `ecs-service`: `vpc_id`, `subnet_ids`, `cluster_arn`, `environment`, `secrets`, `task_role_policy_statements` e `tags`, più `user_pool_id` e `user_pool_client_ids` per un servizio Cognito. Per impostare qualsiasi altra variabile, modifica il blocco `module "ecs_service"` nel modulo del tuo servizio.
+In Terraform, il modulo del tuo servizio ti consente di impostare solo alcune delle variabili del modulo `ecs-service`: `vpc_id`, `subnet_ids`, `cluster_arn`, `environment`, `secrets`, `task_role_policy_statements` e `tags`. Per impostare qualsiasi altra variabile, modifica il blocco `module "ecs_service"` nel modulo del tuo servizio.
 
 #### Immagine Precostruita
 
@@ -340,48 +303,9 @@ module "prebuilt" {
 </Fragment>
 </Infrastructure>
 
-#### Worker Senza Load Balancer
-
-Un worker legge da una coda o esegue lavori in background e nulla lo chiama. Disattiva il load balancer per ottenere un servizio senza load balancer, senza HTTP API e senza URL.
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts
-new EcsService(this, 'Worker', {
-  serviceName: 'Worker',
-  vpc,
-  image: { directory: '<path to the folder with the Dockerfile>' },
-  loadBalancer: false,
-});
-```
-
-</Fragment>
-<Fragment slot="terraform">
-Come con un'immagine precostruita, Terraform concede l'accesso pull su un repository Amazon ECR privato solo quando passi `image_repository_arn`.
-
-```hcl
-module "worker" {
-  source = "../../common/terraform/src/core/container/ecs-service"
-
-  service_name  = "Worker"
-  vpc_id        = aws_vpc.main.id
-  subnet_ids    = aws_subnet.private[*].id
-  image_uri     = "<image uri pinned by digest>"
-  load_balancer = false
-  # For an image in a private Amazon ECR repository, also pass:
-  # image_repository_arn = aws_ecr_repository.my_image.arn
-}
-```
-
-</Fragment>
-</Infrastructure>
-
 #### Diversi Servizi in Uno Stack
 
 Ogni servizio crea il proprio cluster ECS a meno che tu non ne passi uno. Per eseguire diversi servizi in un cluster, passa lo stesso cluster a ciascuno.
-
-Ogni servizio HTTP API crea il proprio VPC link, anche quando i servizi condividono un cluster. API Gateway consente 10 VPC link per account per Regione per impostazione predefinita e puoi richiedere un aumento.
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -479,35 +403,17 @@ La definizione del task esegue il container come uid 1000, un utente non root. Q
 | --- | --- | --- | --- |
 | Utente con cui viene eseguito il container | `user` | `container_user` | `'1000'` (CDK), `"1000:1000"` (Terraform) |
 
-#### CORS e Throttling
-
-Queste impostazioni si applicano solo con `ingress` impostato su `http-api`. CORS (cross-origin resource sharing) decide quali siti web possono chiamare il tuo servizio da un browser. Per impostazione predefinita, l'HTTP API accetta richieste del browser da qualsiasi origine, con qualsiasi metodo e con gli header `authorization`, `content-type`, `x-amz-content-sha256`, `x-amz-date` e `x-amz-security-token`. Gli ultimi tre sono gli header che una firma SigV4 aggiunge. L'HTTP API limita anche le richieste a una velocità costante di 10.000 al secondo, con burst fino a 5.000.
-
-| Impostazione | CDK | Variabile Terraform | Predefinito |
-| --- | --- | --- | --- |
-| Origini CORS consentite | Metodo `restrictCorsTo(...origins)`, o prop `corsPreflight` | `cors_allow_origins` | qualsiasi origine (`["*"]`) |
-| Altre impostazioni CORS | Prop `corsPreflight` | none | qualsiasi metodo e gli header sopra |
-| Throttling | Prop `throttle` | none | `{ rateLimit: 10000, burstLimit: 5000 }` |
-
-Una prop `corsPreflight` sostituisce l'intero valore predefinito, quindi elenca ogni header che i tuoi chiamanti inviano. Il metodo `restrictCorsTo` mantiene le altre impostazioni CORS e cambia solo le origini consentite:
-
-```ts
-const service = new MyService(this, 'MyService', { vpc });
-service.restrictCorsTo('https://app.example.com');
-```
-
-In Terraform, `cors_allow_origins` e `container_user` sono variabili del modulo `ecs-service`. Il modulo del tuo servizio non le passa, quindi impostale nel suo blocco `module "ecs_service"`. I valori di throttling sono fissi in `ecs-service.tf`.
+In Terraform, `container_user` è una variabile del modulo `ecs-service`. Il modulo del tuo servizio non la passa, quindi impostala nel suo blocco `module "ecs_service"`.
 
 ### Costi
 
 Un container service fattura mentre è inattivo, a differenza di una funzione Lambda. Queste parti fatturano all'ora indipendentemente dal fatto che qualcuno chiami o meno il servizio:
 
 - Task Fargate, per vCPU e per GB di memoria. `desiredCount` e `minCapacity` mantengono almeno un task in esecuzione.
-- L'Application Load Balancer, per ora e per unità di capacità del load balancer.
 - Endpoint VPC di interfaccia, per ora in ogni Availability Zone, o un NAT gateway, per ora e per GB di dati che elabora.
 - Archiviazione dei log in CloudWatch Logs e archiviazione delle immagini in Amazon ECR.
 
-L'HTTP API fattura per richiesta. Per stimare il costo per la tua Regione e il tuo traffico, usa il [AWS Pricing Calculator](https://calculator.aws/).
+Per stimare il costo per la tua Regione e il tuo traffico, usa il [AWS Pricing Calculator](https://calculator.aws/).
 
 ### Distruggere il Tuo Servizio
 
@@ -526,7 +432,7 @@ Esegui il target `destroy` del tuo progetto di infrastruttura:
 </Fragment>
 </Infrastructure>
 
-Quindi verifica nella console AWS o con l'AWS CLI che questi siano spariti: il servizio ECS e il cluster, il load balancer e il suo target group, l'HTTP API e il suo VPC link, e il log group del servizio. Le immagini rimangono in Amazon ECR, nel repository degli asset CDK o nel repository condiviso `asset-ecr`. Eliminale se non ne hai più bisogno. Il VPC è tuo, quindi distruggere il servizio lo lascia al suo posto.
+Quindi verifica nella console AWS o con l'AWS CLI che il servizio ECS e il cluster siano spariti. Con Terraform, destroy elimina anche il log group del servizio e pianifica la sua chiave AWS KMS per l'eliminazione dopo 7 giorni. Con CDK, destroy mantiene il log group del servizio e la sua chiave AWS KMS, perché CDK mantiene i log group e le chiavi a meno che una removal policy non dica diversamente. Eliminali tu stesso se non hai più bisogno dei log. Le immagini rimangono in Amazon ECR, nel repository degli asset CDK o nel repository condiviso `asset-ecr`. Eliminale se non ne hai più bisogno. Il VPC è tuo, quindi distruggere il servizio lo lascia al suo posto.
 </OptionFilter>
 
 ## Connettere il Tuo Servizio
@@ -535,16 +441,9 @@ Usa il generatore <Link path="/guides/connection">`connection`</Link> per connet
 
 <RunGenerator generator="connection" />
 
-Un sito web o un agente può chiamare il tuo servizio e il tuo servizio può utilizzare un database relazionale o una tabella DynamoDB. Ogni connessione ha la sua guida:
+Il tuo servizio può utilizzare un database relazionale o una tabella DynamoDB. Ogni connessione ha la sua guida:
 
-- <Link path="guides/connection/react-container">React to Container Service</Link>
-- <Link path="guides/connection/ts-agent-container">TypeScript Agent to Container Service</Link>
-- <Link path="guides/connection/py-agent-container">Python Agent to Container Service</Link>
 - <Link path="guides/connection/ts-container-rdb">TypeScript Container Service to Relational Database</Link>
 - <Link path="guides/connection/ts-container-dynamodb">TypeScript Container Service to DynamoDB</Link>
 
-Ogni connessione ha anche condizioni:
-
-- Un sito web o un agente può connettersi solo a un servizio con `ingress` impostato su `http-api`.
-- Un agente può anche connettersi solo a un servizio con `auth` impostato su `iam`.
-- Una connessione a un database o DynamoDB necessita di un servizio con `infra` impostato su `ecs`.
+Una connessione necessita di un servizio con `infra` impostato su `ecs`.

@@ -1,10 +1,10 @@
 ---
 title: Python Container Service
-description: Thêm dịch vụ HTTP được đóng gói container vào dự án Python và chạy nó trên Amazon ECS
+description: Thêm dịch vụ được đóng gói container vào dự án Python và chạy nó riêng tư trên Amazon ECS
 generator: py#container
 ---
 
-import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import { FileTree } from '@astrojs/starlight/components';
 import ArchitectureDiagram from '@components/architecture-diagram.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import Infrastructure from '@components/infrastructure.astro';
@@ -14,9 +14,13 @@ import OptionFilter from '@components/option-filter.astro';
 import RunGenerator from '@components/run-generator.astro';
 import Snippet from '@components/snippet.astro';
 
-Generator này thêm một dịch vụ HTTP được đóng gói container vào dự án Python hiện có. Bạn sẽ nhận được một máy chủ [FastAPI](https://fastapi.tiangolo.com/) nhỏ, được chạy bởi máy chủ web [uvicorn](https://www.uvicorn.org/), với route `GET /health`, một Dockerfile, và các target để chạy máy chủ cục bộ, xây dựng image và quét image. Bạn cũng nhận được mã CDK hoặc Terraform chạy image trên [Amazon Elastic Container Service (Amazon ECS)](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html), dịch vụ AWS chạy và mở rộng quy mô container.
+Generator này thêm một dịch vụ HTTP được đóng gói container vào dự án Python hiện có. Bạn sẽ nhận được một máy chủ [FastAPI](https://fastapi.tiangolo.com/) nhỏ, được chạy bởi máy chủ web [uvicorn](https://www.uvicorn.org/), với route `GET /health` và route mẫu `GET /echo`, một Dockerfile, và các target để chạy máy chủ cục bộ, xây dựng image và quét image. Bạn cũng nhận được mã CDK hoặc Terraform chạy image trên [Amazon Elastic Container Service (Amazon ECS)](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html), dịch vụ AWS chạy và mở rộng quy mô container.
 
-Dịch vụ chạy trên [AWS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html), chạy mỗi container mà không cần máy chủ để bạn quản lý. Nó chạy trong VPC của riêng bạn (virtual private cloud, một mạng cô lập trong tài khoản AWS của bạn), đằng sau một [Application Load Balancer](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/introduction.html) (ALB) nội bộ mà chỉ các địa chỉ bên trong VPC mới có thể truy cập. Theo mặc định, một [Amazon API Gateway HTTP API](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) nhận yêu cầu từ người gọi và chuyển chúng đến ALB thông qua VPC link (kết nối riêng tư của API Gateway vào VPC). Người gọi nhận được một endpoint HTTPS được xác thực, và load balancer không bao giờ đối mặt với internet.
+## Cách hoạt động
+
+Dịch vụ chạy trên [AWS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html), chạy mỗi container mà không cần máy chủ để bạn quản lý. Mỗi bản sao đang chạy của container của bạn là một ECS task. Các task chạy trong VPC của riêng bạn (virtual private cloud, một mạng cô lập trong tài khoản AWS của bạn). Một security group (một tập hợp các quy tắc tường lửa được gắn vào các task) kiểm soát lưu lượng mạng nào có thể đến và rời khỏi chúng.
+
+Dịch vụ là riêng tư. Nó không có load balancer, không có API và không có địa chỉ IP công khai. Security group của nó không có quy tắc inbound, vì vậy không có gì có thể mở kết nối đến dịch vụ cho đến khi bạn cho phép một người gọi. Dịch vụ vẫn có thể thực hiện các cuộc gọi đi ra, ví dụ đến cơ sở dữ liệu hoặc các dịch vụ AWS khác.
 
 ## Cách sử dụng
 
@@ -34,7 +38,7 @@ Trước tiên hãy sử dụng generator <Link path="/guides/python-project">`p
 
 <GeneratorParameters generator="py#container" />
 
-Các tùy chọn `infra`, `ingress` và `auth` phụ thuộc vào nhau. Với `infra` được đặt thành `none`, generator không tạo infrastructure, và nó bỏ qua `ingress` và `auth` với một cảnh báo. `ingress` chỉ áp dụng khi `infra` được đặt thành `ecs`. `auth` chỉ áp dụng khi `ingress` được đặt thành `http-api`, vì dịch vụ `private` không có HTTP API để xác thực.
+Với `infra` được đặt thành `none`, generator không tạo infrastructure, và dịch vụ chỉ chạy cục bộ.
 
 ## Đầu ra của Generator
 
@@ -67,7 +71,7 @@ Tên target bắt đầu bằng tùy chọn `name`, hoặc bằng `service` nế
   - packages/common/constructs/src
     - app
       - services
-        - \<name>.ts CDK construct cho dịch vụ của bạn, với image, `ingress` và `auth` được đặt
+        - \<name>.ts CDK construct cho dịch vụ của bạn, với image
     - core
       - container
         - ecs-service.ts Construct chung cho dịch vụ ECS trên Fargate
@@ -79,7 +83,7 @@ Tên target bắt đầu bằng tùy chọn `name`, hoặc bằng `service` nế
     - app
       - services
         - \<name>
-          - \<name>.tf Module cho dịch vụ của bạn, xuất bản image và ghi URL vào runtime config
+          - \<name>.tf Module cho dịch vụ của bạn, xuất bản image
     - core
       - container
         - ecs-service
@@ -89,10 +93,12 @@ Tên target bắt đầu bằng tùy chọn `name`, hoặc bằng `service` nế
 </FileTree>
 </Fragment>
 </Infrastructure>
+
+Construct và module tạo một ECS cluster với Container Insights (các chỉ số CloudWatch cho các container của cluster), một task definition, dịch vụ, một task role và một execution role, một log group được mã hóa bằng khóa AWS Key Management Service (AWS KMS), autoscaling dựa trên CPU và security group của dịch vụ.
 </OptionFilter>
 
 <OptionFilter when={{ infra: 'none' }} description="Không có infrastructure được tạo cho infra=none">
-Nếu bạn đặt `infra` thành `none`, không có CDK construct hoặc Terraform module nào được tạo, và dịch vụ chỉ chạy cục bộ. Các tùy chọn `ingress` và `auth` bị bỏ qua trong chế độ này.
+Nếu bạn đặt `infra` thành `none`, không có CDK construct hoặc Terraform module nào được tạo, và dịch vụ chỉ chạy cục bộ.
 </OptionFilter>
 
 #### Kiến trúc
@@ -106,6 +112,8 @@ Target `<name>-serve` chạy máy chủ trên máy của bạn, không có conta
 <NxCommands commands={['run your-project:service-serve']} />
 
 Máy chủ lắng nghe trên cổng trong biến môi trường `PORT`. Target `<name>-serve` đặt nó thành một cổng mà generator chỉ định, bắt đầu từ 8081 và bỏ qua các cổng mà các dự án khác trong workspace của bạn đã sử dụng. Bên trong container, máy chủ lắng nghe trên cổng 8080.
+
+Máy chủ lắng nghe trên địa chỉ trong biến môi trường `HOST`, mặc định là `127.0.0.1`, vì vậy target `<name>-serve` chỉ chấp nhận kết nối từ máy của chính bạn. Image đặt `HOST=0.0.0.0`, vì vậy bên trong một task, máy chủ lắng nghe trên giao diện mạng của chính task. Security group của task vẫn quyết định ai có thể kết nối.
 
 Kiểm tra xem máy chủ đã hoạt động chưa với route health của nó, trả về status 200 và `{"status":"ok"}`:
 
@@ -121,7 +129,7 @@ Target `<name>-docker` xây dựng một image linux/arm64 của dịch vụ c�
 
 <NxCommands commands={['run your-project:service-docker']} />
 
-Chỉ target group của load balancer (danh sách các task mà load balancer gửi yêu cầu đến) kiểm tra `GET /health`, để quyết định xem một task đã sẵn sàng cho lưu lượng chưa. ECS bỏ qua chỉ thị `HEALTHCHECK` trong Dockerfile. Để biết thêm về cách image được xây dựng và xuất bản, xem <Link path="/guides/docker-bundling">Docker Bundling</Link>.
+Trên ECS, một lệnh kiểm tra sức khỏe chạy bên trong container và gọi `GET /health` trên cổng container. Nó không cần quyền truy cập inbound. ECS thay thế một task mà kiểm tra sức khỏe của nó liên tục thất bại. ECS bỏ qua chỉ thị `HEALTHCHECK` trong Dockerfile. Để biết thêm về cách image được xây dựng và xuất bản, xem <Link path="/guides/docker-bundling">Docker Bundling</Link>.
 
 ### Quét Image
 
@@ -132,7 +140,7 @@ Chỉ target group của load balancer (danh sách các task mà load balancer g
 
 ### Thêm dịch vụ vào Infrastructure của bạn
 
-Construct và module không bao giờ tạo VPC. Bạn tạo hoặc import một VPC trong stack hoặc root module của bạn và truyền nó vào. Các task và load balancer chạy trong các private subnet với egress, tiếp cận các dịch vụ AWS thông qua NAT gateway (một gateway được quản lý cho phép các private subnet thực hiện kết nối đi ra) hoặc thông qua VPC endpoint (kết nối riêng tư từ VPC của bạn đến các dịch vụ AWS).
+Construct và module không bao giờ tạo VPC. Bạn tạo hoặc import một VPC trong stack hoặc root module của bạn và truyền nó vào. Các task chạy trong các private subnet với egress, tiếp cận các dịch vụ AWS thông qua NAT gateway (một gateway được quản lý cho phép các private subnet thực hiện kết nối đi ra) hoặc thông qua VPC endpoint (kết nối riêng tư từ VPC của bạn đến các dịch vụ AWS).
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -183,17 +191,7 @@ module "my_service" {
 ```
 </Fragment>
 </Infrastructure>
-</OptionFilter>
 
-<OptionFilter when={{ infra: 'ecs', ingress: 'http-api' }} description="Giới hạn yêu cầu HTTP API">
-### Giới hạn yêu cầu
-
-API Gateway ngừng chờ dịch vụ của bạn sau 30 giây và trả về lỗi cho người gọi. Bạn không thể tăng thời gian chờ tích hợp này. Payload yêu cầu lớn nhất mà HTTP API chấp nhận là 10 MB, và bạn cũng không thể tăng giới hạn này. Cả hai giá trị đều đến từ trang [Amazon API Gateway quotas for HTTP APIs](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-quotas.html).
-
-Vì vậy, các yêu cầu chạy lâu hơn 30 giây và các phản hồi truyền dữ liệu trong thời gian dài không hoạt động thông qua HTTP API. Đối với những trường hợp đó, hãy đặt `ingress` thành `private` và gọi load balancer nội bộ từ bên trong VPC.
-</OptionFilter>
-
-<OptionFilter when={{ infra: 'ecs' }} description="Mạng, bảo mật, gọi, cấu hình nâng cao, chi phí và hủy">
 ### Chạy không có NAT Gateway
 
 Khi các task của bạn khởi động, ECS kéo image và gửi log thay mặt cho chúng. Mã máy chủ của bạn cũng có thể gọi các dịch vụ AWS. Trong các private subnet không có NAT gateway, mỗi cuộc gọi này cần một VPC endpoint. Không có các endpoint phù hợp, các task không khởi động được hoặc hết thời gian chờ khi chúng gọi AWS.
@@ -216,95 +214,60 @@ Interface endpoint cần một security group cho phép HTTPS (cổng 443) từ 
 
 Infrastructure được tạo áp dụng các cài đặt này theo mặc định:
 
-- Load balancer là nội bộ. Không có security group nào cho phép lưu lượng đến từ `0.0.0.0/0` hoặc `::/0`.
+- Security group của dịch vụ không có quy tắc inbound. Không có người gọi nào bên trong hoặc bên ngoài VPC có thể kết nối với các task cho đến khi bạn thêm một quy tắc.
 - Các task chạy trong các private subnet và không bao giờ nhận địa chỉ IP công khai.
-- Load balancer chỉ chấp nhận lưu lượng từ VPC link (`http-api`) hoặc từ dải địa chỉ của VPC (`private`). Các task chỉ chấp nhận lưu lượng từ load balancer, trên cổng container.
+- Generator không tạo load balancer và không có API phía trước dịch vụ.
 - Các task chỉ có thể gửi lưu lượng đi ra trên cổng 443. Kết nối đến cơ sở dữ liệu thêm cổng cơ sở dữ liệu.
 - Task role (role mà mã máy chủ của bạn chạy với) chỉ có thể đọc runtime configuration từ AWS AppConfig cho đến khi bạn hoặc một kết nối cấp thêm quyền.
 - Execution role (role mà ECS sử dụng để khởi động task của bạn) chỉ có thể kéo image của dịch vụ, ghi vào log group của nó và đọc các secret bạn liệt kê.
 - Các secret chỉ đến container dưới dạng tham chiếu đến AWS Secrets Manager hoặc AWS Systems Manager Parameter Store, không bao giờ là giá trị môi trường thuần túy.
-- Container có hệ thống tệp gốc chỉ đọc và chạy với uid 1000, một người dùng không phải root. ECS Exec (truy cập shell vào một task đang chạy) bị tắt.
+- Container có hệ thống tệp gốc chỉ đọc với thư mục `/tmp` có thể ghi, và chạy với uid 1000, một người dùng không phải root. ECS Exec (truy cập shell vào một task đang chạy) bị tắt.
 - Một triển khai không vượt qua kiểm tra health sẽ dừng lại và rollback về phiên bản trước.
-- HTTP API ghi access log và điều tiết yêu cầu. Nó xác thực với IAM trừ khi bạn chọn cách khác.
-- Log được giữ trong một năm.
+- Log group được mã hóa bằng khóa AWS KMS, và log được giữ trong một năm.
 
-Mã được tạo bỏ qua các kiểm tra [Checkov](https://www.checkov.io/) này (Checkov quét mã infrastructure để tìm các cài đặt không an toàn), và nêu lý do bên cạnh mỗi bỏ qua:
+### Cho phép người gọi tiếp cận dịch vụ của bạn
 
-- `CKV_AWS_91` yêu cầu access log của load balancer. Thay vào đó, access log của HTTP API hoặc log của chính dịch vụ của bạn ghi lại các yêu cầu.
-- `CKV_AWS_2` và `CKV_AWS_103` yêu cầu listener HTTPS với TLS. Load balancer lắng nghe trên HTTP thuần vì nó là nội bộ và chỉ những người gọi bên trong VPC mới có thể truy cập nó. Với `http-api`, TLS kết thúc tại API Gateway.
-
-Terraform module cũng bỏ qua `CKV2_AWS_20` và `CKV_AWS_378` vì cùng lý do HTTP listener, và `CKV_AWS_150` vì bảo vệ xóa load balancer bị tắt để dịch vụ có thể bị hủy.
-
-### Gọi dịch vụ của bạn
-
-URL của dịch vụ được ghi vào <Link path="/guides/runtime-config">runtime configuration</Link> dưới dạng `connection.services.<NameClassName>`, trong đó `<NameClassName>` là tên dịch vụ ở dạng PascalCase. Đối với `--name=orders`, key là `Orders`. Không có tên, tên dịch vụ là `<project>-service`, vì vậy đối với một dự án có tên `my-project`, key là `MyProjectService`. Thư mục nguồn và tiền tố target vẫn là `service` trong trường hợp đó.
-
-<Tabs syncKey="auth">
-<TabItem label="IAM" _filter={{ ingress: 'http-api', auth: 'iam' }}>
-Người gọi ký mỗi yêu cầu với [AWS Signature Version 4 (SigV4)](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv.html) cho dịch vụ `execute-api`, sử dụng thông tin xác thực AWS có thể gọi API. API Gateway từ chối yêu cầu không có chữ ký hợp lệ trước khi nó đến dịch vụ của bạn.
+Không có gì có thể gọi dịch vụ như được tạo ra. Nếu một workload khác trong VPC cần gọi nó, ví dụ một Lambda function hoặc một dịch vụ ECS khác, bạn tự thêm một quy tắc inbound vào security group của dịch vụ. Generator không thêm quy tắc inbound nào. Cho phép một người gọi được đặt tên theo security group của nó, trên cổng container, và không bao giờ cho phép một dải địa chỉ.
 
 <Infrastructure>
 <Fragment slot="cdk">
-Cấp quyền cho một role hoặc function để gọi dịch vụ với `grantInvoke`:
+Construct triển khai `IConnectable`, vì vậy cho phép security group của người gọi thông qua `connections` của nó:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-const service = new MyService(this, 'MyService', { vpc });
-service.grantInvoke(myFunction);
+import { Port } from 'aws-cdk-lib/aws-ec2';
+
+const svc = new MyService(this, 'MyService', { vpc });
+svc.connections.allowFrom(callerSecurityGroup, Port.tcp(8080));
 ```
+
+Nếu security group của người gọi được định nghĩa trong ứng dụng CDK của bạn và giới hạn lưu lượng đi ra, `allowFrom` cũng thêm quy tắc outbound tương ứng vào nó.
 </Fragment>
 <Fragment slot="terraform">
-Cấp quyền cho một role để gọi dịch vụ với policy `execute-api:Invoke` trên execution ARN của API, mà module của dịch vụ của bạn xuất ra dưới dạng `api_execution_arn`:
+Thêm một quy tắc inbound vào security group của dịch vụ, mà module của dịch vụ của bạn xuất ra dưới dạng `security_group_id`, với security group của người gọi làm nguồn:
 
 ```hcl title="packages/infra/src/main.tf"
-resource "aws_iam_role_policy" "invoke_my_service" {
-  role = aws_iam_role.caller.id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["execute-api:Invoke"]
-      Resource = ["${module.my_service.api_execution_arn}/*"]
-    }]
-  })
+resource "aws_vpc_security_group_ingress_rule" "caller_to_my_service" {
+  security_group_id            = module.my_service.security_group_id
+  referenced_security_group_id = aws_security_group.caller.id
+  from_port                    = 8080
+  to_port                      = 8080
+  ip_protocol                  = "tcp"
 }
 ```
+
+Nếu security group của người gọi giới hạn lưu lượng đi ra, cũng thêm một `aws_vpc_security_group_egress_rule` trên group của người gọi đến security group của dịch vụ.
 </Fragment>
 </Infrastructure>
-</TabItem>
-<TabItem label="Cognito" _filter={{ ingress: 'http-api', auth: 'cognito' }}>
-Người gọi gửi một JSON Web Token (JWT) được cấp bởi Amazon Cognito user pool của bạn trong header `Authorization`. HTTP API kiểm tra rằng token đến từ user pool và được cấp cho một trong các app client được chấp nhận.
 
-<Infrastructure>
-<Fragment slot="cdk">
-Construct được tạo cho dịch vụ Cognito không nhận prop `auth`. Thay vào đó, truyền user pool và app client trong prop `identity` bắt buộc của nó:
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-new MyService(this, 'MyService', {
-  vpc,
-  identity: { userPool, userPoolClient },
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-Đặt các biến `user_pool_id` và `user_pool_client_ids` bắt buộc của module dịch vụ của bạn, `app/services/<name>/<name>.tf`. Module truyền chúng đến module `ecs-service`.
-</Fragment>
-</Infrastructure>
-</TabItem>
-<TabItem label="None" _filter={{ ingress: 'http-api', auth: 'none' }}>
-HTTP API chấp nhận yêu cầu mà không cần xác thực. Bất kỳ ai biết URL đều có thể gọi dịch vụ của bạn, vì vậy hãy kiểm tra người gọi trong mã của riêng bạn.
-</TabItem>
-<TabItem label="Private" _filter={{ ingress: 'private' }}>
-Dịch vụ `private` không có HTTP API. URL của nó là địa chỉ load balancer nội bộ, mà chỉ những người gọi bên trong VPC mới có thể truy cập. Load balancer chấp nhận lưu lượng từ dải địa chỉ của VPC trên cổng listener của nó. Ví dụ, gọi nó từ một Lambda function hoặc một dịch vụ ECS khác trong cùng VPC.
-</TabItem>
-</Tabs>
+Người gọi kết nối với địa chỉ IP riêng tư của task. Generator không thiết lập service discovery, và địa chỉ của task thay đổi khi ECS thay thế task. Để cung cấp cho người gọi một tên ổn định, hãy tự thiết lập service discovery, ví dụ với [Amazon ECS Service Connect](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-connect.html).
 
 ### Cấu hình nâng cao
 
-Dịch vụ được tạo đặt tên, `ingress` và `auth` của nó cho bạn. Các ví dụ dưới đây sử dụng construct `EcsService` chung và module `ecs-service` trực tiếp, cho các cài đặt mà dịch vụ được tạo không truyền hoặc để chọn `ingress` và `auth` cho mỗi instance.
+Dịch vụ được tạo đặt tên và image của nó cho bạn. Các ví dụ dưới đây sử dụng construct `EcsService` chung và module `ecs-service` trực tiếp, cho các cài đặt mà dịch vụ được tạo không truyền.
 
-Trong CDK, package `common-constructs` của bạn xuất `EcsService` bên cạnh construct của dịch vụ của bạn, vì vậy bạn import nó theo cùng một cách: `import { EcsService } from '@my-scope/common-constructs'`. Construct được tạo mở rộng `EcsService` và truyền mọi prop khác qua, ví dụ `cluster`, `loadBalancer`, `environment`, `secrets` và `grantTaskRole`. Prop `image` tùy chọn của nó thay thế image được xây dựng từ dự án của bạn. Nó không có prop `auth`. Dịch vụ Cognito nhận `identity` thay thế, và các dịch vụ khác luôn sử dụng `auth` mà chúng được tạo với.
+Trong CDK, package `common-constructs` của bạn xuất `EcsService` bên cạnh construct của dịch vụ của bạn, vì vậy bạn import nó theo cùng một cách: `import { EcsService } from '@my-scope/common-constructs'`. Construct được tạo mở rộng `EcsService` và truyền mọi prop khác qua, ví dụ `cluster`, `environment`, `secrets` và `grantTaskRole`. Prop `image` tùy chọn của nó thay thế image được xây dựng từ dự án của bạn.
 
-Trong Terraform, module của dịch vụ của bạn chỉ cho phép bạn đặt một số biến của module `ecs-service`: `vpc_id`, `subnet_ids`, `cluster_arn`, `environment`, `secrets`, `task_role_policy_statements` và `tags`, cộng với `user_pool_id` và `user_pool_client_ids` cho dịch vụ Cognito. Để đặt bất kỳ biến nào khác, hãy chỉnh sửa khối `module "ecs_service"` trong module của dịch vụ của bạn.
+Trong Terraform, module của dịch vụ của bạn chỉ cho phép bạn đặt một số biến của module `ecs-service`: `vpc_id`, `subnet_ids`, `cluster_arn`, `environment`, `secrets`, `task_role_policy_statements` và `tags`. Để đặt bất kỳ biến nào khác, hãy chỉnh sửa khối `module "ecs_service"` trong module của dịch vụ của bạn.
 
 #### Image được xây dựng sẵn
 
@@ -340,48 +303,9 @@ module "prebuilt" {
 </Fragment>
 </Infrastructure>
 
-#### Worker không có Load Balancer
-
-Một worker đọc từ hàng đợi hoặc chạy các công việc nền, và không có gì gọi nó. Tắt load balancer để có một dịch vụ không có load balancer, không có HTTP API và không có URL.
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts
-new EcsService(this, 'Worker', {
-  serviceName: 'Worker',
-  vpc,
-  image: { directory: '<path to the folder with the Dockerfile>' },
-  loadBalancer: false,
-});
-```
-
-</Fragment>
-<Fragment slot="terraform">
-Như với image được xây dựng sẵn, Terraform chỉ cấp quyền pull trên kho lưu trữ Amazon ECR riêng tư khi bạn truyền `image_repository_arn`.
-
-```hcl
-module "worker" {
-  source = "../../common/terraform/src/core/container/ecs-service"
-
-  service_name  = "Worker"
-  vpc_id        = aws_vpc.main.id
-  subnet_ids    = aws_subnet.private[*].id
-  image_uri     = "<image uri pinned by digest>"
-  load_balancer = false
-  # For an image in a private Amazon ECR repository, also pass:
-  # image_repository_arn = aws_ecr_repository.my_image.arn
-}
-```
-
-</Fragment>
-</Infrastructure>
-
 #### Nhiều dịch vụ trong một Stack
 
 Mỗi dịch vụ tạo cluster ECS riêng của nó trừ khi bạn truyền một cluster vào. Để chạy nhiều dịch vụ trong một cluster, hãy truyền cùng một cluster cho mỗi dịch vụ.
-
-Mỗi dịch vụ HTTP API tạo VPC link riêng của nó, ngay cả khi các dịch vụ chia sẻ một cluster. API Gateway cho phép 10 VPC link cho mỗi tài khoản mỗi Region theo mặc định, và bạn có thể yêu cầu tăng.
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -479,35 +403,17 @@ Task definition chạy container với uid 1000, một người dùng không ph�
 | --- | --- | --- | --- |
 | Người dùng mà container chạy với | `user` | `container_user` | `'1000'` (CDK), `"1000:1000"` (Terraform) |
 
-#### CORS và Throttling
-
-Các cài đặt này chỉ áp dụng khi `ingress` được đặt thành `http-api`. CORS (cross-origin resource sharing) quyết định trang web nào có thể gọi dịch vụ của bạn từ trình duyệt. Theo mặc định, HTTP API chấp nhận yêu cầu trình duyệt từ bất kỳ origin nào, với bất kỳ phương thức nào, và với các header `authorization`, `content-type`, `x-amz-content-sha256`, `x-amz-date` và `x-amz-security-token`. Ba header cuối cùng là các header mà chữ ký SigV4 thêm vào. HTTP API cũng điều tiết yêu cầu đến tốc độ ổn định 10.000 mỗi giây, với burst lên đến 5.000.
-
-| Cài đặt | CDK | Terraform variable | Mặc định |
-| --- | --- | --- | --- |
-| Origin CORS được phép | Phương thức `restrictCorsTo(...origins)`, hoặc prop `corsPreflight` | `cors_allow_origins` | bất kỳ origin nào (`["*"]`) |
-| Cài đặt CORS khác | Prop `corsPreflight` | none | bất kỳ phương thức nào, và các header ở trên |
-| Throttling | Prop `throttle` | none | `{ rateLimit: 10000, burstLimit: 5000 }` |
-
-Prop `corsPreflight` thay thế toàn bộ mặc định, vì vậy hãy liệt kê mọi header mà người gọi của bạn gửi. Phương thức `restrictCorsTo` giữ các cài đặt CORS khác và chỉ thay đổi các origin được phép:
-
-```ts
-const service = new MyService(this, 'MyService', { vpc });
-service.restrictCorsTo('https://app.example.com');
-```
-
-Trong Terraform, `cors_allow_origins` và `container_user` là các biến của module `ecs-service`. Module của dịch vụ của bạn không truyền chúng, vì vậy hãy đặt chúng trong khối `module "ecs_service"` của nó. Các giá trị throttling được cố định trong `ecs-service.tf`.
+Trong Terraform, `container_user` là một biến của module `ecs-service`. Module của dịch vụ của bạn không truyền nó, vì vậy hãy đặt nó trong khối `module "ecs_service"` của nó.
 
 ### Chi phí
 
 Một container service tính phí khi nó không hoạt động, không giống như Lambda function. Các phần này tính phí theo giờ cho dù có ai gọi dịch vụ hay không:
 
 - Các task Fargate, mỗi vCPU và mỗi GB bộ nhớ. `desiredCount` và `minCapacity` giữ ít nhất một task đang chạy.
-- Application Load Balancer, mỗi giờ và mỗi đơn vị dung lượng load balancer.
 - Interface VPC endpoint, mỗi giờ trong mỗi Availability Zone, hoặc NAT gateway, mỗi giờ và mỗi GB dữ liệu nó xử lý.
 - Lưu trữ log trong CloudWatch Logs, và lưu trữ image trong Amazon ECR.
 
-HTTP API tính phí cho mỗi yêu cầu. Để ước tính chi phí cho Region và lưu lượng của bạn, hãy sử dụng [AWS Pricing Calculator](https://calculator.aws/).
+Để ước tính chi phí cho Region và lưu lượng của bạn, hãy sử dụng [AWS Pricing Calculator](https://calculator.aws/).
 
 ### Hủy dịch vụ của bạn
 
@@ -526,7 +432,7 @@ Chạy target `destroy` của dự án infrastructure của bạn:
 </Fragment>
 </Infrastructure>
 
-Sau đó kiểm tra trong AWS console hoặc với AWS CLI rằng những thứ này đã biến mất: dịch vụ ECS và cluster, load balancer và target group của nó, HTTP API và VPC link của nó, và log group của dịch vụ. Các image vẫn ở trong Amazon ECR, trong kho lưu trữ CDK assets hoặc kho lưu trữ `asset-ecr` được chia sẻ. Xóa chúng nếu bạn không còn cần chúng nữa. VPC là của bạn, vì vậy việc hủy dịch vụ để nó nguyên vị trí.
+Sau đó kiểm tra trong AWS console hoặc với AWS CLI rằng dịch vụ ECS và cluster đã biến mất. Với Terraform, destroy cũng xóa log group của dịch vụ và lên lịch xóa khóa AWS KMS của nó sau 7 ngày. Với CDK, destroy giữ log group của dịch vụ và khóa AWS KMS của nó, vì CDK giữ log group và khóa trừ khi một removal policy nói khác đi. Tự xóa chúng nếu bạn không còn cần log nữa. Các image vẫn ở trong Amazon ECR, trong kho lưu trữ CDK assets hoặc kho lưu trữ `asset-ecr` được chia sẻ. Xóa chúng nếu bạn không còn cần chúng nữa. VPC là của bạn, vì vậy việc hủy dịch vụ để nó nguyên vị trí.
 </OptionFilter>
 
 ## Kết nối dịch vụ của bạn
@@ -535,16 +441,9 @@ Sử dụng generator <Link path="/guides/connection">`connection`</Link> để 
 
 <RunGenerator generator="connection" />
 
-Một website hoặc một agent có thể gọi dịch vụ của bạn, và dịch vụ của bạn có thể sử dụng cơ sở dữ liệu quan hệ hoặc bảng DynamoDB. Mỗi kết nối có hướng dẫn riêng:
+Dịch vụ của bạn có thể sử dụng cơ sở dữ liệu quan hệ hoặc bảng DynamoDB. Mỗi kết nối có hướng dẫn riêng:
 
-- <Link path="guides/connection/react-container">React to Container Service</Link>
-- <Link path="guides/connection/ts-agent-container">TypeScript Agent to Container Service</Link>
-- <Link path="guides/connection/py-agent-container">Python Agent to Container Service</Link>
 - <Link path="guides/connection/py-container-rdb">Python Container Service to Relational Database</Link>
 - <Link path="guides/connection/py-container-dynamodb">Python Container Service to DynamoDB</Link>
 
-Mỗi kết nối cũng có các điều kiện:
-
-- Một website hoặc một agent chỉ có thể kết nối với dịch vụ có `ingress` được đặt thành `http-api`.
-- Một agent cũng chỉ có thể kết nối với dịch vụ có `auth` được đặt thành `iam`.
-- Kết nối cơ sở dữ liệu hoặc DynamoDB cần dịch vụ có `infra` được đặt thành `ecs`.
+Một kết nối cần dịch vụ có `infra` được đặt thành `ecs`.
