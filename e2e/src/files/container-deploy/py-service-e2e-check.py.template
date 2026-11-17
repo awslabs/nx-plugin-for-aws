@@ -1,0 +1,96 @@
+"""Startup checks for the container-deploy smoke test, which reads the E2E_CHECK log lines."""
+
+import asyncio
+import contextlib
+import json
+import os
+import time
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from <% RDB_MODULE %>.connection import session_context
+from <% RDB_MODULE %>.models.example import ExampleModel as ExampleRow
+from <% TABLE_MODULE %>.entities.example import ExampleModel as ExampleItem
+
+
+def _seconds(name: str, default: float) -> float:
+    return float(os.environ.get(name, default))
+
+
+def _log(check: str, token: str, ok: bool, detail: str | None = None) -> None:
+    print("E2E_CHECK " + json.dumps({"check": check, "token": token, "ok": ok, "detail": detail}), flush=True)
+
+
+def _put_and_get_item(token: str) -> None:
+    ExampleItem.create(id=token, name=token, category="container-deploy")
+    name = ExampleItem.get_by_id(token).name
+    if name != token:
+        raise RuntimeError(f"read back {name!r}")
+
+
+async def _check_item(token: str) -> None:
+    await asyncio.to_thread(_put_and_get_item, token)
+
+
+async def _check_row(token: str) -> None:
+    async with session_context() as session:
+        row = ExampleRow(name=token, description="container-deploy")
+        session.add(row)
+        await session.commit()
+        await session.refresh(row)
+        row_id = row.id
+    # A new session, so the row is read from the database, not the session.
+    async with session_context() as session:
+        fetched = await session.get(ExampleRow, row_id)
+    if fetched is None or fetched.name != token:
+        raise RuntimeError(f"read back {fetched!r}")
+
+
+async def _run_check(check: str, token: str, run: Callable[[str], Awaitable[None]]) -> None:
+    deadline = time.monotonic() + _seconds("E2E_CHECK_TIMEOUT_SECONDS", 3600)
+    interval = _seconds("E2E_CHECK_INTERVAL_SECONDS", 15)
+    attempt = 1
+    while True:
+        try:
+            await run(token)
+            _log(check, token, True)
+            return
+        except Exception as error:
+            if time.monotonic() + interval > deadline:
+                _log(check, token, False, str(error))
+                return
+            print(f"e2e-check {check} attempt {attempt}: {error}", flush=True)
+        attempt += 1
+        await asyncio.sleep(interval)
+
+
+async def _wait_until_listening() -> None:
+    port = int(os.environ.get("PORT", "8080"))
+    while True:
+        try:
+            _, writer = await asyncio.open_connection("127.0.0.1", port)
+            writer.close()
+            await writer.wait_closed()
+            return
+        except OSError:
+            await asyncio.sleep(1)
+
+
+async def run_e2e_checks(token: str) -> None:
+    await _wait_until_listening()
+    await asyncio.gather(
+        _run_check("py-service-my-py-table", token, _check_item),
+        _run_check("py-service-py-postgres-db", token, _check_row),
+    )
+
+
+@asynccontextmanager
+async def e2e_check_lifespan(_app: FastAPI) -> AsyncGenerator[None]:
+    token = os.environ.get("E2E_CHECK_TOKEN")
+    task = asyncio.create_task(run_e2e_checks(token)) if token else None
+    yield
+    if task is not None:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task

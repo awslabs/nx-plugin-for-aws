@@ -11,11 +11,6 @@ import {
   paginateListStacks,
   StackStatus,
 } from '@aws-sdk/client-cloudformation';
-import {
-  CognitoIdentityProviderClient,
-  DescribeUserPoolCommand,
-  ResourceNotFoundException,
-} from '@aws-sdk/client-cognito-identity-provider';
 import { createAwsClient, getRegion } from './deploy-invocations';
 
 /**
@@ -35,13 +30,10 @@ import { createAwsClient, getRegion } from './deploy-invocations';
 /**
  * Resources whose deletion the checks confirm with the owning service, by id.
  * The CloudFormation and Terraform checks below cover everything else the
- * test deploys (VPC, ECS services, load balancers, HTTP APIs, roles, ...).
+ * test deploys (VPC, ECS clusters and services, roles, log groups, security
+ * groups, ...).
  */
 export interface DeployedResourceIds {
-  userPoolIds: string[];
-  identityPoolIds: string[];
-  /** Runtime ids or ARNs of AgentCore runtimes. */
-  agentRuntimeIds: string[];
   tableNames: string[];
   bucketNames: string[];
   appConfigApplicationIds: string[];
@@ -52,9 +44,6 @@ export interface DeployedResourceIds {
 }
 
 export const emptyResourceIds = (): DeployedResourceIds => ({
-  userPoolIds: [],
-  identityPoolIds: [],
-  agentRuntimeIds: [],
   tableNames: [],
   bucketNames: [],
   appConfigApplicationIds: [],
@@ -64,9 +53,6 @@ export const emptyResourceIds = (): DeployedResourceIds => ({
 
 /** The CloudFormation resource types whose physical id goes in each list. */
 const CFN_RESOURCE_TYPES: Record<string, keyof DeployedResourceIds> = {
-  'AWS::Cognito::UserPool': 'userPoolIds',
-  'AWS::Cognito::IdentityPool': 'identityPoolIds',
-  'AWS::BedrockAgentCore::Runtime': 'agentRuntimeIds',
   'AWS::DynamoDB::Table': 'tableNames',
   'AWS::DynamoDB::GlobalTable': 'tableNames',
   'AWS::S3::Bucket': 'bucketNames',
@@ -268,44 +254,7 @@ const describeDbCluster = async (idOrArn: string): Promise<Existence> => {
 /** One check per resource id, labelled for the failure message. */
 const probes = (ids: DeployedResourceIds) => {
   const region = getRegion();
-  const cognito = new CognitoIdentityProviderClient({ region });
   return [
-    ...ids.userPoolIds.map((id) => ({
-      label: `Cognito user pool ${id}`,
-      check: (): Promise<Existence> =>
-        cognito
-          .send(new DescribeUserPoolCommand({ UserPoolId: id }))
-          .then((): Existence => 'exists')
-          .catch(
-            (e): Existence =>
-              e instanceof ResourceNotFoundException
-                ? 'deleted'
-                : `unknown: ${e}`,
-          ),
-    })),
-    ...ids.identityPoolIds.map((id) => ({
-      label: `Cognito identity pool ${id}`,
-      check: () =>
-        describeJson(
-          'cognito-identity',
-          'AWSCognitoIdentityService.DescribeIdentityPool',
-          'application/x-amz-json-1.1',
-          { IdentityPoolId: id },
-        ),
-    })),
-    ...ids.agentRuntimeIds.map((idOrArn) => {
-      const id = idOrArn.split('/').pop() ?? idOrArn;
-      return {
-        label: `AgentCore runtime ${id}`,
-        check: () =>
-          describeRest(
-            'bedrock-agentcore',
-            `https://bedrock-agentcore-control.${region}.amazonaws.com/runtimes/${encodeURIComponent(id)}/`,
-            'GET',
-            (body) => (body as { status?: string }).status === 'DELETING',
-          ),
-      };
-    }),
     ...ids.tableNames.map((name) => ({
       label: `DynamoDB table ${name}`,
       check: () =>

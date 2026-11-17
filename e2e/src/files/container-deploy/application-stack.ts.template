@@ -5,12 +5,9 @@ import {
   MyPyTable,
   MyTable,
   PostgresDb,
-  PyAgent,
   PyService,
   RuntimeConfig,
-  TsProjectAgent,
   TsService,
-  UserIdentity,
 } from '@e2e-test/common-constructs';
 
 export class ApplicationStack extends cdk.Stack {
@@ -21,27 +18,14 @@ export class ApplicationStack extends cdk.Stack {
     // while the rdb deploy jobs run in parallel.
     const vpc = new Vpc(this, 'Vpc', { natGateways: 1 });
 
-    // Per-service constructs vended by ts#container and py#container; props
-    // other than vpc keep their defaults (http-api ingress, iam auth). Each
-    // service is the target of the website and agent connections and the
-    // source of its language's data connections.
-    const tsService = new TsService(this, 'TsService', { vpc });
-    const pyService = new PyService(this, 'PyService', { vpc });
+    // Per-service constructs vended by ts#container and py#container, private
+    // with no inbound rule. Each service is the source of its language's data
+    // connections and checks them at startup when E2E_CHECK_TOKEN is set.
+    const environment = { E2E_CHECK_TOKEN: '<% E2E_CHECK_TOKEN %>' };
+    const tsService = new TsService(this, 'TsService', { vpc, environment });
+    const pyService = new PyService(this, 'PyService', { vpc, environment });
 
-    // The grants the connection generators print, for all ten connections.
-    // The website itself is not deployed; the test signs in as a website
-    // user from Node.
-    const identity = new UserIdentity(this, 'UserIdentity');
-    tsService.grantInvoke(identity.identityPool.authenticatedRole);
-    pyService.grantInvoke(identity.identityPool.authenticatedRole);
-
-    const tsProjectAgent = new TsProjectAgent(this, 'TsProjectAgent');
-    const pyAgent = new PyAgent(this, 'PyAgent');
-    for (const agent of [tsProjectAgent, pyAgent]) {
-      tsService.grantInvoke(agent);
-      pyService.grantInvoke(agent);
-    }
-
+    // The grants the connection generators print, for the four connections.
     const myTable = new MyTable(this, 'MyTable');
     myTable.grantReadWriteData(tsService.taskRole);
     const myPyTable = new MyPyTable(this, 'MyPyTable');
@@ -53,7 +37,8 @@ export class ApplicationStack extends cdk.Stack {
     // construct is not deployed here, and the Python client reads the same
     // cluster's settings under its own runtime-config key. The rdb deploy
     // tests deploy both constructs. No RDS Proxy, as in terraform-deploy-rdb,
-    // to save its cost and create time.
+    // to save its cost and create time. The database's security group admits
+    // each service's security group.
     const postgresDb = new PostgresDb(this, 'PostgresDb', {
       vpc,
       enableRdsProxy: false,
@@ -65,13 +50,23 @@ export class ApplicationStack extends cdk.Stack {
     const rc = RuntimeConfig.ensure(this);
     rc.set('database', 'PyPostgresDb', rc.get('database').PostgresDb);
 
-    new cdk.CfnOutput(this, 'TsServiceUrl', { value: tsService.url ?? '' });
-    new cdk.CfnOutput(this, 'PyServiceUrl', { value: pyService.url ?? '' });
-    new cdk.CfnOutput(this, 'TsAgentArn', {
-      value: tsProjectAgent.agentCoreRuntime.agentRuntimeArn,
-    });
-    new cdk.CfnOutput(this, 'PyAgentArn', {
-      value: pyAgent.agentCoreRuntime.agentRuntimeArn,
-    });
+    // What the test reads to check each service.
+    for (const [name, service] of [
+      ['TsService', tsService],
+      ['PyService', pyService],
+    ] as const) {
+      new cdk.CfnOutput(this, `${name}ClusterArn`, {
+        value: service.cluster.clusterArn,
+      });
+      new cdk.CfnOutput(this, `${name}Name`, {
+        value: service.service.serviceName,
+      });
+      new cdk.CfnOutput(this, `${name}SecurityGroupId`, {
+        value: service.securityGroup.securityGroupId,
+      });
+      new cdk.CfnOutput(this, `${name}LogGroupName`, {
+        value: service.logGroup.logGroupName,
+      });
+    }
   }
 }

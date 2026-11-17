@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { execSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CloudFormation } from '@aws-sdk/client-cloudformation';
@@ -14,13 +15,12 @@ import {
   runInstall,
   tmpProjPath,
 } from '../utils';
-import { addContainerConnectionCalls } from './container-connection-fixtures';
+import { addContainerStartupChecks } from './container-connection-fixtures';
 import {
-  createWebsiteUserAwsClient,
-  invokeAgentCallingContainer,
-  invokeContainerAsWebsiteUser,
-  invokeContainerDatabaseRow,
-  invokeContainerDynamoDBItem,
+  assertContainerServiceIsPrivate,
+  type DeployedContainerService,
+  waitForE2eChecks,
+  waitForHealthyTasks,
 } from './container-deploy-invocations';
 import {
   assertNoLeftovers,
@@ -30,16 +30,9 @@ import {
   findLeftoverResources,
   findLeftoverTerraformState,
 } from './container-deploy-leftovers';
-import {
-  invokeAgentCoreAgent,
-  invokeContainerHealth,
-  invokeIamApiNoAuthDenied,
-  invokeTrpcAgentCoreAgent,
-} from './deploy-invocations';
 import { ensureRdsServiceLinkedRole } from './deploy-prerequisites';
 import { applyInfra } from './terraform-apply';
 import { terraformStateBucketExists } from './terraform-state-bucket';
-import { createCognitoTestUser } from './website-integration';
 
 function readTerraformOutputs(projectRoot: string): Record<string, string> {
   const raw = execSync('terraform output -json', {
@@ -56,55 +49,62 @@ function readTerraformOutputs(projectRoot: string): Record<string, string> {
   );
 }
 
-/** What the test reads from the deployed stack before it calls anything. */
-interface DeployedEndpoints {
-  tsServiceUrl: string;
-  pyServiceUrl: string;
-  tsAgentArn: string;
-  pyAgentArn: string;
-  userPoolId: string;
-  userPoolClientId: string;
-  identityPoolId: string;
-}
+/** The deployed services, and the startup checks each must pass. */
+const SERVICES = [
+  {
+    label: 'TsService',
+    outputKey: 'TsService',
+    terraformOutput: 'ts_service',
+    expectedChecks: ['ts-service-my-table', 'ts-service-postgres-db'],
+  },
+  {
+    label: 'PyService',
+    outputKey: 'PyService',
+    terraformOutput: 'py_service',
+    expectedChecks: ['py-service-my-py-table', 'py-service-py-postgres-db'],
+  },
+] as const;
 
 /**
  * container-deploy smoke tests: deploy one `ts#container` service
- * (`ts-service`) and one `py#container` service (`py-service`), both with the
- * default `http-api` ingress and `iam` auth, into a VPC the test creates,
- * together with the far ends of all ten container connections, then call
- * every connection. `container-deploy` deploys with CDK and
+ * (`ts-service`) and one `py#container` service (`py-service`) into a VPC
+ * the test creates, together with the far ends of the four container data
+ * connections, and check that every connection works and that both services
+ * stay private. `container-deploy` deploys with CDK and
  * `container-deploy-terraform` with Terraform; each is its own CI job,
  * because both in one job would outlast the job's 3-hour AWS role session.
  *
- * Each service is the target of the website and agent connections and the
- * source of its language's data connections:
+ * Each service is the source of its language's data connections:
  *
- * - website -> each service: a website user signed in through Cognito calls
- *   `GET /hello` or `GET /echo` with the identity pool's credentials, as the
- *   website's vended hook does. The website itself is not deployed, only its
- *   user identity.
- * - `ts#agent` and `py#agent` -> each service: each agent is asked to use a
- *   tool that calls `GET /digest` on the service through the vended client,
- *   and must answer with the digest the service computed.
- * - each service -> its language's DynamoDB table: `PUT /items/<id>` writes
- *   one item and reads it back.
- * - each service -> its language's rdb: `PUT /rows/<value>` inserts one row
- *   through the vended rdb client and selects it back. Both services use one
- *   Aurora PostgreSQL cluster, deployed by the `ts#rdb` construct or module;
- *   the Python client is given that cluster's settings under its own
- *   runtime-config key (see the stack templates in `files/container-deploy`).
- *   So the `py#rdb` construct or module, its Alembic migration and its
- *   create-db-user Lambda are not deployed here; the rdb deploy tests
- *   (`cdk-deploy-rdb`, `terraform-deploy-rdb`) deploy them. The rdb
- *   generators vend no migration, so the test writes a first Prisma
- *   migration that creates the tables both services use.
+ * - each service -> its language's DynamoDB table (`my-table`,
+ *   `my-py-table`).
+ * - each service -> its language's rdb (`postgres-db`, `py-postgres-db`).
+ *   Both services use one Aurora PostgreSQL cluster, deployed by the
+ *   `ts#rdb` construct or module; the Python client is given that
+ *   cluster's settings under its own runtime-config key (see the stack
+ *   templates in `files/container-deploy`). So the `py#rdb` construct or
+ *   module, its Alembic migration and its create-db-user Lambda are not
+ *   deployed here; the rdb deploy tests (`cdk-deploy-rdb`,
+ *   `terraform-deploy-rdb`) deploy them. The rdb generators vend no
+ *   migration, so the test writes a first Prisma migration that creates the
+ *   tables both services use.
  *
- * For each service it also calls `GET /health` with SigV4 and checks that an
- * unsigned call is denied. Everything is destroyed in `finally`. After
- * destroy it checks, with read-only calls, that no stack, Terraform state
- * entry or named resource (Cognito pools, AgentCore runtimes, DynamoDB
- * tables, buckets, AppConfig application, Aurora cluster and its secret) is
- * left, and fails the test if one is.
+ * A service has no load balancer and its security group gets no inbound
+ * rule, so the test cannot call it, and does not open it. Instead the test
+ * adds a startup check to each service (`container-connection-fixtures.ts`):
+ * once the server listens, the service writes and reads one DynamoDB item
+ * and inserts and selects one database row through the vended clients, and
+ * logs one `E2E_CHECK` line per connection with a token that is random per
+ * run. After deploy the test, with read-only calls, checks that each service
+ * runs a task, has no load balancer, no public IP and no inbound permission
+ * on its security group, that its containers are `HEALTHY`, and that its
+ * log group holds an `ok: true` line with this run's token for each of its
+ * connections.
+ *
+ * Everything is destroyed in `finally`. After destroy it checks, with
+ * read-only calls, that no stack, Terraform state entry or named resource
+ * (DynamoDB tables, buckets, AppConfig application, Aurora cluster and its
+ * secret) is left, and fails the test if one is.
  *
  * It builds a small workspace of its own rather than the full generator
  * matrix, and runs only on pushes to `main` (`.github/workflows/ci.yml`).
@@ -126,7 +126,7 @@ function describeContainerDeploy(
       pinAwsScopeToLocalRegistry(targetDir);
     });
 
-    it(`should deploy and call the container connections with iac=${iac}`, async () => {
+    it(`should deploy the private container services and check their connections with iac=${iac}`, async () => {
       const projectRoot = await createTestWorkspace(
         pkgMgr,
         targetDir,
@@ -154,18 +154,12 @@ function describeContainerDeploy(
       }
 
       // The two services, and the generators at the far ends of their
-      // connections. The Python agent has a project of its own, so its
-      // dependencies stay out of py-service's image.
+      // connections.
       for (const command of [
         'ts#project --name=ts-project',
         'ts#container --project=ts-project --name=ts-service',
-        'ts#agent --project=ts-project',
         'py#project --name=py-project --type=application',
         'py#container --project=py_project --name=py-service',
-        'py#project --name=py-agents --type=application',
-        'py#agent --project=py_agents --name=py-agent --infra=agentcore',
-        'ts#website --name=website',
-        'ts#website#auth --project=@e2e-test/website --cognitoDomain=e2e-container',
         'ts#dynamodb --name=my-table',
         'py#dynamodb --name=my-py-table',
         'ts#rdb --name=postgres-db',
@@ -177,14 +171,8 @@ function describeContainerDeploy(
         );
       }
 
-      // All ten container connections.
+      // The four container data connections.
       for (const connection of [
-        '--sourceProject=@e2e-test/website --targetProject=ts-project --targetComponent=ts-service',
-        '--sourceProject=@e2e-test/website --targetProject=py_project --targetComponent=py-service',
-        '--sourceProject=ts-project --sourceComponent=agent --targetProject=ts-project --targetComponent=ts-service',
-        '--sourceProject=ts-project --sourceComponent=agent --targetProject=py_project --targetComponent=py-service',
-        '--sourceProject=py_agents --sourceComponent=py-agent --targetProject=ts-project --targetComponent=ts-service',
-        '--sourceProject=py_agents --sourceComponent=py-agent --targetProject=py_project --targetComponent=py-service',
         '--sourceProject=ts-project --sourceComponent=ts-service --targetProject=postgres-db',
         '--sourceProject=py_project --sourceComponent=py-service --targetProject=py_postgres_db',
         '--sourceProject=ts-project --sourceComponent=ts-service --targetProject=@e2e-test/my-table',
@@ -196,7 +184,10 @@ function describeContainerDeploy(
         );
       }
       // Before sync, so sync records ts-project's new import of my-table.
-      await addContainerConnectionCalls(projectRoot);
+      await addContainerStartupChecks(projectRoot);
+
+      // Random per run; each service logs it with its startup check results.
+      const checkToken = randomUUID();
 
       writeFileSync(
         `${projectRoot}/aws-nx-plugin.config.mts`,
@@ -218,7 +209,7 @@ function describeContainerDeploy(
               '../files/container-deploy/application-stack.ts.template',
             ),
             'utf-8',
-          ),
+          ).replace(/<% E2E_CHECK_TOKEN %>/g, checkToken),
         );
       }
 
@@ -249,7 +240,9 @@ function describeContainerDeploy(
           readFileSync(
             join(__dirname, '../files/container-deploy/main.tf.template'),
             'utf-8',
-          ).replace(/<% TEST_RUN_ID %>/g, testRunId),
+          )
+            .replace(/<% TEST_RUN_ID %>/g, testRunId)
+            .replace(/<% E2E_CHECK_TOKEN %>/g, checkToken),
         );
 
         // A state file per run, so parallel and earlier runs never collide.
@@ -266,20 +259,12 @@ function describeContainerDeploy(
           JSON.stringify(infraProjectJson, null, 2),
         );
 
-        // As in terraform-deploy: Cognito deletion_protection = INACTIVE, and
-        // the tables' and the Aurora cluster's literal `prevent_destroy =
-        // true` flipped (a variable cannot drive it), so `terraform destroy`
-        // removes them in one pass. main.tf already disables the tables'
-        // deletion_protection_enabled and the cluster's deletion_protection.
+        // As in terraform-deploy: the tables' and the Aurora cluster's
+        // literal `prevent_destroy = true` flipped (a variable cannot drive
+        // it), so `terraform destroy` removes them in one pass. main.tf
+        // already disables the tables' deletion_protection_enabled and the
+        // cluster's deletion_protection.
         const terraformSrc = `${projectRoot}/packages/common/terraform/src`;
-        const identityTfPath = `${terraformSrc}/core/user-identity/identity/identity.tf`;
-        writeFileSync(
-          identityTfPath,
-          readFileSync(identityTfPath, 'utf-8').replace(
-            /deletion_protection\s*=\s*"ACTIVE"/,
-            'deletion_protection = "INACTIVE"',
-          ),
-        );
         for (const relativeTfPath of [
           'core/dynamodb/dynamodb.tf',
           'core/rdb/aurora/aurora.tf',
@@ -312,7 +297,10 @@ function describeContainerDeploy(
       try {
         await runCLI(`sync`, opts);
 
-        let deployed: DeployedEndpoints;
+        // Log lines from before this deploy cannot hold this run's token, so
+        // reading from here on only saves time.
+        const deployStartedAt = Date.now();
+        let services: DeployedContainerService[];
         if (iac === 'cdk') {
           await runCLI(
             `deploy infra ${cdkStageName}/* --output-style=stream`,
@@ -324,28 +312,21 @@ function describeContainerDeploy(
                 StackName: `${cdkStageName}-Application`,
               })
             ).Stacks?.[0]?.Outputs ?? [];
-          const findOutput = (keyPrefix: string): string => {
-            const output = outputs.find((o) =>
-              o.OutputKey?.startsWith(keyPrefix),
-            );
-            if (!output?.OutputValue) {
-              throw new Error(`Output with key prefix ${keyPrefix} not found`);
+          const output = (key: string): string => {
+            const value = outputs.find((o) => o.OutputKey === key)?.OutputValue;
+            if (!value) {
+              throw new Error(`Stack output ${key} not found`);
             }
-            return output.OutputValue;
+            return value;
           };
-          deployed = {
-            tsServiceUrl: findOutput('TsServiceUrl'),
-            pyServiceUrl: findOutput('PyServiceUrl'),
-            tsAgentArn: findOutput('TsAgentArn'),
-            pyAgentArn: findOutput('PyAgentArn'),
-            userPoolId: findOutput('UserIdentityUserIdentityUserPoolId'),
-            userPoolClientId: findOutput(
-              'UserIdentityUserIdentityUserPoolClientId',
-            ),
-            identityPoolId: findOutput(
-              'UserIdentityUserIdentityIdentityPoolId',
-            ),
-          };
+          services = SERVICES.map(({ label, outputKey, expectedChecks }) => ({
+            label,
+            clusterArn: output(`${outputKey}ClusterArn`),
+            serviceName: output(`${outputKey}Name`),
+            securityGroupId: output(`${outputKey}SecurityGroupId`),
+            logGroupName: output(`${outputKey}LogGroupName`),
+            expectedChecks: [...expectedChecks],
+          }));
         } else {
           // `bootstrap` re-applies the shared state bucket and rewrites its
           // bootstrap.tfstate, so run it only when the bucket is missing.
@@ -357,86 +338,29 @@ function describeContainerDeploy(
           await applyInfra(opts);
           const outputs = readTerraformOutputs(projectRoot);
           console.log('Terraform outputs:', outputs);
-          deployed = {
-            tsServiceUrl: outputs.ts_service_url,
-            pyServiceUrl: outputs.py_service_url,
-            tsAgentArn: outputs.ts_agent_arn,
-            pyAgentArn: outputs.py_agent_arn,
-            userPoolId: outputs.user_pool_id,
-            userPoolClientId: outputs.user_pool_client_id,
-            identityPoolId: outputs.identity_pool_id,
+          const output = (name: string): string => {
+            const value = outputs[name];
+            if (!value || value === 'null' || value === 'undefined') {
+              throw new Error(`Terraform output ${name} not found`);
+            }
+            return value;
           };
+          services = SERVICES.map(
+            ({ label, terraformOutput, expectedChecks }) => ({
+              label,
+              clusterArn: output(`${terraformOutput}_cluster_arn`),
+              serviceName: output(`${terraformOutput}_name`),
+              securityGroupId: output(`${terraformOutput}_security_group_id`),
+              logGroupName: output(`${terraformOutput}_log_group_name`),
+              expectedChecks: [...expectedChecks],
+            }),
+          );
         }
 
-        const services = [
-          {
-            url: deployed.tsServiceUrl,
-            name: 'TypeScript container service',
-            language: 'ts',
-          },
-          {
-            url: deployed.pyServiceUrl,
-            name: 'Python container service',
-            language: 'py',
-          },
-        ] as const;
-
-        for (const { url, name } of services) {
-          await invokeContainerHealth(url, name);
-          await invokeIamApiNoAuthDenied(url, name);
-        }
-
-        // website -> each service
-        const websiteUser = await createWebsiteUserAwsClient(
-          await createCognitoTestUser(
-            deployed.userPoolId,
-            deployed.userPoolClientId,
-          ),
-          deployed.identityPoolId,
-        );
-        for (const { url, name, language } of services) {
-          await invokeContainerAsWebsiteUser(url, name, websiteUser, language);
-        }
-
-        // each service -> its DynamoDB table and its database
-        for (const { url, name } of services) {
-          await invokeContainerDynamoDBItem(url, name);
-          await invokeContainerDatabaseRow(url, name);
-        }
-
-        // each agent -> each service
-        const agents = [
-          {
-            name: 'TypeScript agent',
-            invoke: (prompt: string, sessionId: string) =>
-              invokeTrpcAgentCoreAgent(
-                deployed.tsAgentArn,
-                'TypeScript agent',
-                prompt,
-                { sessionId },
-              ),
-          },
-          {
-            name: 'Python agent',
-            invoke: (prompt: string, sessionId: string) =>
-              invokeAgentCoreAgent(
-                deployed.pyAgentArn,
-                'Python agent',
-                prompt,
-                {
-                  sessionId,
-                },
-              ),
-          },
-        ];
-        for (const agent of agents) {
-          for (const toolName of ['ts_service_digest', 'py_service_digest']) {
-            await invokeAgentCallingContainer(
-              agent.name,
-              toolName,
-              agent.invoke,
-            );
-          }
+        for (const service of services) {
+          await assertContainerServiceIsPrivate(service);
+          await waitForHealthyTasks(service);
+          await waitForE2eChecks(service, checkToken, deployStartedAt);
         }
       } catch (e) {
         testError = e;
@@ -458,9 +382,6 @@ function describeContainerDeploy(
                 .map((name) => outputs[name])
                 .filter((v) => v && v !== 'null' && v !== 'undefined');
             resourceIds = {
-              userPoolIds: ids('user_pool_id'),
-              identityPoolIds: ids('identity_pool_id'),
-              agentRuntimeIds: ids('ts_agent_arn', 'py_agent_arn'),
               tableNames: ids('my_table_name', 'my_py_table_name'),
               bucketNames: ids('asset_bucket_name'),
               appConfigApplicationIds: ids('runtime_config_application_id'),

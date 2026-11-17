@@ -4,11 +4,18 @@
 #
 
 # Wiring for the container-deploy smoke test. Provisions a minimal VPC with
-# one NAT gateway, plus one ts#container and one py#container service
-# (http-api ingress, iam auth) running in its private subnets. It also deploys
-# the far ends of all ten container connections (a Cognito user identity, a
-# ts#agent, a py#agent, a DynamoDB table per language and one Aurora
-# PostgreSQL cluster) with the grants the connection generators print.
+# one NAT gateway, plus one ts#container and one py#container service running
+# privately in its private subnets, with no inbound rule. It also deploys the
+# far ends of the four container data connections (a DynamoDB table per
+# language and one Aurora PostgreSQL cluster) with the grants the connection
+# generators print.
+
+# A random value per test run. Each service logs it with the result of its
+# startup checks, so a log line from an earlier run cannot pass the test.
+variable "e2e_check_token" {
+  type    = string
+  default = "<% E2E_CHECK_TOKEN %>"
+}
 
 # Shared asset registry, which hosts both services' images and the
 # database's migration image.
@@ -25,8 +32,7 @@ module "runtime_config_appconfig" {
   application_name = "e2e-container-runtime-config-<% TEST_RUN_ID %>"
 }
 
-# Shared asset bucket, which stages the agents' deployment zips and the
-# database's create-db-user Lambda zip.
+# Shared asset bucket, which stages the database's create-db-user Lambda zip.
 module "asset_bucket" {
   source = "../../common/terraform/src/core/asset-bucket"
 
@@ -138,6 +144,8 @@ module "ts_service" {
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  environment = { E2E_CHECK_TOKEN = var.e2e_check_token }
 }
 
 module "py_service" {
@@ -151,99 +159,13 @@ module "py_service" {
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  environment = { E2E_CHECK_TOKEN = var.e2e_check_token }
 }
 
 # ---------------------------------------------------------------------------
-# Connections the test calls, with the grants their generators print
+# Connections the services check, with the grants their generators print
 # ---------------------------------------------------------------------------
-
-# Website -> ts_service and py_service: the website's signed-in users call
-# both services.
-module "user_identity" {
-  source = "../../common/terraform/src/core/user-identity"
-}
-
-resource "aws_iam_role_policy" "authenticated_ts_service_invoke" {
-  name = "authenticated-ts-service-invoke"
-  role = module.user_identity.authenticated_role_name
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["execute-api:Invoke"]
-        Resource = ["${module.ts_service.api_execution_arn}/*"]
-      },
-    ]
-  })
-}
-
-resource "aws_iam_role_policy" "authenticated_py_service_invoke" {
-  name = "authenticated-py-service-invoke"
-  role = module.user_identity.authenticated_role_name
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["execute-api:Invoke"]
-        Resource = ["${module.py_service.api_execution_arn}/*"]
-      },
-    ]
-  })
-}
-
-# ts_agent and py_agent -> ts_service and py_service: each agent's tools call
-# both services with the agent's role.
-module "ts_agent" {
-  source = "../../common/terraform/src/app/agents/ts-project-agent"
-
-  session_force_destroy = true
-
-  appconfig_application_id  = module.runtime_config_appconfig.application_id
-  appconfig_application_arn = module.runtime_config_appconfig.application_arn
-  asset_bucket_name         = module.asset_bucket.bucket_name
-  asset_bucket_arn          = module.asset_bucket.bucket_arn
-
-  additional_iam_policy_statements = [
-    {
-      Effect   = "Allow"
-      Action   = ["execute-api:Invoke"]
-      Resource = ["${module.ts_service.api_execution_arn}/*"]
-    },
-    {
-      Effect   = "Allow"
-      Action   = ["execute-api:Invoke"]
-      Resource = ["${module.py_service.api_execution_arn}/*"]
-    },
-  ]
-}
-
-module "py_agent" {
-  source = "../../common/terraform/src/app/agents/py-agent"
-
-  session_force_destroy = true
-
-  appconfig_application_id  = module.runtime_config_appconfig.application_id
-  appconfig_application_arn = module.runtime_config_appconfig.application_arn
-  asset_bucket_name         = module.asset_bucket.bucket_name
-  asset_bucket_arn          = module.asset_bucket.bucket_arn
-
-  additional_iam_policy_statements = [
-    {
-      Effect   = "Allow"
-      Action   = ["execute-api:Invoke"]
-      Resource = ["${module.ts_service.api_execution_arn}/*"]
-    },
-    {
-      Effect   = "Allow"
-      Action   = ["execute-api:Invoke"]
-      Resource = ["${module.py_service.api_execution_arn}/*"]
-    },
-  ]
-}
 
 # ts_service -> my_table and py_service -> my_py_table: each service writes
 # and reads its language's table.
@@ -439,8 +361,7 @@ resource "aws_vpc_security_group_egress_rule" "py_service_to_postgres_db" {
 }
 
 # Deploys the runtime configuration every module above contributes: the
-# services' URLs (read by the agents), the table names and the database
-# settings (read by the services).
+# table names and the database settings, read by the services.
 module "runtime_config_appconfig_deployment" {
   source = "../../common/terraform/src/core/runtime-config/appconfig-deployment"
 
@@ -451,11 +372,8 @@ module "runtime_config_appconfig_deployment" {
   namespaces                = module.runtime_config_appconfig.namespaces
 
   depends_on = [
-    module.user_identity,
     module.ts_service,
     module.py_service,
-    module.ts_agent,
-    module.py_agent,
     module.my_table,
     module.my_py_table,
     module.postgres_db,
@@ -463,32 +381,37 @@ module "runtime_config_appconfig_deployment" {
   ]
 }
 
-output "ts_service_url" {
-  value = module.ts_service.url
+# What the test reads to check each service.
+output "ts_service_cluster_arn" {
+  value = module.ts_service.cluster_arn
 }
 
-output "py_service_url" {
-  value = module.py_service.url
+output "ts_service_name" {
+  value = module.ts_service.service_name
 }
 
-output "ts_agent_arn" {
-  value = module.ts_agent.agent_core_runtime_arn
+output "ts_service_security_group_id" {
+  value = module.ts_service.security_group_id
 }
 
-output "py_agent_arn" {
-  value = module.py_agent.agent_core_runtime_arn
+output "ts_service_log_group_name" {
+  value = module.ts_service.log_group_name
 }
 
-output "user_pool_id" {
-  value = module.user_identity.user_pool_id
+output "py_service_cluster_arn" {
+  value = module.py_service.cluster_arn
 }
 
-output "user_pool_client_id" {
-  value = module.user_identity.user_pool_client_id
+output "py_service_name" {
+  value = module.py_service.service_name
 }
 
-output "identity_pool_id" {
-  value = module.user_identity.identity_pool_id
+output "py_service_security_group_id" {
+  value = module.py_service.security_group_id
+}
+
+output "py_service_log_group_name" {
+  value = module.py_service.log_group_name
 }
 
 # Ids the test's leftover check confirms are deleted after destroy.

@@ -749,31 +749,3 @@ export async function pingWebsite(domain: string): Promise<void> {
   ).toHaveProperty('cognitoProps');
   console.log('Successfully pinged website');
 }
-
-/**
- * `GET /health` on a `ts#container` or `py#container` service through its HTTP
- * API, signed with SigV4 (`auth: iam`). Retries only 503 and 504, which API
- * Gateway returns while the VPC link or target group is still settling.
- */
-export async function invokeContainerHealth(
-  serviceUrl: string,
-  serviceName: string,
-): Promise<void> {
-  const aws = await createAwsClient();
-  const url = `${normalizeApiUrl(serviceUrl)}/health`;
-  const maxAttempts = 8;
-  console.log(`Testing ${serviceName} at ${url}`);
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const response = await aws.fetch(url);
-    if ([503, 504].includes(response.status) && attempt < maxAttempts) {
-      console.log(
-        `${serviceName} health returned ${response.status}; retrying in 15s (attempt ${attempt} of ${maxAttempts})`,
-      );
-      await new Promise((resolve) => setTimeout(resolve, 15_000));
-      continue;
-    }
-    console.log(`${serviceName} health response status:`, response.status);
-    expect(response.status).toBe(200);
-    return;
-  }
-}

@@ -1,0 +1,90 @@
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+import { createExampleEntity } from '@e2e-test/my-table';
+import { getPostgresDb } from './postgres-db<% JS %>';
+
+// Startup checks for the container-deploy smoke test, which reads the
+// E2E_CHECK lines from the service's log group.
+
+const seconds = (name: string, fallback: number) =>
+  Number(process.env[name] ?? fallback) * 1000;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const errorText = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
+
+const putAndGetItem = async (token: string) => {
+  const entity = await createExampleEntity();
+  await entity.put({ id: token }).go();
+  const { data } = await entity.get({ id: token }).go();
+  if (data?.id !== token) {
+    throw new Error(`read back ${JSON.stringify(data)}`);
+  }
+};
+
+// getPostgresDb() keeps a failed runtime-config read for the life of the
+// process, so wait until the configuration is deployed before the first call.
+const waitForDatabaseConfig = async () => {
+  const config = await getAppConfig<Record<string, unknown>>('database', {
+    application: process.env.RUNTIME_CONFIG_APP_ID ?? '',
+    environment: 'default',
+    transform: 'json',
+    forceFetch: true,
+  });
+  if (!config?.PostgresDb) {
+    throw new Error('runtime config has no database.PostgresDb yet');
+  }
+};
+
+let databaseConfigFound = false;
+
+const insertAndSelectRow = async (token: string) => {
+  if (!databaseConfigFound) {
+    await waitForDatabaseConfig();
+    databaseConfigFound = true;
+  }
+  const prisma = await getPostgresDb();
+  const { id } = await prisma.exampleTable.create({
+    data: { column1: token, column2: 'container-deploy' },
+  });
+  const row = await prisma.exampleTable.findUniqueOrThrow({ where: { id } });
+  if (row.column1 !== token) {
+    throw new Error(`read back ${JSON.stringify(row)}`);
+  }
+};
+
+const runCheck = async (
+  check: string,
+  token: string,
+  run: (token: string) => Promise<void>,
+) => {
+  const deadline = Date.now() + seconds('E2E_CHECK_TIMEOUT_SECONDS', 3600);
+  const interval = seconds('E2E_CHECK_INTERVAL_SECONDS', 15);
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await run(token);
+      console.log(`E2E_CHECK ${JSON.stringify({ check, token, ok: true })}`);
+      return;
+    } catch (error) {
+      if (Date.now() + interval > deadline) {
+        console.log(
+          `E2E_CHECK ${JSON.stringify({ check, token, ok: false, detail: errorText(error) })}`,
+        );
+        return;
+      }
+      console.log(`e2e-check ${check} attempt ${attempt}: ${errorText(error)}`);
+      await sleep(interval);
+    }
+  }
+};
+
+export const runE2eChecks = async (): Promise<void> => {
+  const token = process.env.E2E_CHECK_TOKEN;
+  if (!token) {
+    return;
+  }
+  await Promise.all([
+    runCheck('ts-service-my-table', token, putAndGetItem),
+    runCheck('ts-service-postgres-db', token, insertAndSelectRow),
+  ]);
+};
