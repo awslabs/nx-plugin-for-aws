@@ -90,10 +90,13 @@ const mustRedact = (key: string, value: string): boolean => {
  * The value of a quoted `key="value"` or `key: 'value'`, as two alternatives
  * one per quote character. A quoted value runs to the matching quote, a line
  * end or the end of the input, so a space, comma or brace inside the quotes
- * is part of the value and cannot end the match early. Each value class
- * excludes its own terminators, so the pattern has nothing to backtrack over.
+ * is part of the value and cannot end the match early. A backslash escapes
+ * the character after it, so an escaped copy of the surrounding quote
+ * (`access_token="abc\"def"`) belongs to the value as well, and a backslash
+ * with nothing after it is consumed too. Every branch of a value starts on a
+ * different character, so the pattern has nothing to backtrack over.
  */
-const QUOTED_VALUE = String.raw`"([^"\r\n]*)("|(?=[\r\n]|$))|'([^'\r\n]*)('|(?=[\r\n]|$))`;
+const QUOTED_VALUE = String.raw`"((?:[^"\\\r\n]|\\[^\r\n]|\\(?=[\r\n]|$))*)("|(?=[\r\n]|$))|'((?:[^'\\\r\n]|\\[^\r\n]|\\(?=[\r\n]|$))*)('|(?=[\r\n]|$))`;
 
 /** The quote and the inner value of whichever quoted alternative matched. */
 const quotedValue = (

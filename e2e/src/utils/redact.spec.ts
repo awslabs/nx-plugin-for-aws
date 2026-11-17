@@ -459,6 +459,51 @@ describe('redactOAuthValues', () => {
     },
   );
 
+  // A backslash escapes the character after it inside a quoted value, so an
+  // escaped copy of the surrounding quote is part of the value and cannot end
+  // the redaction early and leave the rest of the credential in the log.
+
+  it.each([
+    ['access_token="abc\\"def"', 'access_token="[REDACTED]"'],
+    ["access_token='abc\\'def'", "access_token='[REDACTED]'"],
+    [`code="${CODE}\\"x"`, 'code="[REDACTED]"'],
+    ['access_token="abc\\\\"', 'access_token="[REDACTED]"'],
+    ['access_token="abc\\"def\\"ghi"', 'access_token="[REDACTED]"'],
+  ])(
+    'redacts a quoted parameter value holding an escaped quote: %s',
+    (input, expected) => {
+      const output = redactOAuthValues(input);
+      expect(output).toBe(expected);
+      expect(output).not.toContain('def');
+    },
+  );
+
+  it.each([
+    ['{ accessToken: "abc\\"def" }', '{ accessToken: "[REDACTED]" }'],
+    ["{ accessToken: 'abc\\'def' }", "{ accessToken: '[REDACTED]' }"],
+    ['{accessToken:"abc\\"def"}', '{accessToken:"[REDACTED]"}'],
+  ])(
+    'redacts a quoted preview value holding an escaped quote: %s',
+    (input, expected) => {
+      const output = redactOAuthValues(input);
+      expect(output).toBe(expected);
+      expect(output).not.toContain('def');
+    },
+  );
+
+  it.each([
+    ['access_token="abc\\', 'access_token="[REDACTED]'],
+    ['access_token="abc\\\nNEXT', 'access_token="[REDACTED]\nNEXT'],
+    ["{ accessToken: 'abc\\", "{ accessToken: '[REDACTED]"],
+  ])(
+    'redacts a quoted value truncated after a lone backslash: %s',
+    (input, expected) => {
+      const output = redactOAuthValues(input);
+      expect(output).toBe(expected);
+      expect(output).not.toContain('abc');
+    },
+  );
+
   // The diagnostic shapes are bounded short of the length a credential
   // occupies. Each bound is pinned on both sides.
 

@@ -15,8 +15,13 @@ import { generateFiles } from '@nx/devkit';
 import { FsTree, flushChanges } from 'nx/src/generators/tree';
 import { type Browser, chromium, type Page } from 'playwright';
 import { formatFilesInSubtree } from '../../../packages/nx-plugin/src/utils/format';
+import { resolveWithin } from '../utils/deadline';
 import { redactOAuthValues } from '../utils/redact';
-import { describeSignInFailure } from '../utils/sign-in-failure';
+import {
+  describeSignInFailure,
+  signInIncompleteError,
+  signInStepError,
+} from '../utils/sign-in-failure';
 import { IDP_PROVIDER_NAME, type TestIdp } from '../utils/test-idp';
 
 /**
@@ -216,6 +221,16 @@ const trackDocumentStatus = (page: Page): (() => number | undefined) => {
 };
 
 /**
+ * Printed in place of a page title that could not be read in time, and how
+ * long the failure handler waits for it. `Page.title()` asks the renderer
+ * with no deadline of its own, so an unresponsive renderer would hold the
+ * failure handler for the whole of the suite's timeout and the original error
+ * would never be thrown.
+ */
+const TITLE_UNAVAILABLE = '<title unavailable>';
+const TITLE_TIMEOUT_MS = 5_000;
+
+/**
  * The line a failed sign-in step prints: the step, the origin and path of the
  * page's URL, its HTTP status and its title. The sign-in flow carries the
  * authorization code and the tokens in the URL query and fragment and in the
@@ -231,9 +246,33 @@ const logSignInFailure = async (
       step,
       url: page.url(),
       status: documentStatus(),
-      title: await page.title().catch(() => undefined),
+      title: await resolveWithin(
+        () => page.title(),
+        TITLE_UNAVAILABLE,
+        TITLE_TIMEOUT_MS,
+      ),
     }),
   );
+};
+
+/**
+ * Wait for the page's URL to satisfy `url`, reporting a failure as an error
+ * that has been through `redactOAuthValues`.
+ *
+ * A navigation-wait timeout quotes every URL the page visited while waiting,
+ * and during a sign-in flow those carry the authorization code and the
+ * tokens, so the wait's own error never reaches the test log.
+ */
+const waitForUrl = async (
+  page: Page,
+  step: string,
+  url: string | RegExp | ((url: URL) => boolean),
+): Promise<void> => {
+  try {
+    await page.waitForURL(url, { timeout: 120_000 });
+  } catch (e) {
+    throw signInStepError(step, e);
+  }
 };
 
 /**
@@ -266,6 +305,7 @@ const fillCognitoLoginForm = async (
       'button[type="submit"], input[type="submit"], button:has-text("Sign in"), button:has-text("Continue"), button:has-text("Next")',
     )
     .first();
+  const step = 'login form not fillable';
   try {
     await usernameInput.waitFor({ state: 'visible', timeout: 60_000 });
     await usernameInput.click();
@@ -280,19 +320,26 @@ const fillCognitoLoginForm = async (
     await passwordInput.fill(password);
     await submit.click();
   } catch (e) {
-    await logSignInFailure(page, 'login form not fillable', documentStatus);
-    throw e;
+    await logSignInFailure(page, step, documentStatus);
+    throw signInStepError(step, e);
   }
 };
 
 /**
  * Wait to land back on the website after a Cognito sign-in, then open the
  * integration-test page and wait for its run button to render.
+ *
+ * Returns only once that button has rendered, which is what proves the
+ * sign-in completed and the page no longer holds a credential. A flow that
+ * ran out of attempts throws instead, so a caller can treat a normal return
+ * as the point from which browser output is safe to forward.
  */
 const waitForSignedIn = async (page: Page, target: string): Promise<void> => {
-  await page.waitForURL((url) => !url.href.includes('amazoncognito.com'), {
-    timeout: 120_000,
-  });
+  await waitForUrl(
+    page,
+    'did not land back on the website after sign-in',
+    (url) => !url.href.includes('amazoncognito.com'),
+  );
   // react-oidc-context completes the code exchange on the redirect back to
   // the app origin. Navigate to the example route and retry until the run
   // button renders (a premature load before the exchange finishes would
@@ -304,10 +351,16 @@ const waitForSignedIn = async (page: Page, target: string): Promise<void> => {
         .goto(target, { waitUntil: 'domcontentloaded', timeout: 120_000 })
         .catch(() => {});
       const button = page.getByTestId('run-integration-test');
-      if (await button.count()) break;
+      if (await button.count()) {
+        return;
+      }
     }
     await page.waitForTimeout(2_000);
   }
+  throw signInIncompleteError(
+    'the integration-test page never rendered its run button after sign-in',
+    page.url(),
+  );
 };
 
 /** Claims of the ID token react-oidc-context keeps in session storage after sign-in. */
@@ -348,11 +401,12 @@ export const runFederatedSignInTest = async (
   try {
     const context = await browser.newContext();
     const page: Page = await context.newPage();
-    // The browser's console output is not forwarded to the test log at all
-    // during this test: every step of it is part of the sign-in flow, whose
-    // console messages carry the authorization code and the tokens. Nothing
-    // is buffered to be replayed later either. A failed step prints the safe
-    // description built by `describeSignInFailure` instead.
+    // The browser's console output is not forwarded to the test log while the
+    // sign-in flow runs: its console messages carry the authorization code
+    // and the tokens, and nothing is buffered to be replayed later.
+    // Forwarding starts once `waitForSignedIn` has proved the sign-in
+    // completed. A failed step before that prints the safe description built
+    // by `describeSignInFailure` instead.
     const documentStatus = trackDocumentStatus(page);
 
     const target = integrationTestUrl(baseUrl);
@@ -360,28 +414,31 @@ export const runFederatedSignInTest = async (
       waitUntil: 'domcontentloaded',
       timeout: 120_000,
     });
-    await page.waitForURL(/amazoncognito\.com/, { timeout: 120_000 });
+    await waitForUrl(
+      page,
+      'no redirect to the managed login page',
+      /amazoncognito\.com/,
+    );
     await page.waitForLoadState('networkidle').catch(() => {});
     const idpButton = page
       .getByRole('button', { name: /E2eIdp/i })
       .or(page.getByRole('link', { name: /E2eIdp/i }))
       .first();
+    const idpButtonStep = 'no E2eIdp sign-in button on the managed login page';
     try {
       await idpButton.waitFor({ state: 'visible', timeout: 60_000 });
       await idpButton.click();
     } catch (e) {
-      await logSignInFailure(
-        page,
-        'no E2eIdp sign-in button on the managed login page',
-        documentStatus,
-      );
-      throw e;
+      await logSignInFailure(page, idpButtonStep, documentStatus);
+      throw signInStepError(idpButtonStep, e);
     }
 
     const idpHost = `${idp.names.domainPrefix}.auth.${idp.region}.amazoncognito.com`;
-    await page.waitForURL((url) => url.hostname === idpHost, {
-      timeout: 120_000,
-    });
+    await waitForUrl(
+      page,
+      "no redirect to the identity provider's managed login page",
+      (url) => url.hostname === idpHost,
+    );
     await fillCognitoLoginForm(
       page,
       idp.username,
@@ -389,6 +446,7 @@ export const runFederatedSignInTest = async (
       documentStatus,
     );
     await waitForSignedIn(page, target);
+    logBrowserMessages(page);
     await page
       .getByTestId('run-integration-test')
       .waitFor({ state: 'visible', timeout: 120_000 });
@@ -447,7 +505,11 @@ export const runWebsiteIntegrationTest = async (options: {
       // The deployed site auto-redirects unauthenticated users to the Cognito
       // managed login UI. Complete the login form, then wait to land back on
       // the app and for the post-login OAuth code exchange to settle.
-      await page.waitForURL(/amazoncognito\.com/, { timeout: 120_000 });
+      await waitForUrl(
+        page,
+        'no redirect to the managed login page',
+        /amazoncognito\.com/,
+      );
       await fillCognitoLoginForm(
         page,
         login.username,

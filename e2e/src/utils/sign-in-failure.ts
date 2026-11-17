@@ -49,9 +49,14 @@ export interface SignInFailure {
  * A sign-in flow puts the authorization code and the tokens in URL query
  * strings and fragments, in the page's console output and in its markup, so
  * a failure here reports the step, the origin and path of the URL, the HTTP
- * status and the page title, and nothing else. No markup is dumped. The
- * assembled line passes through `redactOAuthValues` as a backup, in case a
- * path segment or a title carries a labelled value.
+ * status and the page title, and nothing else. No markup is dumped.
+ *
+ * The two fields the page controls, the URL and the title, each pass through
+ * `redactOAuthValues` as a backup, in case a path segment or a title carries
+ * a labelled value. The title is redacted before it is quoted, so the
+ * redactor reads it as the page wrote it: a title that quotes its own value
+ * (`access_token="<value>"`) is then redacted whole, where the escapes
+ * `JSON.stringify` adds would hide the end of that value from it.
  */
 export const describeSignInFailure = ({
   step,
@@ -59,12 +64,41 @@ export const describeSignInFailure = ({
   status,
   title,
 }: SignInFailure): string => {
-  const parts = [`[login] ${step}`, `url=${originAndPath(url)}`];
+  const parts = [
+    `[login] ${step}`,
+    `url=${redactOAuthValues(originAndPath(url))}`,
+  ];
   if (status !== undefined) {
     parts.push(`status=${status}`);
   }
   if (title !== undefined) {
-    parts.push(`title=${JSON.stringify(title)}`);
+    parts.push(`title=${JSON.stringify(redactOAuthValues(title))}`);
   }
-  return redactOAuthValues(parts.join(' '));
+  return parts.join(' ');
 };
+
+/** The message of a thrown value, whether or not it is an `Error`. */
+const messageOf = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+/**
+ * The error a failed sign-in step throws in place of the one it caught.
+ *
+ * Playwright's navigation-wait timeouts quote every URL the page visited
+ * while waiting, which across the hosted-UI redirect back to the app is the
+ * URL carrying the authorization code in its query and the tokens in its
+ * fragment. The replacement holds the step and the caught message with every
+ * credential replaced, and nothing else: no `cause` and no copy of the
+ * original stack, either of which would print the unredacted message again.
+ */
+export const signInStepError = (step: string, error: unknown): Error =>
+  new Error(`[login] ${step}: ${redactOAuthValues(messageOf(error))}`);
+
+/**
+ * The error a sign-in flow throws when it ran out of attempts without
+ * completing. It names the step and the page the flow gave up on, described
+ * by `describeSignInFailure`, so it holds the origin and path of the URL and
+ * never its query or its fragment.
+ */
+export const signInIncompleteError = (step: string, url: string): Error =>
+  new Error(describeSignInFailure({ step, url }));
