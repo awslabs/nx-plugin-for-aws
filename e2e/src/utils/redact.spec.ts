@@ -28,10 +28,12 @@ const longValue = (length: number) =>
 const SURVIVING_CODES = [
   'ECONNRESET',
   'ETIMEDOUT',
+  'ENOTFOUND',
   '500',
   'E123',
   'ResourceNotFoundException',
   'UnrecognizedClientException',
+  'TypeError',
   'ERR_TLS_CERT_ALTNAME_INVALID',
   'ERR_INVALID_ARG_TYPE',
 ];
@@ -292,4 +294,90 @@ describe('redactOAuthValues', () => {
       expect(redactOAuthValues(text)).toBe(text);
     },
   );
+
+  // Every case below is an input an earlier review probed against this
+  // helper and found unredacted.
+
+  it.each([
+    [`received code="${CODE}"`, 'received code="[REDACTED]"'],
+    [`received code='${CODE}'`, "received code='[REDACTED]'"],
+    ['token=1 access_token="at-1"', 'token=1 access_token="[REDACTED]"'],
+    ["token=1 access_token='at-1'", "token=1 access_token='[REDACTED]'"],
+  ])('redacts a quoted parameter value: %s', (input, expected) => {
+    expect(redactOAuthValues(input)).toBe(expected);
+  });
+
+  it.each([
+    [`{"code":"${CODE}\\/x"}`, 'a JSON escape'],
+    [`{"code":"${CODE} "}`, 'a trailing space'],
+    [`{"code":" ${CODE}"}`, 'a leading space'],
+    [`{"code":"${CODE},x"}`, 'a comma'],
+    [`{"code":"${CODE}}"}`, 'a closing brace'],
+    [`{"code":"${CODE}é"}`, 'a non-ASCII character'],
+  ])('redacts a JSON code value holding %s: %s', (input) => {
+    const output = redactOAuthValues(input);
+    expect(output).toBe('{"code":"[REDACTED]"}');
+    expect(output).not.toContain(CODE);
+  });
+
+  it.each([
+    [`x {"code":"${CODE}\r\nNEXT`, 'x {"code":"[REDACTED]\r\nNEXT'],
+    [
+      'x {"access_token":"at-1\r\nNEXT',
+      'x {"access_token":"[REDACTED]\r\nNEXT',
+    ],
+  ])(
+    'redacts a CRLF-terminated JSON value and keeps the carriage return: %s',
+    (input, expected) => {
+      expect(redactOAuthValues(input)).toBe(expected);
+    },
+  );
+
+  it.each([
+    ['{"access_token":"secret\\', '{"access_token":"[REDACTED]'],
+    ['{"access_token":"secret\\\nNEXT', '{"access_token":"[REDACTED]\nNEXT'],
+    [
+      '{"access_token":"secret\\\r\nNEXT',
+      '{"access_token":"[REDACTED]\r\nNEXT',
+    ],
+    [`{"code":"${CODE}\\`, '{"code":"[REDACTED]'],
+    [`{"code":"${CODE}\\\nNEXT`, '{"code":"[REDACTED]\nNEXT'],
+  ])(
+    'redacts a JSON value truncated after a lone backslash: %s',
+    (input, expected) => {
+      expect(redactOAuthValues(input)).toBe(expected);
+      expect(redactOAuthValues(input)).not.toContain('secret');
+    },
+  );
+
+  it.each([
+    ['{"access_token":"at-1', '{"access_token":"[REDACTED]'],
+    [`{"code":"${CODE}`, '{"code":"[REDACTED]'],
+  ])('redacts a JSON value that ends with the input: %s', (input, expected) => {
+    expect(redactOAuthValues(input)).toBe(expected);
+  });
+
+  it.each([
+    [`{ accessToken: '${CODE}' }`, "{ accessToken: '[REDACTED]' }"],
+    [`{ accessToken: "${CODE}" }`, '{ accessToken: "[REDACTED]" }'],
+    [
+      "{ refreshToken: 'rt-1', state: 's1' }",
+      "{ refreshToken: '[REDACTED]', state: 's1' }",
+    ],
+  ])(
+    'keeps the quotes around a redacted token in an object preview: %s',
+    (input, expected) => {
+      expect(redactOAuthValues(input)).toBe(expected);
+    },
+  );
+
+  it.each([
+    `{"id_token":"${CODE} "}`,
+    `{"refresh_token":"${CODE}é"}`,
+    `{ idToken: '${CODE}' }`,
+    `id_token_hint="${CODE}"`,
+    `{"accessToken":"${CODE},x"}`,
+  ])('redacts a token value whatever its shape: %s', (input) => {
+    expect(redactOAuthValues(input)).not.toContain(CODE);
+  });
 });

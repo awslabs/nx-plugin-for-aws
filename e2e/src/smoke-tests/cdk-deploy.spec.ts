@@ -111,11 +111,15 @@ async function deleteLeftoverStacks(cdkStageName: string): Promise<void> {
         await cfn
           .deleteStack({ StackName: stack.StackName })
           .catch((e) =>
-            console.warn(`Failed to delete stack ${stack.StackName}: ${e}`),
+            console.warn(
+              `Failed to delete stack ${stack.StackName}: ${redactOAuthValues(String(e))}`,
+            ),
           );
       }
     } catch (e) {
-      console.warn(`Failed to list stacks in ${region}: ${e}`);
+      console.warn(
+        `Failed to list stacks in ${region}: ${redactOAuthValues(String(e))}`,
+      );
     }
   }
 }

@@ -3,7 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/** Keys whose value is always a token, whatever the value looks like. */
+/**
+ * Keys whose value is a bearer credential whatever it looks like, so every
+ * value they carry is replaced.
+ */
 const TOKEN_KEYS = [
   'id_token(?:_hint)?',
   'access_token',
@@ -11,101 +14,161 @@ const TOKEN_KEYS = [
   'idToken',
   'accessToken',
   'refreshToken',
-].join('|');
+];
 
-/** The characters an authorization code can be made of. */
-const CODE_CHARS = '[A-Za-z0-9._~+/=%-]';
+/** Every key this module reads, the token keys plus the OAuth `code`. */
+const KEYS = [...TOKEN_KEYS, 'code'].join('|');
+
+const REDACTED = '[REDACTED]';
+
+/** An all-caps Node, HTTP or AWS error code: `ECONNRESET`, `E123`. */
+const DIAGNOSTIC_NAME = /^[A-Z0-9_]{1,40}$/;
+
+/** A bare status or error number: `500`. */
+const DIAGNOSTIC_NUMBER = /^[0-9]+$/;
+
+/** An error class name: `ResourceNotFoundException`, `TypeError`. */
+const DIAGNOSTIC_CLASS = /^[A-Za-z_][A-Za-z0-9_]*(?:Exception|Error)$/;
 
 /**
- * An authorization-code-shaped value: at least 20 code characters, of which
- * at least one is not a letter or an underscore. `code` is also the property
- * name of Node, HTTP and AWS SDK errors, whose value a maintainer needs when
- * triaging a failed run, so the shape keeps those: `ECONNRESET`, `500` and
- * `E123` are too short, and `ResourceNotFoundException` or
- * `ERR_TLS_CERT_ALTNAME_INVALID` are letters and underscores only. A Cognito
- * code is UUID length and always carries digits and hyphens.
+ * Whether a `code` value is a diagnostic rather than an authorization code.
+ * `code` names the OAuth parameter and also the property Node, HTTP and AWS
+ * SDK errors put their failure identifier in, which a maintainer needs when
+ * triaging a failed run, so the three shapes above are kept.
  *
- * The length test is a fixed-width lookahead rather than `{20,}`, and the
- * leading run uses a character class disjoint from the one that must follow
- * it, so the pattern cannot backtrack across a long value.
+ * The rule says what is safe to log instead of what a credential looks like.
+ * An authorization code that arrives in an unexpected shape is redacted
+ * because it is not on this list, rather than surviving because it failed to
+ * match a pattern.
  */
-const CODE_VALUE = `(?=${CODE_CHARS}{20})[A-Za-z_]*[0-9.~+/=%-]${CODE_CHARS}*`;
+const isDiagnosticCode = (value: string): boolean =>
+  DIAGNOSTIC_NAME.test(value) ||
+  DIAGNOSTIC_NUMBER.test(value) ||
+  DIAGNOSTIC_CLASS.test(value);
 
 /**
- * Query string, fragment or form body for the token keys: `#id_token=...`,
- * `&amp;access_token=...`, `access_token=...` in a logged form body. The
- * lookbehind keeps compound names such as `my_access_token` out. A `;` or
- * `)` ends the value, so a cookie attribute or a closing bracket after the
- * token stays readable.
+ * Splits one pair of surrounding quotes off a value, so the quotes Node and
+ * Chromium print around a string are judged and printed as punctuation
+ * rather than as part of the value.
  */
-const TOKEN_PARAM_PATTERN = new RegExp(
-  String.raw`(?<![\w.-])(${TOKEN_KEYS})=[^&#\s"'<>;)]+`,
+const unquote = (value: string): { quote: string; inner: string } => {
+  const quote = value.charAt(0);
+  if (
+    (quote === '"' || quote === "'") &&
+    value.length > 1 &&
+    value.endsWith(quote)
+  ) {
+    return { quote, inner: value.slice(1, -1) };
+  }
+  return { quote: '', inner: value };
+};
+
+/**
+ * Whether the value of `key` has to be replaced. An empty value holds no
+ * credential, and `code` is the only key with values worth keeping.
+ */
+const mustRedact = (key: string, value: string): boolean => {
+  if (value === '') {
+    return false;
+  }
+  return key !== 'code' || !isDiagnosticCode(value);
+};
+
+/**
+ * `key=value` in a query string, a URL fragment, a logged form body or
+ * prose. The lookbehind keeps compound names such as `my_access_token` and
+ * `error_code` out.
+ *
+ * The value runs to the next `&`, `#`, whitespace, quote or angle bracket,
+ * so no character inside it can end the match early and leave the rest in
+ * the log. `;` and `)` are left alone so a cookie attribute or a closing
+ * bracket after the value stays readable. A surrounding quote is captured
+ * and printed again, which is what makes `code="<value>"` redact.
+ */
+const PARAM_PATTERN = new RegExp(
+  String.raw`(?<![\w.-])(${KEYS})=(["']?)([^&#\s"'<>;)]*)(["']?)`,
   'g',
 );
 
+const redactParam = (
+  match: string,
+  key: string,
+  open: string,
+  value: string,
+  close: string,
+): string =>
+  mustRedact(key, value) ? `${key}=${open}${REDACTED}${close}` : match;
+
 /**
- * The same for `code`, guarded by the value shape instead of by the position
- * in the text, because `code` is also an error-code name. Prose such as
- * `request failed with error code=E123` keeps its value, while a logged
- * token-request body redacts whatever the parameter order is.
+ * A JSON property: `"access_token":"<value>"`. The value runs to the closing
+ * unescaped quote, a line end or the end of the input, and a backslash with
+ * nothing after it is consumed as well.
+ *
+ * Every character other than those terminators belongs to the value, so a
+ * JSON escape, a space, a comma, a brace or a non-ASCII byte inside it
+ * cannot stop the match — a mangled or truncated dump has its value redacted
+ * to the end of its own line while the lines after it stay readable and keep
+ * their `\r`. Each branch of the value starts on a different character, so
+ * the pattern has nothing to backtrack over.
  */
-const CODE_PARAM_PATTERN = new RegExp(
-  String.raw`(?<![\w.-])code=${CODE_VALUE}`,
+const JSON_PATTERN = new RegExp(
+  String.raw`("(${KEYS})"\s*:\s*")((?:[^"\\\r\n]|\\[^\r\n]|\\(?=[\r\n]|$))*)("|(?=[\r\n]|$))`,
   'g',
 );
+
+const redactJson = (
+  match: string,
+  prefix: string,
+  key: string,
+  value: string,
+  close: string,
+): string => (mustRedact(key, value) ? `${prefix}${REDACTED}${close}` : match);
 
 /**
- * JSON: `"id_token":"..."`. The value cannot cross a line break and the
- * closing quote is optional, so a truncated HTML or console dump has its
- * value redacted to the end of its own line and the lines after it stay
- * readable.
- */
-const JSON_TOKEN_PATTERN = new RegExp(
-  String.raw`("(?:${TOKEN_KEYS})"\s*:\s*")(?:[^"\\\n]|\\.)*("|(?=\n|$))`,
-  'g',
-);
-
-/** The same for `code`, with the shape guard every `code` path applies. */
-const JSON_CODE_PATTERN = new RegExp(
-  String.raw`("code"\s*:\s*")${CODE_VALUE}("|(?=\n|$))`,
-  'g',
-);
-
-/**
- * Chromium object preview of a logged object. Browser console text is not a
+ * A logged object as Chromium and `util.inspect` print it:
+ * `{ accessToken: 'at-1', code: <value> }`. Browser console text is not a
  * stable serialization format, so the delimiter before the key and the
- * whitespace around the key and colon are matched loosely and put back
- * unchanged. The value stays on one line.
+ * whitespace around the key and the colon are matched loosely and printed
+ * again unchanged. The value runs to the next comma, closing brace or line
+ * end, and keeps the quotes it arrived in.
  */
-const previewPattern = (keys: string, value: string) =>
-  new RegExp(String.raw`(^|[{,])(\s*)(${keys})(\s*):(\s*)${value}`, 'gm');
-
-/** A single-line value, without the whitespace that surrounds it. */
-const PREVIEW_VALUE = String.raw`[^\s,}\n](?:[^,}\n]*[^\s,}\n])?`;
-
-const PREVIEW_TOKEN_PATTERN = previewPattern(TOKEN_KEYS, PREVIEW_VALUE);
-
-/**
- * Node prints a string property quoted, as in `{ code: '<uuid>' }`, so the
- * quotes are optional around the shape and are put back unchanged.
- */
-const PREVIEW_CODE_PATTERN = previewPattern(
-  'code',
-  `(['"]?)${CODE_VALUE}(['"]?)`,
+const PREVIEW_PATTERN = new RegExp(
+  String.raw`(^|[{,])(\s*)(${KEYS})(\s*):(\s*)([^,}\r\n]*)`,
+  'gm',
 );
 
+const redactPreview = (
+  match: string,
+  delimiter: string,
+  beforeKey: string,
+  key: string,
+  afterKey: string,
+  afterColon: string,
+  rest: string,
+): string => {
+  // The value ends at the last character that is not whitespace; what
+  // follows it separates the value from the delimiter and is printed again.
+  const value = rest.trimEnd();
+  const { quote, inner } = unquote(value);
+  if (!mustRedact(key, inner)) {
+    return match;
+  }
+  const trailing = rest.slice(value.length);
+  return `${delimiter}${beforeKey}${key}${afterKey}:${afterColon}${quote}${REDACTED}${quote}${trailing}`;
+};
+
 /**
- * Replaces the values of OAuth authorization codes and tokens (`code`,
+ * Replaces the values of OAuth tokens and authorization codes (`code`,
  * `id_token`, `id_token_hint`, `access_token`, `refresh_token` and their
- * camelCase spellings) in text that is about to be logged with `[REDACTED]`,
- * keeping the key and the punctuation around it. A `code` value is only
- * redacted when it is token-shaped, so diagnostic error codes survive.
+ * camelCase spellings) in text that is about to be logged with
+ * `[REDACTED]`, keeping the key and the punctuation around it.
+ *
+ * Redaction fails closed: a token key loses its value whatever the value
+ * is, and a `code` value is kept only when it is one of the diagnostic
+ * shapes `isDiagnosticCode` lists.
  */
 export const redactOAuthValues = (text: string): string =>
   text
-    .replace(TOKEN_PARAM_PATTERN, '$1=[REDACTED]')
-    .replace(CODE_PARAM_PATTERN, 'code=[REDACTED]')
-    .replace(JSON_TOKEN_PATTERN, '$1[REDACTED]$2')
-    .replace(JSON_CODE_PATTERN, '$1[REDACTED]$2')
-    .replace(PREVIEW_TOKEN_PATTERN, '$1$2$3$4:$5[REDACTED]')
-    .replace(PREVIEW_CODE_PATTERN, '$1$2$3$4:$5$6[REDACTED]$7');
+    .replace(PARAM_PATTERN, redactParam)
+    .replace(JSON_PATTERN, redactJson)
+    .replace(PREVIEW_PATTERN, redactPreview);

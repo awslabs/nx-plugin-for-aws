@@ -440,12 +440,17 @@ export const deleteTestIdp = async (idp: TestIdp): Promise<void> => {
   );
 };
 
-/** The outcome of `keepTestIdp`. */
+/** What writing one resource's `keep-until` tag achieved. */
+export type KeepOutcome = 'tagged' | 'failed' | 'missing';
+
+/** The outcome of `keepTestIdp`, one entry per resource. */
 export interface KeptTestIdp {
   /** ISO time until which the sweep must keep the resources. */
   keepUntil: string;
-  /** False when a tag could not be written, so the sweep may reclaim earlier. */
-  tagged: boolean;
+  /** Whether the client secret carries the tag, or is already gone. */
+  secret: KeepOutcome;
+  /** The same for the user pool. `missing` when there is no pool to tag. */
+  userPool: KeepOutcome;
 }
 
 /**
@@ -458,25 +463,33 @@ export const keepTestIdp = async (
   idp: TestIdp,
   { keepForMs = DEFAULT_KEEP_FOR_MS, now = Date.now() } = {},
 ): Promise<KeptTestIdp> => {
-  const keepUntil = new Date(now + keepForMs).toISOString();
-  let tagged = true;
-  const tagStep = async (label: string, step: () => Promise<unknown>) => {
+  // The sweep ignores a deadline further out than MAX_KEEP_FOR_MS, so a
+  // longer request is clamped here rather than written as a tag nothing
+  // honours while the teardown log claims the resources are held.
+  const keepUntil = new Date(
+    now + Math.min(keepForMs, MAX_KEEP_FOR_MS),
+  ).toISOString();
+  const tagStep = async (
+    label: string,
+    step: () => Promise<unknown>,
+  ): Promise<KeepOutcome> => {
     try {
       await step();
       console.log(`Tagged ${label} to keep until ${keepUntil}`);
+      return 'tagged';
     } catch (e) {
       if (isNotFound(e)) {
         // There is nothing left to keep, and nothing for an operator to
         // clean up either, so this is not a tagging failure.
         console.log(`${label} is already deleted, so there is nothing to keep`);
-      } else {
-        tagged = false;
-        console.warn(`Failed to tag ${label}: ${describeError(e)}`);
+        return 'missing';
       }
+      console.warn(`Failed to tag ${label}: ${describeError(e)}`);
+      return 'failed';
     }
   };
 
-  await tagStep(`secret ${idp.names.secretName}`, () =>
+  const secret = await tagStep(`secret ${idp.names.secretName}`, () =>
     secretsClient(idp.region).send(
       // TagResource appends to the secret's existing tags, so the run and
       // created-at tags the sweep filters on are kept.
@@ -487,28 +500,82 @@ export const keepTestIdp = async (
     ),
   );
   const userPoolId = idp.userPoolId;
-  if (userPoolId) {
-    // Tagging a user pool needs its ARN, which only DescribeUserPool returns.
-    await tagStep(`user pool ${userPoolId}`, async () => {
-      const cognito = cognitoClient(idp.region);
-      const { UserPool } = await cognito.send(
-        new DescribeUserPoolCommand({ UserPoolId: userPoolId }),
-      );
-      if (!UserPool?.Arn) {
-        throw new Error('DescribeUserPool returned no user pool ARN');
-      }
-      await cognito.send(
-        // TagResource only adds or overwrites the keys it is given, unlike
-        // UpdateUserPool's UserPoolTags, which replaces the whole set, so
-        // the run and created-at tags the sweep filters on are kept.
-        new TagUserPoolCommand({
-          ResourceArn: UserPool.Arn,
-          Tags: { [KEEP_UNTIL_TAG]: keepUntil },
-        }),
-      );
-    });
+  // A handle with no pool id comes from a create that failed before the pool
+  // existed, so there is nothing to tag and nothing to clean up.
+  const userPool: KeepOutcome = userPoolId
+    ? // Tagging a user pool needs its ARN, which only DescribeUserPool returns.
+      await tagStep(`user pool ${userPoolId}`, async () => {
+        const cognito = cognitoClient(idp.region);
+        const { UserPool } = await cognito.send(
+          new DescribeUserPoolCommand({ UserPoolId: userPoolId }),
+        );
+        if (!UserPool?.Arn) {
+          throw new Error('DescribeUserPool returned no user pool ARN');
+        }
+        await cognito.send(
+          // TagResource only adds or overwrites the keys it is given, unlike
+          // UpdateUserPool's UserPoolTags, which replaces the whole set, so
+          // the run and created-at tags the sweep filters on are kept.
+          new TagUserPoolCommand({
+            ResourceArn: UserPool.Arn,
+            Tags: { [KEEP_UNTIL_TAG]: keepUntil },
+          }),
+        );
+      })
+    : 'missing';
+  return { keepUntil, secret, userPool };
+};
+
+/**
+ * The lines a failed teardown prints about a kept identity provider: which
+ * resources now carry the `keep-until` tag, which are already gone, and what
+ * an operator has to do by hand. A resource the tag step found absent is
+ * named as absent, so the warning never asks for a resource that does not
+ * exist to be deleted.
+ */
+export const describeKeptTestIdp = (
+  idp: TestIdp,
+  kept: KeptTestIdp,
+): string[] => {
+  const labels: Record<keyof Omit<KeptTestIdp, 'keepUntil'>, string> = {
+    secret: `secret ${idp.names.secretName}`,
+    userPool: `user pool ${idp.names.userPoolName} (${idp.userPoolId ?? 'id unknown'})`,
+  };
+  const named = (outcome: KeepOutcome): string[] =>
+    (['secret', 'userPool'] as const)
+      .filter((resource) => kept[resource] === outcome)
+      .map((resource) => labels[resource]);
+  const tagged = named('tagged');
+  const failed = named('failed');
+  const missing = named('missing');
+  const them = (names: string[]) => (names.length > 1 ? 'them' : 'it');
+
+  if (tagged.length + failed.length === 0) {
+    return [
+      'The test identity provider is already deleted, so there is nothing to keep.',
+      'Retry the destroy with this state key.',
+    ];
   }
-  return { keepUntil, tagged };
+  return [
+    'The test identity provider is kept, because the stack reads its client secret:',
+    `region ${idp.region}`,
+    ...(tagged.length > 0
+      ? [
+          `Tagged ${KEEP_UNTIL_TAG}=${kept.keepUntil}, so no sweep deletes ${them(tagged)} before then: ${tagged.join(', ')}.`,
+        ]
+      : []),
+    ...(failed.length > 0
+      ? [
+          `Tagging ${KEEP_UNTIL_TAG}=${kept.keepUntil} failed (see the warning above), so the next run's sweep may delete ${them(failed)} within hours. Clean up now: ${failed.join(', ')}.`,
+        ]
+      : []),
+    ...(missing.length > 0
+      ? [
+          `Already deleted, so nothing is left to clean up: ${missing.join(', ')}.`,
+        ]
+      : []),
+    'To clean up by hand: run the destroy again with this state key, then delete the resources named above.',
+  ];
 };
 
 /** The age cutoff of one sweep, and the time it runs at. */

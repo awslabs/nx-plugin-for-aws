@@ -21,8 +21,8 @@ import {
   checkFederation,
   createTestIdp,
   deleteTestIdp,
+  describeKeptTestIdp,
   federationPlanChanges,
-  KEEP_UNTIL_TAG,
   keepTestIdp,
   newTestIdp,
   registerIdpCallback,
@@ -668,14 +668,7 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
               `terraform destroy failed: ${redactOAuthValues(String(e))}`,
               `Terraform state key: ${terraformStateKey(opts.cwd, tfEnv)} (TF_ENV=${tfEnv}), bucket <account id>-tf-state-${region}`,
               ...(idp && kept
-                ? [
-                    'The test identity provider is kept, because the stack reads its client secret:',
-                    `user pool ${idp.names.userPoolName} (${idp.userPoolId ?? 'id unknown'}), secret ${idp.names.secretName}, region ${idp.region}`,
-                    kept.tagged
-                      ? `Both are tagged ${KEEP_UNTIL_TAG}=${kept.keepUntil}, so no sweep deletes them before then.`
-                      : `Tagging ${KEEP_UNTIL_TAG}=${kept.keepUntil} failed (see the warning above), so the next run's sweep may delete them within hours. Clean up now.`,
-                    'To clean up by hand: run the destroy again with this state key, then delete the user pool and the secret by the names above.',
-                  ]
+                ? describeKeptTestIdp(idp, kept)
                 : ['Retry the destroy with this state key.']),
             ].join('\n'),
           );
