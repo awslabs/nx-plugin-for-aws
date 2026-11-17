@@ -355,9 +355,17 @@ export const federationNextSteps = (iac: Iac): string => {
 
   1. ${redirectUri}
   2. Register an application at your identity provider with that redirect URI, and note its client ID and client secret.
-  3. Store the client secret in AWS Secrets Manager as a plain string:
+  3. Store the client secret in AWS Secrets Manager as a plain string, in the region of your stack. Run these commands in bash or zsh. They wait for you to paste the secret and press Enter, and do not show it. The secret goes to a file in a new private temporary directory, not on the command line, so it stays out of your shell history and the process list. The directory is deleted when the commands finish or are interrupted:
 
-       aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string <client secret>
+       (
+         umask 077
+         d=$(mktemp -d) || exit
+         trap 'rm -rf "$d"' EXIT
+         trap 'exit 1' HUP INT TERM
+         IFS= read -rs CLIENT_SECRET
+         printf '%s' "$CLIENT_SECRET" > "$d/secret"
+         aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string "file://$d/secret" --region <region>
+       )
 
   4. ${addProvider}
 

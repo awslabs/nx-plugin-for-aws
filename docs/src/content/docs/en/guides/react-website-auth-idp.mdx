@@ -243,7 +243,7 @@ The generator does not overwrite your edits to the new files. If you have change
 
 ## Set up your identity provider
 
-The deploy that adds an identity provider reads its client secret from Secrets Manager. If the secret does not exist, the deploy fails. Follow these steps in this order. The generator also prints them when it finishes.
+The deploy that adds an identity provider reads its client secret from Secrets Manager. If the secret does not exist, the deploy fails. The principal that runs the deploy needs `secretsmanager:GetSecretValue` on the secret, plus `kms:Decrypt` on the key if the secret is encrypted with a customer managed AWS KMS key. Follow these steps in this order. The generator also prints them when it finishes.
 
 1. Run `ts#website#auth` with `--federation=oidc`, and deploy once.
 2. Find the redirect URI of your user pool. All identity providers of the pool use the same one.
@@ -266,11 +266,21 @@ output "idp_redirect_uri" { value = module.user_identity.idp_redirect_uri }
 </Infrastructure>
 
 3. Register an application at the identity provider with that redirect URI, and note its client ID and client secret. Register only this `/oauth2/idpresponse` URI at the identity provider. Your website's own URLs are registered with Cognito, not with the identity provider.
-4. Store the client secret in Secrets Manager:
+4. Store the client secret in Secrets Manager. Pass it in a file, not as a command-line argument. An argument stays in your shell history, and other users of the same computer can see it in the process list while the command runs:
 
    ```bash
-   aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string <client secret> --region <region>
+   (
+     umask 077
+     d=$(mktemp -d) || exit
+     trap 'rm -rf "$d"' EXIT
+     trap 'exit 1' HUP INT TERM
+     IFS= read -rs CLIENT_SECRET
+     printf '%s' "$CLIENT_SECRET" > "$d/secret"
+     aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string "file://$d/secret" --region <region>
+   )
    ```
+
+   The commands run in a subshell, between the parentheses. `read` waits for you to paste the client secret and press Enter, and does not show it. `IFS=` and `-r` keep the secret exactly as you paste it, including spaces at either end and backslashes. `mktemp -d` creates a new directory that only you can open (mode 700), and `printf` writes the secret into it without a newline at the end. The AWS CLI reads the value of `--secret-string` from the file named after `file://` and passes it unchanged, so a newline at the end of the file would become part of the secret. When the subshell ends, the `trap` commands delete the directory. They also do this if the `aws` command fails or you press Ctrl-C. The commands work in bash and zsh, the default shells on Linux and macOS. For Windows, see [Mitigate the risks of using the AWS CLI to store your AWS Secrets Manager secrets](https://docs.aws.amazon.com/secretsmanager/latest/userguide/security_cli-exposure-risks.html).
 
    Set `--region` to your stack's region. The secret must exist in that region before the deploy that adds the identity provider. Store the secret as a plain string, not JSON, because Cognito receives the whole secret value as the client secret. In the Secrets Manager console, choose Plaintext, not Key/value.
 
@@ -343,7 +353,7 @@ To test with another Cognito user pool as the identity provider, use the issuer 
 - MFA (multi-factor authentication) required in your user pool does not apply to federated users. Cognito leaves their authentication to the identity provider, so enforce MFA at the identity provider.
 - Signing out of your website ends the Cognito session only. It does not end the user's session at an OIDC identity provider, so the next sign-in through the button can complete without a password. On a shared computer, users must also sign out at the identity provider.
 - The user menu shows the Cognito username. For a federated user it is the identity provider name, an underscore and the user's `sub` at the identity provider, in lowercase, for example `okta_00u1abcd`.
-- Removing or disabling a user at the identity provider stops only their next sign-in through it. Cognito renews tokens with its own refresh token and does not ask the identity provider, and the website renews tokens without the user noticing. The user can therefore keep access until the refresh token expires, up to 30 days after their last sign-in. To end the user's access at once, also sign them out of every session and disable them in the user pool. Their username is `<identity provider name in lowercase>_<sub>`:
+- Removing or disabling a user at the identity provider stops only their next sign-in through it. Cognito renews tokens with its own refresh token and does not ask the identity provider, and the website renews tokens without the user noticing. The user can therefore keep access until the refresh token expires, up to 30 days after their last sign-in. To stop the user getting new tokens, also sign them out of every session and disable them in the user pool. Their username is `<identity provider name in lowercase>_<sub>`:
 
   ```bash
   aws cognito-idp admin-user-global-sign-out --user-pool-id <user pool id> --username okta_<sub>
@@ -352,7 +362,9 @@ To test with another Cognito user pool as the identity provider, use the issuer 
 
   This has been tested on AWS. After `admin-user-global-sign-out` and `admin-disable-user`, the identity provider still signs the user in, but Cognito refuses them.
 
-  A shorter refresh token validity on the web client (`refreshTokenValidity` in CDK, `refresh_token_validity` in Terraform) shortens the time a removed user keeps access. This has not been tested on AWS.
+  These commands do not end access that the user already has. [`admin-user-global-sign-out`](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminUserGlobalSignOut.html) revokes the user's refresh tokens, so the website cannot get new tokens for them, and `admin-disable-user` stops their next sign-in. ID and access tokens that Cognito has already issued stay valid until they expire, by default one hour after they were issued ([ID and access token validity](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_CreateUserPoolClient.html#CognitoUserPools-CreateUserPoolClient-request-IdTokenValidity)). The AWS credentials that the identity pool has already given the website also stay valid until they expire, one hour after they were issued ([identity pools authentication flow](https://docs.aws.amazon.com/cognito/latest/developerguide/concepts.html#authentication-flow-enhanced)). Until they expire, the user can still use the website and the identity pool's authenticated role.
+
+  A shorter refresh token validity on the web client (`refreshTokenValidity` in CDK, `refresh_token_validity` in Terraform) shortens the time a removed user keeps access if you do not run these commands. A shorter ID and access token validity (`idTokenValidity` and `accessTokenValidity` in CDK, `id_token_validity` and `access_token_validity` in Terraform) shortens the time that tokens already issued stay valid after you run the commands, but some time always remains. Neither has been tested on AWS.
 
 ## The client secret
 

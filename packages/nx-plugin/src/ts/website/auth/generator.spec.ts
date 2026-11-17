@@ -365,4 +365,31 @@ describe('ts#website#auth generator federation', () => {
       expect(federationNextSteps(iac)).toMatchSnapshot();
     },
   );
+
+  it.each(['cdk', 'terraform'] as const)(
+    'should keep the client secret off the command line in the %s next steps',
+    (iac) => {
+      const steps = federationNextSteps(iac);
+      // The secret is written to a new private temporary directory, which
+      // the subshell's traps delete when it ends or is interrupted.
+      for (const line of [
+        'umask 077',
+        'd=$(mktemp -d) || exit',
+        `trap 'rm -rf "$d"' EXIT`,
+        `trap 'exit 1' HUP INT TERM`,
+        'IFS= read -rs CLIENT_SECRET',
+        `printf '%s' "$CLIENT_SECRET" > "$d/secret"`,
+      ]) {
+        expect(steps).toContain(line);
+      }
+      expect(steps).not.toContain('client-secret.txt');
+      // Every --secret-string argument is a file reference, never a value.
+      const secretArguments = steps.match(/--secret-string\s+\S+/g) ?? [];
+      expect(secretArguments).toEqual(['--secret-string "file://$d/secret"']);
+      // The secret must be created in the stack's region.
+      expect(steps).toContain(
+        '--secret-string "file://$d/secret" --region <region>',
+      );
+    },
+  );
 });

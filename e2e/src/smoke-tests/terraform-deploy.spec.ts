@@ -5,11 +5,12 @@
 import { execSync } from 'node:child_process';
 import {
   existsSync,
-  mkdirSync,
+  mkdtempSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ensureDirSync } from 'fs-extra';
 
@@ -106,30 +107,37 @@ function readTerraformOutputs(projectRoot: string): Record<string, string> {
  * main user pool, its app clients or its identity providers. Other modules
  * plan changes on every run (for example the `timestamp()` triggers of
  * runtime-config/read), so those are only logged.
+ *
+ * The saved plan holds the identity provider's client secret in plain text,
+ * so it is written to a private temporary directory (mkdtemp creates it with
+ * mode 0700) outside the workspace and deleted whatever the outcome.
  */
 function checkSecondPlan(projectRoot: string): void {
   const infraSrc = join(projectRoot, 'packages/infra/src');
-  const planDir = join(projectRoot, 'dist/e2e-second-plan');
-  mkdirSync(planDir, { recursive: true });
-  const planFile = join(planDir, 'second.tfplan');
-  execSync(
-    `terraform plan -var-file=env/dev.tfvars -input=false -no-color -out=${planFile}`,
-    { cwd: infraSrc, stdio: 'inherit' },
-  );
-  const plan = JSON.parse(
-    execSync(`terraform show -json ${planFile}`, {
-      cwd: infraSrc,
-      encoding: 'utf-8',
-      maxBuffer: 200 * 1024 * 1024,
-    }),
-  ) as { resource_changes?: TerraformResourceChange[] };
-  const { federation, other } = federationPlanChanges(
-    plan.resource_changes ?? [],
-  );
-  console.log(
-    `Second plan changes outside the user pool (${other.length}):\n${other.join('\n')}`,
-  );
-  expect(federation).toEqual([]);
+  const planDir = mkdtempSync(join(tmpdir(), 'e2e-second-plan-'));
+  try {
+    const planFile = join(planDir, 'second.tfplan');
+    execSync(
+      `terraform plan -var-file=env/dev.tfvars -input=false -no-color -out=${planFile}`,
+      { cwd: infraSrc, stdio: 'inherit' },
+    );
+    const plan = JSON.parse(
+      execSync(`terraform show -json ${planFile}`, {
+        cwd: infraSrc,
+        encoding: 'utf-8',
+        maxBuffer: 200 * 1024 * 1024,
+      }),
+    ) as { resource_changes?: TerraformResourceChange[] };
+    const { federation, other } = federationPlanChanges(
+      plan.resource_changes ?? [],
+    );
+    console.log(
+      `Second plan changes outside the user pool (${other.length}):\n${other.join('\n')}`,
+    );
+    expect(federation).toEqual([]);
+  } finally {
+    rmSync(planDir, { force: true, recursive: true });
+  }
 }
 
 interface TerraformDeployVariant {
