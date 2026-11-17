@@ -94,13 +94,28 @@ interface Result {
 }
 
 const CASES_FILE = process.env.EVAL_CASES ?? 'evals/agent/cases.json';
-const TIMEOUT_MS = Number(process.env.EVAL_TIMEOUT_MS ?? 60_000);
+const envMs = (name: string, fallback: number): number => {
+  const raw = process.env[name];
+  if (!raw) {
+    return fallback;
+  }
+  const value = Number(raw);
+  if (Number.isFinite(value) && value >= 0) {
+    return value;
+  }
+  console.warn(
+    \`Ignoring \${name}="\${raw}" as it is not a number of milliseconds, using \${fallback}\`,
+  );
+  return fallback;
+};
+
+const TIMEOUT_MS = envMs('EVAL_TIMEOUT_MS', 60_000);
 // Connected servers started by Nx may not be listening yet, so connection
 // errors are retried until this long after startup.
-const STARTUP_TIMEOUT_MS = Number(
-  process.env.EVAL_STARTUP_TIMEOUT_MS ?? 30_000,
-);
+const STARTUP_TIMEOUT_MS = envMs('EVAL_STARTUP_TIMEOUT_MS', 30_000);
 const startedAt = Date.now();
+const inStartupWindow = () => Date.now() - startedAt <= STARTUP_TIMEOUT_MS;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const loadCases = () => {
   const json = JSON.parse(readFileSync(CASES_FILE, 'utf-8'));
@@ -131,7 +146,17 @@ const invoke = (prompt: string): Promise<Result> =>
   runWithSessionId(newSessionId(), async () => {
     const agent = await getAgent();
     const toolCalls: ToolCall[] = [];
-    agent.addHook(AfterToolCallEvent, (event) => {
+    agent.addHook(AfterToolCallEvent, async (event) => {
+      // Tools such as A2A connect on first call, and their errors become tool results.
+      if (
+        event.result.status === 'error' &&
+        isConnectionError(event.error) &&
+        inStartupWindow()
+      ) {
+        await sleep(1_000);
+        event.retry = true;
+        return;
+      }
       toolCalls.push({
         name: event.toolUse.name,
         error:
@@ -183,13 +208,10 @@ const invokeWhenReady = async (prompt: string): Promise<Result> => {
     try {
       return await withTimeout(invoke(prompt));
     } catch (err) {
-      if (
-        !isConnectionError(err) ||
-        Date.now() - startedAt > STARTUP_TIMEOUT_MS
-      ) {
+      if (!isConnectionError(err) || !inStartupWindow()) {
         throw err;
       }
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      await sleep(1_000);
     }
   }
 };
