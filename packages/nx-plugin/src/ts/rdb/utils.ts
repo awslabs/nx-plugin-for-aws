@@ -10,6 +10,8 @@ const RDS_CA_RUN = [
   '    curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \\',
   '    -o /usr/local/share/ca-certificates/rds-bundle.crt && \\',
   '    update-ca-certificates',
+  // Node trusts only its bundled CA store unless it is given extra certificates.
+  'ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/rds-bundle.crt',
 ].join('\n');
 
 export const injectRdsCaBundleIntoDockerfile = (

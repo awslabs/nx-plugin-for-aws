@@ -121,6 +121,15 @@ CMD [ "node", "index.js" ]
     expect(tree.read(DOCKERFILE, 'utf-8')).toMatchSnapshot();
   });
 
+  it('should make node trust the RDS CA bundle', async () => {
+    await run();
+
+    // Node reads its own CA store, not the system one update-ca-certificates writes.
+    expect(tree.read(DOCKERFILE, 'utf-8')).toContain(
+      'ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/rds-bundle.crt',
+    );
+  });
+
   it('should not fail when the service has no Dockerfile', async () => {
     tree.delete(DOCKERFILE);
 
