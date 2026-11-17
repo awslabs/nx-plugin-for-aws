@@ -15,6 +15,7 @@ import { generateFiles } from '@nx/devkit';
 import { FsTree, flushChanges } from 'nx/src/generators/tree';
 import { type Browser, chromium, type Page } from 'playwright';
 import { formatFilesInSubtree } from '../../../packages/nx-plugin/src/utils/format';
+import { redactOAuthValues } from '../utils/redact';
 import { IDP_PROVIDER_NAME, type TestIdp } from '../utils/test-idp';
 
 /**
@@ -173,20 +174,26 @@ export const createCognitoTestUser = async (
 const integrationTestUrl = (baseUrl: string): string =>
   `${baseUrl.replace(/\/$/, '')}/integration-test`;
 
-/** Prints the page's console messages and errors to the test log. */
+/**
+ * Prints the page's console messages and errors to the test log, with OAuth
+ * codes and tokens redacted.
+ */
 const logBrowserMessages = (page: Page): void => {
   page.on('console', (m) => {
     const t = m.text();
     if (!t.includes('AuthProvider context is undefined')) {
-      console.log(`[browser:${m.type()}] ${t}`);
+      console.log(`[browser:${m.type()}] ${redactOAuthValues(t)}`);
     }
   });
-  page.on('pageerror', (e) => console.log(`[browser:pageerror] ${e.message}`));
+  page.on('pageerror', (e) =>
+    console.log(`[browser:pageerror] ${redactOAuthValues(e.message)}`),
+  );
 };
 
 /**
  * Fill and submit the sign-in form of a Cognito managed login page. Prints
- * the page HTML when the form cannot be filled.
+ * the page HTML, with OAuth codes and tokens redacted, when the form cannot
+ * be filled.
  */
 const fillCognitoLoginForm = async (
   page: Page,
@@ -227,7 +234,7 @@ const fillCognitoLoginForm = async (
     await submit.click();
   } catch (e) {
     console.log('[login] login form not fillable. Page HTML follows:');
-    console.log((await page.content()).slice(0, 6000));
+    console.log(redactOAuthValues(await page.content()).slice(0, 6000));
     throw e;
   }
 };
@@ -313,7 +320,7 @@ export const runFederatedSignInTest = async (
       await idpButton.click();
     } catch (e) {
       console.log('[login] no E2eIdp sign-in button. Page HTML follows:');
-      console.log((await page.content()).slice(0, 6000));
+      console.log(redactOAuthValues(await page.content()).slice(0, 6000));
       throw e;
     }
 
@@ -403,14 +410,19 @@ export const runWebsiteIntegrationTest = async (options: {
       (await page.getByTestId('integration-test-results').textContent()) ??
         '{}',
     );
-    console.log('Website integration results:', JSON.stringify(results));
+    console.log(
+      'Website integration results:',
+      redactOAuthValues(JSON.stringify(results)),
+    );
 
     const failures = Object.entries(results).filter(
       ([k, v]) => k !== 'done' && v !== 'OK',
     );
     if (failures.length > 0) {
       throw new Error(
-        `Website integration failures: ${JSON.stringify(failures)}`,
+        redactOAuthValues(
+          `Website integration failures: ${JSON.stringify(failures)}`,
+        ),
       );
     }
     // Every connected API and agent must have produced a result.
