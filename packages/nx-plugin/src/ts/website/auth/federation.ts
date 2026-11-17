@@ -362,8 +362,10 @@ export const federationNextSteps = (iac: Iac): string => {
          d=$(mktemp -d) || exit
          trap 'rm -rf "$d"' EXIT
          trap 'exit 1' HUP INT TERM
-         IFS= read -rs CLIENT_SECRET
-         printf '%s' "$CLIENT_SECRET" > "$d/secret"
+         unset CLIENT_SECRET
+         IFS= read -rs CLIENT_SECRET || exit 1
+         printf '%s' "$CLIENT_SECRET" > "$d/secret" || exit 1
+         unset CLIENT_SECRET
          aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string "file://$d/secret" --region <region>
        )
 

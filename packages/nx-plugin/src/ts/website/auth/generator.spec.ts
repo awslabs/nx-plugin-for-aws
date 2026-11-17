@@ -377,11 +377,19 @@ describe('ts#website#auth generator federation', () => {
         'd=$(mktemp -d) || exit',
         `trap 'rm -rf "$d"' EXIT`,
         `trap 'exit 1' HUP INT TERM`,
-        'IFS= read -rs CLIENT_SECRET',
-        `printf '%s' "$CLIENT_SECRET" > "$d/secret"`,
+        'IFS= read -rs CLIENT_SECRET || exit 1',
+        `printf '%s' "$CLIENT_SECRET" > "$d/secret" || exit 1`,
       ]) {
         expect(steps).toContain(line);
       }
+      // CLIENT_SECRET is unset before read, so an inherited export does not
+      // apply, and again after printf, so aws never sees it in its environment.
+      expect(steps).toMatch(
+        /\n( *)unset CLIENT_SECRET\n\1IFS= read -rs CLIENT_SECRET \|\| exit 1\n/,
+      );
+      expect(steps).toMatch(
+        /\n( *)printf '%s' "\$CLIENT_SECRET" > "\$d\/secret" \|\| exit 1\n\1unset CLIENT_SECRET\n\1aws secretsmanager create-secret /,
+      );
       expect(steps).not.toContain('client-secret.txt');
       // Every --secret-string argument is a file reference, never a value.
       const secretArguments = steps.match(/--secret-string\s+\S+/g) ?? [];

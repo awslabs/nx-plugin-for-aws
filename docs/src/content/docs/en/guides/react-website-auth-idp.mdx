@@ -243,7 +243,18 @@ The generator does not overwrite your edits to the new files. If you have change
 
 ## Set up your identity provider
 
-The deploy that adds an identity provider reads its client secret from Secrets Manager. If the secret does not exist, the deploy fails. The principal that runs the deploy needs `secretsmanager:GetSecretValue` on the secret, plus `kms:Decrypt` on the key if the secret is encrypted with a customer managed AWS KMS key. Follow these steps in this order. The generator also prints them when it finishes.
+The deploy that adds an identity provider reads its client secret from Secrets Manager. If the secret does not exist, the deploy fails.
+
+<Infrastructure>
+  <Fragment slot="cdk">
+CloudFormation reads the secret with the stack's execution role, by default `cdk-hnb659fds-cfn-exec-role-<account>-<region>`. That role needs `secretsmanager:GetSecretValue` on the secret, plus `kms:Decrypt` on the key if the secret is encrypted with a customer managed AWS KMS key.
+  </Fragment>
+  <Fragment slot="terraform">
+The identity that runs `terraform apply` reads the secret. It needs `secretsmanager:GetSecretValue` on the secret, plus `kms:Decrypt` on the key if the secret is encrypted with a customer managed AWS KMS key.
+  </Fragment>
+</Infrastructure>
+
+Follow these steps in this order. The generator also prints them when it finishes.
 
 1. Run `ts#website#auth` with `--federation=oidc`, and deploy once.
 2. Find the redirect URI of your user pool. All identity providers of the pool use the same one.
@@ -274,13 +285,15 @@ output "idp_redirect_uri" { value = module.user_identity.idp_redirect_uri }
      d=$(mktemp -d) || exit
      trap 'rm -rf "$d"' EXIT
      trap 'exit 1' HUP INT TERM
-     IFS= read -rs CLIENT_SECRET
-     printf '%s' "$CLIENT_SECRET" > "$d/secret"
+     unset CLIENT_SECRET
+     IFS= read -rs CLIENT_SECRET || exit 1
+     printf '%s' "$CLIENT_SECRET" > "$d/secret" || exit 1
+     unset CLIENT_SECRET
      aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string "file://$d/secret" --region <region>
    )
    ```
 
-   The commands run in a subshell, between the parentheses. `read` waits for you to paste the client secret and press Enter, and does not show it. `IFS=` and `-r` keep the secret exactly as you paste it, including spaces at either end and backslashes. `mktemp -d` creates a new directory that only you can open (mode 700), and `printf` writes the secret into it without a newline at the end. The AWS CLI reads the value of `--secret-string` from the file named after `file://` and passes it unchanged, so a newline at the end of the file would become part of the secret. When the subshell ends, the `trap` commands delete the directory. They also do this if the `aws` command fails or you press Ctrl-C. The commands work in bash and zsh, the default shells on Linux and macOS. For Windows, see [Mitigate the risks of using the AWS CLI to store your AWS Secrets Manager secrets](https://docs.aws.amazon.com/secretsmanager/latest/userguide/security_cli-exposure-risks.html).
+   The commands run in a subshell, between the parentheses. `read` waits for you to paste the client secret and press Enter, and does not show it. The two `unset` commands keep the secret out of the `aws` command's environment, even if you exported `CLIENT_SECRET` earlier. `IFS=` and `-r` keep the secret exactly as you paste it, including spaces at either end and backslashes. `mktemp -d` creates a new directory that only you can open (mode 700), and `printf` writes the secret into it without a newline at the end. The AWS CLI reads the value of `--secret-string` from the file named after `file://` and passes it unchanged, so a newline at the end of the file would become part of the secret. When the subshell ends, the `trap` commands delete the directory. They also do this if the `aws` command fails or you press Ctrl-C. The commands work in bash and zsh, the default shells on Linux and macOS. For Windows, see [Mitigate the risks of using the AWS CLI to store your AWS Secrets Manager secrets](https://docs.aws.amazon.com/secretsmanager/latest/userguide/security_cli-exposure-risks.html).
 
    Set `--region` to your stack's region. The secret must exist in that region before the deploy that adds the identity provider. Store the secret as a plain string, not JSON, because Cognito receives the whole secret value as the client secret. In the Secrets Manager console, choose Plaintext, not Key/value.
 
