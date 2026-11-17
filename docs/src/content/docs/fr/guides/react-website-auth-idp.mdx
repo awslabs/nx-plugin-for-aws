@@ -243,7 +243,18 @@ Le générateur n'écrase pas vos modifications des nouveaux fichiers. Si vous a
 
 ## Configurer votre fournisseur d'identité
 
-Le déploiement qui ajoute un fournisseur d'identité lit son secret client depuis Secrets Manager. Si le secret n'existe pas, le déploiement échoue. Suivez ces étapes dans cet ordre. Le générateur les affiche également lorsqu'il se termine.
+Le déploiement qui ajoute un fournisseur d'identité lit son secret client depuis Secrets Manager. Si le secret n'existe pas, le déploiement échoue.
+
+<Infrastructure>
+  <Fragment slot="cdk">
+CloudFormation lit le secret avec le rôle d'exécution de la pile, par défaut `cdk-hnb659fds-cfn-exec-role-<account>-<region>`. Ce rôle a besoin de `secretsmanager:GetSecretValue` sur le secret, plus `kms:Decrypt` sur la clé si le secret est chiffré avec une clé AWS KMS gérée par le client.
+  </Fragment>
+  <Fragment slot="terraform">
+L'identité qui exécute `terraform apply` lit le secret. Elle a besoin de `secretsmanager:GetSecretValue` sur le secret, plus `kms:Decrypt` sur la clé si le secret est chiffré avec une clé AWS KMS gérée par le client.
+  </Fragment>
+</Infrastructure>
+
+Suivez ces étapes dans cet ordre. Le générateur les affiche également lorsqu'il se termine.
 
 1. Exécutez `ts#website#auth` avec `--federation=oidc`, et déployez une fois.
 2. Trouvez l'URI de redirection de votre pool d'utilisateurs. Tous les fournisseurs d'identité du pool utilisent le même.
@@ -266,11 +277,23 @@ output "idp_redirect_uri" { value = module.user_identity.idp_redirect_uri }
 </Infrastructure>
 
 3. Enregistrez une application chez le fournisseur d'identité avec cet URI de redirection, et notez son ID client et son secret client. Enregistrez uniquement cet URI `/oauth2/idpresponse` chez le fournisseur d'identité. Les URL de votre propre site web sont enregistrées avec Cognito, pas avec le fournisseur d'identité.
-4. Stockez le secret client dans Secrets Manager :
+4. Stockez le secret client dans Secrets Manager. Passez-le dans un fichier, pas comme argument de ligne de commande. Un argument reste dans votre historique de shell, et d'autres utilisateurs du même ordinateur peuvent le voir dans la liste des processus pendant l'exécution de la commande :
 
    ```bash
-   aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string <client secret> --region <region>
+   (
+     umask 077
+     d=$(mktemp -d) || exit
+     trap 'rm -rf "$d"' EXIT
+     trap 'exit 1' HUP INT TERM
+     unset CLIENT_SECRET
+     IFS= read -rs CLIENT_SECRET || exit 1
+     printf '%s' "$CLIENT_SECRET" > "$d/secret" || exit 1
+     unset CLIENT_SECRET
+     aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string "file://$d/secret" --region <region>
+   )
    ```
+
+   Les commandes s'exécutent dans un sous-shell, entre les parenthèses. `read` attend que vous colliez le secret client et appuyiez sur Entrée, et ne l'affiche pas. Les deux commandes `unset` gardent le secret hors de l'environnement de la commande `aws`, même si vous avez exporté `CLIENT_SECRET` plus tôt. `IFS=` et `-r` gardent le secret exactement tel que vous le collez, y compris les espaces aux deux extrémités et les barres obliques inverses. `mktemp -d` crée un nouveau répertoire que vous seul pouvez ouvrir (mode 700), et `printf` écrit le secret dedans sans retour à la ligne à la fin. L'AWS CLI lit la valeur de `--secret-string` depuis le fichier nommé après `file://` et la passe inchangée, donc un retour à la ligne à la fin du fichier ferait partie du secret. Lorsque le sous-shell se termine, les commandes `trap` suppriment le répertoire. Elles le font également si la commande `aws` échoue ou si vous appuyez sur Ctrl-C. Les commandes fonctionnent dans bash et zsh, les shells par défaut sur Linux et macOS. Pour Windows, voir [Mitigate the risks of using the AWS CLI to store your AWS Secrets Manager secrets](https://docs.aws.amazon.com/secretsmanager/latest/userguide/security_cli-exposure-risks.html).
 
    Définissez `--region` sur la région de votre pile. Le secret doit exister dans cette région avant le déploiement qui ajoute le fournisseur d'identité. Stockez le secret sous forme de chaîne simple, pas JSON, car Cognito reçoit la valeur entière du secret comme secret client. Dans la console Secrets Manager, choisissez Plaintext, pas Key/value.
 
@@ -343,7 +366,7 @@ Pour tester avec un autre pool d'utilisateurs Cognito comme fournisseur d'identi
 - L'authentification multifacteur (MFA) requise dans votre pool d'utilisateurs ne s'applique pas aux utilisateurs fédérés. Cognito laisse leur authentification au fournisseur d'identité, donc appliquez l'authentification multifacteur chez le fournisseur d'identité.
 - Se déconnecter de votre site web termine uniquement la session Cognito. Cela ne termine pas la session de l'utilisateur chez un fournisseur d'identité OIDC, donc la prochaine connexion via le bouton peut se terminer sans mot de passe. Sur un ordinateur partagé, les utilisateurs doivent également se déconnecter chez le fournisseur d'identité.
 - Le menu utilisateur affiche le nom d'utilisateur Cognito. Pour un utilisateur fédéré, c'est le nom du fournisseur d'identité, un trait de soulignement et le `sub` de l'utilisateur chez le fournisseur d'identité, en minuscules, par exemple `okta_00u1abcd`.
-- Supprimer ou désactiver un utilisateur chez le fournisseur d'identité arrête uniquement sa prochaine connexion via celui-ci. Cognito renouvelle les jetons avec son propre jeton de rafraîchissement et ne demande pas au fournisseur d'identité, et le site web renouvelle les jetons sans que l'utilisateur ne le remarque. L'utilisateur peut donc conserver l'accès jusqu'à l'expiration du jeton de rafraîchissement, jusqu'à 30 jours après sa dernière connexion. Pour mettre fin à l'accès de l'utilisateur immédiatement, déconnectez-le également de chaque session et désactivez-le dans le pool d'utilisateurs. Son nom d'utilisateur est `<identity provider name in lowercase>_<sub>` :
+- Supprimer ou désactiver un utilisateur chez le fournisseur d'identité arrête uniquement sa prochaine connexion via celui-ci. Cognito renouvelle les jetons avec son propre jeton de rafraîchissement et ne demande pas au fournisseur d'identité, et le site web renouvelle les jetons sans que l'utilisateur ne le remarque. L'utilisateur peut donc conserver l'accès jusqu'à l'expiration du jeton de rafraîchissement, jusqu'à 30 jours après sa dernière connexion. Pour empêcher l'utilisateur d'obtenir de nouveaux jetons, déconnectez-le également de chaque session et désactivez-le dans le pool d'utilisateurs. Son nom d'utilisateur est `<identity provider name in lowercase>_<sub>` :
 
   ```bash
   aws cognito-idp admin-user-global-sign-out --user-pool-id <user pool id> --username okta_<sub>
@@ -352,7 +375,9 @@ Pour tester avec un autre pool d'utilisateurs Cognito comme fournisseur d'identi
 
   Cela a été testé sur AWS. Après `admin-user-global-sign-out` et `admin-disable-user`, le fournisseur d'identité connecte toujours l'utilisateur, mais Cognito les refuse.
 
-  Une validité de jeton de rafraîchissement plus courte sur le client web (`refreshTokenValidity` dans CDK, `refresh_token_validity` dans Terraform) raccourcit le temps pendant lequel un utilisateur supprimé conserve l'accès. Cela n'a pas été testé sur AWS.
+  Ces commandes ne mettent pas fin à l'accès que l'utilisateur a déjà. [`admin-user-global-sign-out`](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminUserGlobalSignOut.html) révoque les jetons de rafraîchissement de l'utilisateur, donc le site web ne peut pas obtenir de nouveaux jetons pour eux, et `admin-disable-user` arrête leur prochaine connexion. Les jetons d'ID et d'accès que Cognito a déjà émis restent valides jusqu'à leur expiration, par défaut une heure après leur émission ([validité des jetons d'ID et d'accès](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_CreateUserPoolClient.html#CognitoUserPools-CreateUserPoolClient-request-IdTokenValidity)). Les informations d'identification AWS que le pool d'identités a déjà données au site web restent également valides jusqu'à leur expiration, une heure après leur émission ([flux d'authentification des pools d'identités](https://docs.aws.amazon.com/cognito/latest/developerguide/concepts.html#authentication-flow-enhanced)). Jusqu'à leur expiration, l'utilisateur peut toujours utiliser le site web et le rôle authentifié du pool d'identités.
+
+  Une validité de jeton de rafraîchissement plus courte sur le client web (`refreshTokenValidity` dans CDK, `refresh_token_validity` dans Terraform) raccourcit le temps pendant lequel un utilisateur supprimé conserve l'accès si vous n'exécutez pas ces commandes. Une validité de jeton d'ID et d'accès plus courte (`idTokenValidity` et `accessTokenValidity` dans CDK, `id_token_validity` et `access_token_validity` dans Terraform) raccourcit le temps pendant lequel les jetons déjà émis restent valides après l'exécution des commandes, mais un certain temps reste toujours. Aucune des deux n'a été testée sur AWS.
 
 ## Le secret client
 

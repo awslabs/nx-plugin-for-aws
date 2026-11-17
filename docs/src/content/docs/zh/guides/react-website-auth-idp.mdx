@@ -243,7 +243,18 @@ oidc_identity_providers = var.oidc_identity_providers
 
 ## 设置您的身份提供商
 
-添加身份提供商的部署会从 Secrets Manager 读取其客户端密钥。如果密钥不存在，部署将失败。按此顺序执行以下步骤。生成器完成时也会打印这些步骤。
+添加身份提供商的部署会从 Secrets Manager 读取其客户端密钥。如果密钥不存在，部署将失败。
+
+<Infrastructure>
+  <Fragment slot="cdk">
+CloudFormation 使用堆栈的执行角色读取密钥，默认为 `cdk-hnb659fds-cfn-exec-role-<account>-<region>`。该角色需要对密钥具有 `secretsmanager:GetSecretValue` 权限，如果密钥使用客户托管的 AWS KMS 密钥加密，还需要对密钥具有 `kms:Decrypt` 权限。
+  </Fragment>
+  <Fragment slot="terraform">
+运行 `terraform apply` 的身份读取密钥。它需要对密钥具有 `secretsmanager:GetSecretValue` 权限，如果密钥使用客户托管的 AWS KMS 密钥加密，还需要对密钥具有 `kms:Decrypt` 权限。
+  </Fragment>
+</Infrastructure>
+
+按此顺序执行以下步骤。生成器完成时也会打印这些步骤。
 
 1. 使用 `--federation=oidc` 运行 `ts#website#auth`，并部署一次。
 2. 找到您的用户池的重定向 URI。该池的所有身份提供商都使用相同的 URI。
@@ -266,11 +277,23 @@ output "idp_redirect_uri" { value = module.user_identity.idp_redirect_uri }
 </Infrastructure>
 
 3. 在身份提供商处使用该重定向 URI 注册一个应用程序，并记下其客户端 ID 和客户端密钥。仅在身份提供商处注册此 `/oauth2/idpresponse` URI。您网站自己的 URL 是在 Cognito 中注册的，而不是在身份提供商处。
-4. 将客户端密钥存储在 Secrets Manager 中：
+4. 将客户端密钥存储在 Secrets Manager 中。在文件中传递它，而不是作为命令行参数。参数会保留在您的 shell 历史记录中，并且同一台计算机的其他用户可以在命令运行时在进程列表中看到它：
 
    ```bash
-   aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string <client secret> --region <region>
+   (
+     umask 077
+     d=$(mktemp -d) || exit
+     trap 'rm -rf "$d"' EXIT
+     trap 'exit 1' HUP INT TERM
+     unset CLIENT_SECRET
+     IFS= read -rs CLIENT_SECRET || exit 1
+     printf '%s' "$CLIENT_SECRET" > "$d/secret" || exit 1
+     unset CLIENT_SECRET
+     aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string "file://$d/secret" --region <region>
+   )
    ```
+
+   这些命令在子 shell 中运行，位于括号之间。`read` 等待您粘贴客户端密钥并按 Enter，并且不显示它。两个 `unset` 命令将密钥排除在 `aws` 命令的环境之外，即使您之前导出了 `CLIENT_SECRET`。`IFS=` 和 `-r` 保持密钥与您粘贴的完全一致，包括两端的空格和反斜杠。`mktemp -d` 创建一个只有您可以打开的新目录（模式 700），`printf` 将密钥写入其中，末尾没有换行符。AWS CLI 从 `file://` 后面命名的文件中读取 `--secret-string` 的值并原样传递，因此文件末尾的换行符会成为密钥的一部分。当子 shell 结束时，`trap` 命令会删除该目录。如果 `aws` 命令失败或您按 Ctrl-C，它们也会这样做。这些命令在 bash 和 zsh（Linux 和 macOS 上的默认 shell）中有效。对于 Windows，请参阅[降低使用 AWS CLI 存储 AWS Secrets Manager 密钥的风险](https://docs.aws.amazon.com/secretsmanager/latest/userguide/security_cli-exposure-risks.html)。
 
    将 `--region` 设置为您的堆栈区域。在添加身份提供商的部署之前，密钥必须存在于该区域。将密钥存储为纯字符串，而不是 JSON，因为 Cognito 接收整个密钥值作为客户端密钥。在 Secrets Manager 控制台中，选择 Plaintext，而不是 Key/value。
 
@@ -343,7 +366,7 @@ Auth0 仅在用户的连接提供 `given_name` 和 `family_name` 时才返回它
 - 用户池中要求的 MFA（多因素身份验证）不适用于联合用户。Cognito 将他们的身份验证留给身份提供商，因此在身份提供商处强制执行 MFA。
 - 从您的网站注销仅结束 Cognito 会话。它不会结束用户在 OIDC 身份提供商处的会话，因此通过按钮的下一次登录可以在没有密码的情况下完成。在共享计算机上，用户还必须在身份提供商处注销。
 - 用户菜单显示 Cognito 用户名。对于联合用户，它是身份提供商名称、下划线和用户在身份提供商处的 `sub`，小写，例如 `okta_00u1abcd`。
-- 在身份提供商处删除或禁用用户仅会阻止他们通过它的下一次登录。Cognito 使用自己的刷新令牌续订令牌，不会询问身份提供商，网站在用户不注意的情况下续订令牌。因此，用户可以保持访问权限，直到刷新令牌过期，最多在他们上次登录后 30 天。要立即结束用户的访问权限，还要将他们从每个会话中注销并在用户池中禁用他们。他们的用户名是 `<identity provider name in lowercase>_<sub>`：
+- 在身份提供商处删除或禁用用户仅会阻止他们通过它的下一次登录。Cognito 使用自己的刷新令牌续订令牌，不会询问身份提供商，网站在用户不注意的情况下续订令牌。因此，用户可以保持访问权限，直到刷新令牌过期，最多在他们上次登录后 30 天。要阻止用户获取新令牌，还要将他们从每个会话中注销并在用户池中禁用他们。他们的用户名是 `<identity provider name in lowercase>_<sub>`：
 
   ```bash
   aws cognito-idp admin-user-global-sign-out --user-pool-id <user pool id> --username okta_<sub>
@@ -352,7 +375,9 @@ Auth0 仅在用户的连接提供 `given_name` 和 `family_name` 时才返回它
 
   这已在 AWS 上进行了测试。在 `admin-user-global-sign-out` 和 `admin-disable-user` 之后，身份提供商仍然会让用户登录，但 Cognito 会拒绝他们。
 
-  Web 客户端上较短的刷新令牌有效期（CDK 中的 `refreshTokenValidity`，Terraform 中的 `refresh_token_validity`）会缩短被删除用户保持访问权限的时间。这尚未在 AWS 上测试。
+  这些命令不会结束用户已经拥有的访问权限。[`admin-user-global-sign-out`](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminUserGlobalSignOut.html) 撤销用户的刷新令牌，因此网站无法为他们获取新令牌，`admin-disable-user` 阻止他们的下一次登录。Cognito 已经颁发的 ID 和访问令牌在过期之前保持有效，默认情况下在颁发后一小时过期（[ID 和访问令牌有效期](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_CreateUserPoolClient.html#CognitoUserPools-CreateUserPoolClient-request-IdTokenValidity)）。身份池已经给网站的 AWS 凭证也在过期之前保持有效，在颁发后一小时过期（[身份池身份验证流程](https://docs.aws.amazon.com/cognito/latest/developerguide/concepts.html#authentication-flow-enhanced)）。在它们过期之前，用户仍然可以使用网站和身份池的已认证角色。
+
+  Web 客户端上较短的刷新令牌有效期（CDK 中的 `refreshTokenValidity`，Terraform 中的 `refresh_token_validity`）会缩短被删除用户在您不运行这些命令时保持访问权限的时间。较短的 ID 和访问令牌有效期（CDK 中的 `idTokenValidity` 和 `accessTokenValidity`，Terraform 中的 `id_token_validity` 和 `access_token_validity`）会缩短在您运行命令后已颁发令牌保持有效的时间，但总会有一些时间。两者都尚未在 AWS 上测试。
 
 ## 客户端密钥
 

@@ -243,7 +243,18 @@ Generator không ghi đè các chỉnh sửa của bạn đối với các file 
 
 ## Thiết lập nhà cung cấp danh tính của bạn
 
-Lần deploy thêm một nhà cung cấp danh tính sẽ đọc client secret của nó từ Secrets Manager. Nếu secret không tồn tại, deploy sẽ thất bại. Thực hiện các bước này theo thứ tự. Generator cũng in chúng ra khi nó hoàn thành.
+Lần deploy thêm một nhà cung cấp danh tính sẽ đọc client secret của nó từ Secrets Manager. Nếu secret không tồn tại, deploy sẽ thất bại.
+
+<Infrastructure>
+  <Fragment slot="cdk">
+CloudFormation đọc secret với execution role của stack, theo mặc định là `cdk-hnb659fds-cfn-exec-role-<account>-<region>`. Role đó cần `secretsmanager:GetSecretValue` trên secret, cộng với `kms:Decrypt` trên key nếu secret được mã hóa bằng customer managed AWS KMS key.
+  </Fragment>
+  <Fragment slot="terraform">
+Identity chạy `terraform apply` đọc secret. Nó cần `secretsmanager:GetSecretValue` trên secret, cộng với `kms:Decrypt` trên key nếu secret được mã hóa bằng customer managed AWS KMS key.
+  </Fragment>
+</Infrastructure>
+
+Thực hiện các bước này theo thứ tự. Generator cũng in chúng ra khi nó hoàn thành.
 
 1. Chạy `ts#website#auth` với `--federation=oidc`, và deploy một lần.
 2. Tìm redirect URI của user pool của bạn. Tất cả các nhà cung cấp danh tính của pool sử dụng cùng một URI.
@@ -266,11 +277,23 @@ output "idp_redirect_uri" { value = module.user_identity.idp_redirect_uri }
 </Infrastructure>
 
 3. Đăng ký một ứng dụng tại nhà cung cấp danh tính với redirect URI đó, và ghi lại client ID và client secret của nó. Chỉ đăng ký URI `/oauth2/idpresponse` này tại nhà cung cấp danh tính. Các URL của chính website của bạn được đăng ký với Cognito, không phải với nhà cung cấp danh tính.
-4. Lưu trữ client secret trong Secrets Manager:
+4. Lưu trữ client secret trong Secrets Manager. Truyền nó trong một file, không phải dưới dạng đối số dòng lệnh. Một đối số sẽ ở lại trong lịch sử shell của bạn, và những người dùng khác trên cùng máy tính có thể thấy nó trong danh sách tiến trình khi lệnh đang chạy:
 
    ```bash
-   aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string <client secret> --region <region>
+   (
+     umask 077
+     d=$(mktemp -d) || exit
+     trap 'rm -rf "$d"' EXIT
+     trap 'exit 1' HUP INT TERM
+     unset CLIENT_SECRET
+     IFS= read -rs CLIENT_SECRET || exit 1
+     printf '%s' "$CLIENT_SECRET" > "$d/secret" || exit 1
+     unset CLIENT_SECRET
+     aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string "file://$d/secret" --region <region>
+   )
    ```
+
+   Các lệnh chạy trong một subshell, giữa các dấu ngoặc đơn. `read` đợi bạn dán client secret và nhấn Enter, và không hiển thị nó. Hai lệnh `unset` giữ secret ra khỏi môi trường của lệnh `aws`, ngay cả khi bạn đã export `CLIENT_SECRET` trước đó. `IFS=` và `-r` giữ secret chính xác như bạn dán nó, bao gồm cả khoảng trắng ở hai đầu và dấu gạch chéo ngược. `mktemp -d` tạo một thư mục mới mà chỉ bạn có thể mở (mode 700), và `printf` ghi secret vào đó mà không có ký tự xuống dòng ở cuối. AWS CLI đọc giá trị của `--secret-string` từ file được đặt tên sau `file://` và truyền nó không thay đổi, vì vậy một ký tự xuống dòng ở cuối file sẽ trở thành một phần của secret. Khi subshell kết thúc, các lệnh `trap` xóa thư mục. Chúng cũng làm điều này nếu lệnh `aws` thất bại hoặc bạn nhấn Ctrl-C. Các lệnh hoạt động trong bash và zsh, các shell mặc định trên Linux và macOS. Đối với Windows, xem [Mitigate the risks of using the AWS CLI to store your AWS Secrets Manager secrets](https://docs.aws.amazon.com/secretsmanager/latest/userguide/security_cli-exposure-risks.html).
 
    Đặt `--region` thành region của stack của bạn. Secret phải tồn tại trong region đó trước lần deploy thêm nhà cung cấp danh tính. Lưu trữ secret dưới dạng chuỗi thuần túy, không phải JSON, vì Cognito nhận toàn bộ giá trị secret làm client secret. Trong bảng điều khiển Secrets Manager, chọn Plaintext, không phải Key/value.
 
@@ -343,7 +366,7 @@ Thêm `email`, `given_name` và `family_name` làm optional claims vào ID token
 - MFA (xác thực đa yếu tố) được yêu cầu trong user pool của bạn không áp dụng cho federated users. Cognito để xác thực của họ cho nhà cung cấp danh tính, vì vậy hãy thực thi MFA tại nhà cung cấp danh tính.
 - Đăng xuất khỏi website của bạn chỉ kết thúc phiên Cognito. Nó không kết thúc phiên của người dùng tại nhà cung cấp danh tính OIDC, vì vậy lần đăng nhập tiếp theo thông qua nút có thể hoàn thành mà không cần mật khẩu. Trên máy tính dùng chung, người dùng cũng phải đăng xuất tại nhà cung cấp danh tính.
 - Menu người dùng hiển thị tên người dùng Cognito. Đối với federated user, đó là tên nhà cung cấp danh tính, một dấu gạch dưới và `sub` của người dùng tại nhà cung cấp danh tính, ở dạng chữ thường, ví dụ `okta_00u1abcd`.
-- Xóa hoặc vô hiệu hóa người dùng tại nhà cung cấp danh tính chỉ ngăn lần đăng nhập tiếp theo của họ thông qua nó. Cognito gia hạn token bằng refresh token riêng của nó và không hỏi nhà cung cấp danh tính, và website gia hạn token mà người dùng không nhận thấy. Do đó người dùng có thể giữ quyền truy cập cho đến khi refresh token hết hạn, tối đa 30 ngày sau lần đăng nhập cuối cùng của họ. Để kết thúc quyền truy cập của người dùng ngay lập tức, cũng đăng xuất họ khỏi mọi phiên và vô hiệu hóa họ trong user pool. Tên người dùng của họ là `<identity provider name in lowercase>_<sub>`:
+- Xóa hoặc vô hiệu hóa người dùng tại nhà cung cấp danh tính chỉ ngăn lần đăng nhập tiếp theo của họ thông qua nó. Cognito gia hạn token bằng refresh token riêng của nó và không hỏi nhà cung cấp danh tính, và website gia hạn token mà người dùng không nhận thấy. Do đó người dùng có thể giữ quyền truy cập cho đến khi refresh token hết hạn, tối đa 30 ngày sau lần đăng nhập cuối cùng của họ. Để ngăn người dùng nhận token mới, cũng đăng xuất họ khỏi mọi phiên và vô hiệu hóa họ trong user pool. Tên người dùng của họ là `<identity provider name in lowercase>_<sub>`:
 
   ```bash
   aws cognito-idp admin-user-global-sign-out --user-pool-id <user pool id> --username okta_<sub>
@@ -352,7 +375,9 @@ Thêm `email`, `given_name` và `family_name` làm optional claims vào ID token
 
   Điều này đã được kiểm tra trên AWS. Sau `admin-user-global-sign-out` và `admin-disable-user`, nhà cung cấp danh tính vẫn đăng nhập người dùng, nhưng Cognito từ chối họ.
 
-  Thời hạn refresh token ngắn hơn trên web client (`refreshTokenValidity` trong CDK, `refresh_token_validity` trong Terraform) rút ngắn thời gian người dùng bị xóa giữ quyền truy cập. Điều này chưa được kiểm tra trên AWS.
+  Các lệnh này không kết thúc quyền truy cập mà người dùng đã có. [`admin-user-global-sign-out`](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminUserGlobalSignOut.html) thu hồi refresh token của người dùng, vì vậy website không thể nhận token mới cho họ, và `admin-disable-user` ngăn lần đăng nhập tiếp theo của họ. ID và access token mà Cognito đã phát hành vẫn hợp lệ cho đến khi chúng hết hạn, theo mặc định là một giờ sau khi chúng được phát hành ([ID and access token validity](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_CreateUserPoolClient.html#CognitoUserPools-CreateUserPoolClient-request-IdTokenValidity)). AWS credentials mà identity pool đã cung cấp cho website cũng vẫn hợp lệ cho đến khi chúng hết hạn, một giờ sau khi chúng được phát hành ([identity pools authentication flow](https://docs.aws.amazon.com/cognito/latest/developerguide/concepts.html#authentication-flow-enhanced)). Cho đến khi chúng hết hạn, người dùng vẫn có thể sử dụng website và authenticated role của identity pool.
+
+  Thời hạn refresh token ngắn hơn trên web client (`refreshTokenValidity` trong CDK, `refresh_token_validity` trong Terraform) rút ngắn thời gian người dùng bị xóa giữ quyền truy cập nếu bạn không chạy các lệnh này. Thời hạn ID và access token ngắn hơn (`idTokenValidity` và `accessTokenValidity` trong CDK, `id_token_validity` và `access_token_validity` trong Terraform) rút ngắn thời gian mà các token đã phát hành vẫn hợp lệ sau khi bạn chạy các lệnh, nhưng luôn còn một khoảng thời gian. Cả hai đều chưa được kiểm tra trên AWS.
 
 ## Client secret
 

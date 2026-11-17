@@ -243,7 +243,18 @@ O gerador não sobrescreve suas edições nos novos arquivos. Se você alterou `
 
 ## Configurar seu provedor de identidade
 
-O deploy que adiciona um provedor de identidade lê seu client secret do Secrets Manager. Se o secret não existir, o deploy falha. Siga estas etapas nesta ordem. O gerador também as imprime quando termina.
+O deploy que adiciona um provedor de identidade lê seu client secret do Secrets Manager. Se o secret não existir, o deploy falha.
+
+<Infrastructure>
+  <Fragment slot="cdk">
+O CloudFormation lê o secret com a função de execução da stack, por padrão `cdk-hnb659fds-cfn-exec-role-<account>-<region>`. Essa função precisa de `secretsmanager:GetSecretValue` no secret, mais `kms:Decrypt` na chave se o secret estiver criptografado com uma chave AWS KMS gerenciada pelo cliente.
+  </Fragment>
+  <Fragment slot="terraform">
+A identidade que executa `terraform apply` lê o secret. Ela precisa de `secretsmanager:GetSecretValue` no secret, mais `kms:Decrypt` na chave se o secret estiver criptografado com uma chave AWS KMS gerenciada pelo cliente.
+  </Fragment>
+</Infrastructure>
+
+Siga estas etapas nesta ordem. O gerador também as imprime quando termina.
 
 1. Execute `ts#website#auth` com `--federation=oidc`, e faça o deploy uma vez.
 2. Encontre o URI de redirecionamento do seu user pool. Todos os provedores de identidade do pool usam o mesmo.
@@ -266,11 +277,23 @@ output "idp_redirect_uri" { value = module.user_identity.idp_redirect_uri }
 </Infrastructure>
 
 3. Registre uma aplicação no provedor de identidade com aquele URI de redirecionamento, e anote seu client ID e client secret. Registre apenas este URI `/oauth2/idpresponse` no provedor de identidade. As URLs do seu próprio website são registradas com o Cognito, não com o provedor de identidade.
-4. Armazene o client secret no Secrets Manager:
+4. Armazene o client secret no Secrets Manager. Passe-o em um arquivo, não como um argumento de linha de comando. Um argumento permanece no histórico do seu shell, e outros usuários do mesmo computador podem vê-lo na lista de processos enquanto o comando é executado:
 
    ```bash
-   aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string <client secret> --region <region>
+   (
+     umask 077
+     d=$(mktemp -d) || exit
+     trap 'rm -rf "$d"' EXIT
+     trap 'exit 1' HUP INT TERM
+     unset CLIENT_SECRET
+     IFS= read -rs CLIENT_SECRET || exit 1
+     printf '%s' "$CLIENT_SECRET" > "$d/secret" || exit 1
+     unset CLIENT_SECRET
+     aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string "file://$d/secret" --region <region>
+   )
    ```
+
+   Os comandos são executados em um subshell, entre os parênteses. `read` espera que você cole o client secret e pressione Enter, e não o mostra. Os dois comandos `unset` mantêm o secret fora do ambiente do comando `aws`, mesmo se você exportou `CLIENT_SECRET` anteriormente. `IFS=` e `-r` mantêm o secret exatamente como você o cola, incluindo espaços em ambas as extremidades e barras invertidas. `mktemp -d` cria um novo diretório que apenas você pode abrir (modo 700), e `printf` escreve o secret nele sem uma nova linha no final. A AWS CLI lê o valor de `--secret-string` do arquivo nomeado após `file://` e o passa inalterado, então uma nova linha no final do arquivo se tornaria parte do secret. Quando o subshell termina, os comandos `trap` excluem o diretório. Eles também fazem isso se o comando `aws` falhar ou você pressionar Ctrl-C. Os comandos funcionam em bash e zsh, os shells padrão no Linux e macOS. Para Windows, consulte [Mitigate the risks of using the AWS CLI to store your AWS Secrets Manager secrets](https://docs.aws.amazon.com/secretsmanager/latest/userguide/security_cli-exposure-risks.html).
 
    Defina `--region` para a região da sua stack. O secret deve existir nessa região antes do deploy que adiciona o provedor de identidade. Armazene o secret como uma string simples, não JSON, porque o Cognito recebe o valor inteiro do secret como o client secret. No console do Secrets Manager, escolha Plaintext, não Key/value.
 
@@ -343,7 +366,7 @@ Para testar com outro user pool do Cognito como provedor de identidade, use o is
 - MFA (autenticação multifator) exigida no seu user pool não se aplica a usuários federados. O Cognito deixa sua autenticação para o provedor de identidade, então imponha MFA no provedor de identidade.
 - Fazer logout do seu website encerra apenas a sessão do Cognito. Não encerra a sessão do usuário no provedor de identidade OIDC, então o próximo login através do botão pode ser concluído sem uma senha. Em um computador compartilhado, os usuários também devem fazer logout no provedor de identidade.
 - O menu do usuário mostra o nome de usuário do Cognito. Para um usuário federado, é o nome do provedor de identidade, um underscore e o `sub` do usuário no provedor de identidade, em minúsculas, por exemplo `okta_00u1abcd`.
-- Remover ou desabilitar um usuário no provedor de identidade interrompe apenas o próximo login dele através dele. O Cognito renova tokens com seu próprio refresh token e não pergunta ao provedor de identidade, e o website renova tokens sem que o usuário perceba. O usuário pode, portanto, manter o acesso até que o refresh token expire, até 30 dias após seu último login. Para encerrar o acesso do usuário imediatamente, também desconecte-o de todas as sessões e desabilite-o no user pool. Seu nome de usuário é `<identity provider name in lowercase>_<sub>`:
+- Remover ou desabilitar um usuário no provedor de identidade interrompe apenas o próximo login dele através dele. O Cognito renova tokens com seu próprio refresh token e não pergunta ao provedor de identidade, e o website renova tokens sem que o usuário perceba. O usuário pode, portanto, manter o acesso até que o refresh token expire, até 30 dias após seu último login. Para impedir que o usuário obtenha novos tokens, também desconecte-o de todas as sessões e desabilite-o no user pool. Seu nome de usuário é `<identity provider name in lowercase>_<sub>`:
 
   ```bash
   aws cognito-idp admin-user-global-sign-out --user-pool-id <user pool id> --username okta_<sub>
@@ -352,7 +375,9 @@ Para testar com outro user pool do Cognito como provedor de identidade, use o is
 
   Isso foi testado na AWS. Após `admin-user-global-sign-out` e `admin-disable-user`, o provedor de identidade ainda faz o login do usuário, mas o Cognito os recusa.
 
-  Uma validade de refresh token mais curta no web client (`refreshTokenValidity` no CDK, `refresh_token_validity` no Terraform) reduz o tempo que um usuário removido mantém o acesso. Isso não foi testado na AWS.
+  Esses comandos não encerram o acesso que o usuário já tem. [`admin-user-global-sign-out`](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminUserGlobalSignOut.html) revoga os refresh tokens do usuário, então o website não pode obter novos tokens para eles, e `admin-disable-user` interrompe o próximo login deles. Tokens de ID e acesso que o Cognito já emitiu permanecem válidos até expirarem, por padrão uma hora após terem sido emitidos ([validade de token de ID e acesso](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_CreateUserPoolClient.html#CognitoUserPools-CreateUserPoolClient-request-IdTokenValidity)). As credenciais AWS que o identity pool já forneceu ao website também permanecem válidas até expirarem, uma hora após terem sido emitidas ([fluxo de autenticação de identity pools](https://docs.aws.amazon.com/cognito/latest/developerguide/concepts.html#authentication-flow-enhanced)). Até que expirem, o usuário ainda pode usar o website e a função autenticada do identity pool.
+
+  Uma validade de refresh token mais curta no web client (`refreshTokenValidity` no CDK, `refresh_token_validity` no Terraform) reduz o tempo que um usuário removido mantém o acesso se você não executar esses comandos. Uma validade de token de ID e acesso mais curta (`idTokenValidity` e `accessTokenValidity` no CDK, `id_token_validity` e `access_token_validity` no Terraform) reduz o tempo que os tokens já emitidos permanecem válidos após você executar os comandos, mas sempre resta algum tempo. Nenhum dos dois foi testado na AWS.
 
 ## O client secret
 

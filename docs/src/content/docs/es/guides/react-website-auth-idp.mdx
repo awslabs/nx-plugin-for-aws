@@ -243,7 +243,18 @@ El generador no sobrescribe tus ediciones a los nuevos archivos. Si has cambiado
 
 ## Configurar tu proveedor de identidad
 
-El despliegue que agrega un proveedor de identidad lee su secreto de cliente desde Secrets Manager. Si el secreto no existe, el despliegue falla. Sigue estos pasos en este orden. El generador también los imprime cuando termina.
+El despliegue que agrega un proveedor de identidad lee su secreto de cliente desde Secrets Manager. Si el secreto no existe, el despliegue falla.
+
+<Infrastructure>
+  <Fragment slot="cdk">
+CloudFormation lee el secreto con el rol de ejecución del stack, por defecto `cdk-hnb659fds-cfn-exec-role-<account>-<region>`. Ese rol necesita `secretsmanager:GetSecretValue` en el secreto, más `kms:Decrypt` en la clave si el secreto está cifrado con una clave AWS KMS administrada por el cliente.
+  </Fragment>
+  <Fragment slot="terraform">
+La identidad que ejecuta `terraform apply` lee el secreto. Necesita `secretsmanager:GetSecretValue` en el secreto, más `kms:Decrypt` en la clave si el secreto está cifrado con una clave AWS KMS administrada por el cliente.
+  </Fragment>
+</Infrastructure>
+
+Sigue estos pasos en este orden. El generador también los imprime cuando termina.
 
 1. Ejecuta `ts#website#auth` con `--federation=oidc`, y despliega una vez.
 2. Encuentra el URI de redirección de tu grupo de usuarios. Todos los proveedores de identidad del grupo usan el mismo.
@@ -266,11 +277,23 @@ output "idp_redirect_uri" { value = module.user_identity.idp_redirect_uri }
 </Infrastructure>
 
 3. Registra una aplicación en el proveedor de identidad con ese URI de redirección, y anota su ID de cliente y secreto de cliente. Registra solo este URI `/oauth2/idpresponse` en el proveedor de identidad. Las URLs propias de tu sitio web están registradas con Cognito, no con el proveedor de identidad.
-4. Almacena el secreto de cliente en Secrets Manager:
+4. Almacena el secreto de cliente en Secrets Manager. Pásalo en un archivo, no como un argumento de línea de comandos. Un argumento permanece en tu historial de shell, y otros usuarios de la misma computadora pueden verlo en la lista de procesos mientras se ejecuta el comando:
 
    ```bash
-   aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string <client secret> --region <region>
+   (
+     umask 077
+     d=$(mktemp -d) || exit
+     trap 'rm -rf "$d"' EXIT
+     trap 'exit 1' HUP INT TERM
+     unset CLIENT_SECRET
+     IFS= read -rs CLIENT_SECRET || exit 1
+     printf '%s' "$CLIENT_SECRET" > "$d/secret" || exit 1
+     unset CLIENT_SECRET
+     aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string "file://$d/secret" --region <region>
+   )
    ```
+
+   Los comandos se ejecutan en un subshell, entre los paréntesis. `read` espera a que pegues el secreto de cliente y presiones Enter, y no lo muestra. Los dos comandos `unset` mantienen el secreto fuera del entorno del comando `aws`, incluso si exportaste `CLIENT_SECRET` anteriormente. `IFS=` y `-r` mantienen el secreto exactamente como lo pegas, incluyendo espacios en cualquier extremo y barras invertidas. `mktemp -d` crea un nuevo directorio que solo tú puedes abrir (modo 700), y `printf` escribe el secreto en él sin un salto de línea al final. El AWS CLI lee el valor de `--secret-string` del archivo nombrado después de `file://` y lo pasa sin cambios, por lo que un salto de línea al final del archivo se convertiría en parte del secreto. Cuando el subshell termina, los comandos `trap` eliminan el directorio. También hacen esto si el comando `aws` falla o presionas Ctrl-C. Los comandos funcionan en bash y zsh, los shells predeterminados en Linux y macOS. Para Windows, consulta [Mitigate the risks of using the AWS CLI to store your AWS Secrets Manager secrets](https://docs.aws.amazon.com/secretsmanager/latest/userguide/security_cli-exposure-risks.html).
 
    Establece `--region` a la región de tu stack. El secreto debe existir en esa región antes del despliegue que agrega el proveedor de identidad. Almacena el secreto como una cadena simple, no JSON, porque Cognito recibe el valor completo del secreto como el secreto de cliente. En la consola de Secrets Manager, elige Plaintext, no Key/value.
 
@@ -343,7 +366,7 @@ Para probar con otro grupo de usuarios de Cognito como proveedor de identidad, u
 - MFA (autenticación multifactor) requerida en tu grupo de usuarios no se aplica a usuarios federados. Cognito deja su autenticación al proveedor de identidad, así que aplica MFA en el proveedor de identidad.
 - Cerrar sesión en tu sitio web termina solo la sesión de Cognito. No termina la sesión del usuario en un proveedor de identidad OIDC, por lo que el próximo inicio de sesión a través del botón puede completarse sin una contraseña. En una computadora compartida, los usuarios también deben cerrar sesión en el proveedor de identidad.
 - El menú de usuario muestra el nombre de usuario de Cognito. Para un usuario federado es el nombre del proveedor de identidad, un guion bajo y el `sub` del usuario en el proveedor de identidad, en minúsculas, por ejemplo `okta_00u1abcd`.
-- Eliminar o deshabilitar un usuario en el proveedor de identidad detiene solo su próximo inicio de sesión a través de él. Cognito renueva los tokens con su propio token de actualización y no consulta al proveedor de identidad, y el sitio web renueva los tokens sin que el usuario lo note. Por lo tanto, el usuario puede mantener el acceso hasta que expire el token de actualización, hasta 30 días después de su último inicio de sesión. Para terminar el acceso del usuario de inmediato, también cierra su sesión en todas las sesiones y deshabilítalo en el grupo de usuarios. Su nombre de usuario es `<identity provider name in lowercase>_<sub>`:
+- Eliminar o deshabilitar un usuario en el proveedor de identidad detiene solo su próximo inicio de sesión a través de él. Cognito renueva los tokens con su propio token de actualización y no consulta al proveedor de identidad, y el sitio web renueva los tokens sin que el usuario lo note. Por lo tanto, el usuario puede mantener el acceso hasta que expire el token de actualización, hasta 30 días después de su último inicio de sesión. Para detener que el usuario obtenga nuevos tokens, también cierra su sesión en todas las sesiones y deshabilítalo en el grupo de usuarios. Su nombre de usuario es `<identity provider name in lowercase>_<sub>`:
 
   ```bash
   aws cognito-idp admin-user-global-sign-out --user-pool-id <user pool id> --username okta_<sub>
@@ -352,7 +375,9 @@ Para probar con otro grupo de usuarios de Cognito como proveedor de identidad, u
 
   Esto ha sido probado en AWS. Después de `admin-user-global-sign-out` y `admin-disable-user`, el proveedor de identidad aún inicia sesión al usuario, pero Cognito los rechaza.
 
-  Una validez de token de actualización más corta en el cliente web (`refreshTokenValidity` en CDK, `refresh_token_validity` en Terraform) acorta el tiempo que un usuario eliminado mantiene el acceso. Esto no ha sido probado en AWS.
+  Estos comandos no terminan el acceso que el usuario ya tiene. [`admin-user-global-sign-out`](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminUserGlobalSignOut.html) revoca los tokens de actualización del usuario, por lo que el sitio web no puede obtener nuevos tokens para ellos, y `admin-disable-user` detiene su próximo inicio de sesión. Los tokens de ID y acceso que Cognito ya ha emitido permanecen válidos hasta que expiren, por defecto una hora después de que fueron emitidos ([ID and access token validity](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_CreateUserPoolClient.html#CognitoUserPools-CreateUserPoolClient-request-IdTokenValidity)). Las credenciales de AWS que el grupo de identidades ya ha dado al sitio web también permanecen válidas hasta que expiren, una hora después de que fueron emitidas ([identity pools authentication flow](https://docs.aws.amazon.com/cognito/latest/developerguide/concepts.html#authentication-flow-enhanced)). Hasta que expiren, el usuario aún puede usar el sitio web y el rol autenticado del grupo de identidades.
+
+  Una validez de token de actualización más corta en el cliente web (`refreshTokenValidity` en CDK, `refresh_token_validity` en Terraform) acorta el tiempo que un usuario eliminado mantiene el acceso si no ejecutas estos comandos. Una validez de token de ID y acceso más corta (`idTokenValidity` y `accessTokenValidity` en CDK, `id_token_validity` y `access_token_validity` en Terraform) acorta el tiempo que los tokens ya emitidos permanecen válidos después de ejecutar los comandos, pero siempre queda algo de tiempo. Ninguno ha sido probado en AWS.
 
 ## El secreto de cliente
 

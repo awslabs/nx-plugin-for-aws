@@ -243,7 +243,18 @@ oidc_identity_providers = var.oidc_identity_providers
 
 ## アイデンティティプロバイダーの設定
 
-アイデンティティプロバイダーを追加するデプロイでは、Secrets Managerからクライアントシークレットを読み取ります。シークレットが存在しない場合、デプロイは失敗します。この順序で次の手順に従ってください。ジェネレーターは、完了時にこれらも出力します。
+アイデンティティプロバイダーを追加するデプロイでは、Secrets Managerからクライアントシークレットを読み取ります。シークレットが存在しない場合、デプロイは失敗します。
+
+<Infrastructure>
+  <Fragment slot="cdk">
+CloudFormationは、スタックの実行ロール（デフォルトでは`cdk-hnb659fds-cfn-exec-role-<account>-<region>`）でシークレットを読み取ります。そのロールには、シークレットに対する`secretsmanager:GetSecretValue`と、シークレットがカスタマー管理のAWS KMSキーで暗号化されている場合はキーに対する`kms:Decrypt`が必要です。
+  </Fragment>
+  <Fragment slot="terraform">
+`terraform apply`を実行するアイデンティティがシークレットを読み取ります。シークレットに対する`secretsmanager:GetSecretValue`と、シークレットがカスタマー管理のAWS KMSキーで暗号化されている場合はキーに対する`kms:Decrypt`が必要です。
+  </Fragment>
+</Infrastructure>
+
+この順序で次の手順に従ってください。ジェネレーターは、完了時にこれらも出力します。
 
 1. `ts#website#auth`を`--federation=oidc`で実行し、一度デプロイします。
 2. ユーザープールのリダイレクトURIを見つけます。プールのすべてのアイデンティティプロバイダーは同じものを使用します。
@@ -266,11 +277,23 @@ output "idp_redirect_uri" { value = module.user_identity.idp_redirect_uri }
 </Infrastructure>
 
 3. そのリダイレクトURIでアイデンティティプロバイダーにアプリケーションを登録し、そのクライアントIDとクライアントシークレットをメモします。アイデンティティプロバイダーには、この`/oauth2/idpresponse` URIのみを登録してください。ウェブサイト自体のURLは、アイデンティティプロバイダーではなくCognitoに登録されます。
-4. クライアントシークレットをSecrets Managerに保存します：
+4. クライアントシークレットをSecrets Managerに保存します。コマンドライン引数としてではなく、ファイルで渡してください。引数はシェル履歴に残り、コマンドの実行中は同じコンピューターの他のユーザーがプロセスリストで確認できます：
 
    ```bash
-   aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string <client secret> --region <region>
+   (
+     umask 077
+     d=$(mktemp -d) || exit
+     trap 'rm -rf "$d"' EXIT
+     trap 'exit 1' HUP INT TERM
+     unset CLIENT_SECRET
+     IFS= read -rs CLIENT_SECRET || exit 1
+     printf '%s' "$CLIENT_SECRET" > "$d/secret" || exit 1
+     unset CLIENT_SECRET
+     aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string "file://$d/secret" --region <region>
+   )
    ```
+
+   コマンドは括弧の間でサブシェルで実行されます。`read`はクライアントシークレットを貼り付けてEnterを押すのを待ち、表示しません。2つの`unset`コマンドは、以前に`CLIENT_SECRET`をエクスポートした場合でも、`aws`コマンドの環境からシークレットを除外します。`IFS=`と`-r`は、両端のスペースやバックスラッシュを含め、貼り付けた通りにシークレットを保持します。`mktemp -d`は、あなただけが開くことができる新しいディレクトリ（モード700）を作成し、`printf`は末尾に改行なしでシークレットを書き込みます。AWS CLIは`file://`の後に指定されたファイルから`--secret-string`の値を読み取り、変更せずに渡すため、ファイルの末尾の改行はシークレットの一部になります。サブシェルが終了すると、`trap`コマンドがディレクトリを削除します。`aws`コマンドが失敗した場合やCtrl-Cを押した場合も同様です。コマンドはbashとzsh（LinuxとmacOSのデフォルトシェル）で動作します。Windowsについては、[Mitigate the risks of using the AWS CLI to store your AWS Secrets Manager secrets](https://docs.aws.amazon.com/secretsmanager/latest/userguide/security_cli-exposure-risks.html)を参照してください。
 
    `--region`をスタックのリージョンに設定します。アイデンティティプロバイダーを追加するデプロイの前に、そのリージョンにシークレットが存在する必要があります。Cognitoはシークレット値全体をクライアントシークレットとして受け取るため、シークレットをJSONではなくプレーン文字列として保存してください。Secrets Managerコンソールでは、Key/valueではなくPlaintextを選択してください。
 
@@ -343,7 +366,7 @@ Microsoftのディスカバリードキュメントに対して確認されま�
 - ユーザープールで必要なMFA（多要素認証）は、フェデレーテッドユーザーには適用されません。Cognitoは認証をアイデンティティプロバイダーに任せるため、アイデンティティプロバイダーでMFAを強制してください。
 - ウェブサイトからサインアウトすると、Cognitoセッションのみが終了します。OIDCアイデンティティプロバイダーでのユーザーのセッションは終了しないため、ボタンを介した次回のサインインはパスワードなしで完了できます。共有コンピューターでは、ユーザーはアイデンティティプロバイダーでもサインアウトする必要があります。
 - ユーザーメニューには、Cognitoユーザー名が表示されます。フェデレーテッドユーザーの場合、それはアイデンティティプロバイダー名、アンダースコア、アイデンティティプロバイダーでのユーザーの`sub`を小文字にしたものです（例：`okta_00u1abcd`）。
-- アイデンティティプロバイダーでユーザーを削除または無効化しても、そのユーザーの次回のサインインのみが停止されます。Cognitoは独自のリフレッシュトークンでトークンを更新し、アイデンティティプロバイダーに問い合わせません。また、ウェブサイトはユーザーが気付かないうちにトークンを更新します。したがって、ユーザーはリフレッシュトークンが期限切れになるまで、最後のサインインから最大30日間アクセスを維持できます。ユーザーのアクセスを直ちに終了するには、すべてのセッションからサインアウトさせ、ユーザープールで無効化します。ユーザー名は`<identity provider name in lowercase>_<sub>`です：
+- アイデンティティプロバイダーでユーザーを削除または無効化しても、そのユーザーの次回のサインインのみが停止されます。Cognitoは独自のリフレッシュトークンでトークンを更新し、アイデンティティプロバイダーに問い合わせません。また、ウェブサイトはユーザーが気付かないうちにトークンを更新します。したがって、ユーザーはリフレッシュトークンが期限切れになるまで、最後のサインインから最大30日間アクセスを維持できます。ユーザーが新しいトークンを取得できないようにするには、すべてのセッションからサインアウトさせ、ユーザープールで無効化します。ユーザー名は`<identity provider name in lowercase>_<sub>`です：
 
   ```bash
   aws cognito-idp admin-user-global-sign-out --user-pool-id <user pool id> --username okta_<sub>
@@ -352,7 +375,9 @@ Microsoftのディスカバリードキュメントに対して確認されま�
 
   これはAWSでテストされています。`admin-user-global-sign-out`と`admin-disable-user`の後、アイデンティティプロバイダーは依然としてユーザーをサインインさせますが、Cognitoはそれらを拒否します。
 
-  Webクライアントのリフレッシュトークン有効期間を短くする（CDKでは`refreshTokenValidity`、Terraformでは`refresh_token_validity`）と、削除されたユーザーがアクセスを維持する時間が短縮されます。これはAWSではテストされていません。
+  これらのコマンドは、ユーザーが既に持っているアクセスを終了しません。[`admin-user-global-sign-out`](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminUserGlobalSignOut.html)はユーザーのリフレッシュトークンを取り消すため、ウェブサイトはそれらの新しいトークンを取得できず、`admin-disable-user`は次回のサインインを停止します。Cognitoが既に発行したIDトークンとアクセストークンは、期限が切れるまで有効なままです。デフォルトでは、発行から1時間後です（[ID and access token validity](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_CreateUserPoolClient.html#CognitoUserPools-CreateUserPoolClient-request-IdTokenValidity)）。アイデンティティプールが既にウェブサイトに付与したAWS認証情報も、期限が切れるまで有効なままです。発行から1時間後です（[identity pools authentication flow](https://docs.aws.amazon.com/cognito/latest/developerguide/concepts.html#authentication-flow-enhanced)）。期限が切れるまで、ユーザーは引き続きウェブサイトとアイデンティティプールの認証済みロールを使用できます。
+
+  これらのコマンドを実行しない場合、Webクライアントのリフレッシュトークン有効期間を短くする（CDKでは`refreshTokenValidity`、Terraformでは`refresh_token_validity`）と、削除されたユーザーがアクセスを維持する時間が短縮されます。IDトークンとアクセストークンの有効期間を短くする（CDKでは`idTokenValidity`と`accessTokenValidity`、Terraformでは`id_token_validity`と`access_token_validity`）と、コマンドを実行した後に既に発行されたトークンが有効なままである時間が短縮されますが、常にある程度の時間は残ります。どちらもAWSではテストされていません。
 
 ## クライアントシークレット
 

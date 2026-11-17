@@ -243,7 +243,18 @@ oidc_identity_providers = var.oidc_identity_providers
 
 ## 아이덴티티 프로바이더 설정
 
-아이덴티티 프로바이더를 추가하는 배포는 Secrets Manager에서 클라이언트 시크릿을 읽습니다. 시크릿이 존재하지 않으면 배포가 실패합니다. 다음 단계를 이 순서대로 따르세요. 생성기는 완료 시 이러한 단계도 출력합니다.
+아이덴티티 프로바이더를 추가하는 배포는 Secrets Manager에서 클라이언트 시크릿을 읽습니다. 시크릿이 존재하지 않으면 배포가 실패합니다.
+
+<Infrastructure>
+  <Fragment slot="cdk">
+CloudFormation은 스택의 실행 역할로 시크릿을 읽습니다. 기본적으로 `cdk-hnb659fds-cfn-exec-role-<account>-<region>`입니다. 해당 역할은 시크릿에 대한 `secretsmanager:GetSecretValue`가 필요하며, 시크릿이 고객 관리형 AWS KMS 키로 암호화된 경우 키에 대한 `kms:Decrypt`도 필요합니다.
+  </Fragment>
+  <Fragment slot="terraform">
+`terraform apply`를 실행하는 아이덴티티가 시크릿을 읽습니다. 시크릿에 대한 `secretsmanager:GetSecretValue`가 필요하며, 시크릿이 고객 관리형 AWS KMS 키로 암호화된 경우 키에 대한 `kms:Decrypt`도 필요합니다.
+  </Fragment>
+</Infrastructure>
+
+다음 단계를 이 순서대로 따르세요. 생성기는 완료 시 이러한 단계도 출력합니다.
 
 1. `--federation=oidc`와 함께 `ts#website#auth`를 실행하고 한 번 배포합니다.
 2. 사용자 풀의 리디렉션 URI를 찾습니다. 풀의 모든 아이덴티티 프로바이더는 동일한 것을 사용합니다.
@@ -266,11 +277,23 @@ output "idp_redirect_uri" { value = module.user_identity.idp_redirect_uri }
 </Infrastructure>
 
 3. 해당 리디렉션 URI로 아이덴티티 프로바이더에 애플리케이션을 등록하고 클라이언트 ID와 클라이언트 시크릿을 기록합니다. 아이덴티티 프로바이더에는 이 `/oauth2/idpresponse` URI만 등록하세요. 웹사이트 자체의 URL은 아이덴티티 프로바이더가 아닌 Cognito에 등록됩니다.
-4. Secrets Manager에 클라이언트 시크릿을 저장합니다:
+4. Secrets Manager에 클라이언트 시크릿을 저장합니다. 명령줄 인수가 아닌 파일로 전달하세요. 인수는 셸 기록에 남고, 명령이 실행되는 동안 같은 컴퓨터의 다른 사용자가 프로세스 목록에서 볼 수 있습니다:
 
    ```bash
-   aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string <client secret> --region <region>
+   (
+     umask 077
+     d=$(mktemp -d) || exit
+     trap 'rm -rf "$d"' EXIT
+     trap 'exit 1' HUP INT TERM
+     unset CLIENT_SECRET
+     IFS= read -rs CLIENT_SECRET || exit 1
+     printf '%s' "$CLIENT_SECRET" > "$d/secret" || exit 1
+     unset CLIENT_SECRET
+     aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string "file://$d/secret" --region <region>
+   )
    ```
+
+   명령은 괄호 사이의 서브셸에서 실행됩니다. `read`는 클라이언트 시크릿을 붙여넣고 Enter를 누를 때까지 기다리며 표시하지 않습니다. 두 개의 `unset` 명령은 이전에 `CLIENT_SECRET`을 내보낸 경우에도 `aws` 명령의 환경에서 시크릿을 제외합니다. `IFS=`와 `-r`은 양쪽 끝의 공백과 백슬래시를 포함하여 붙여넣은 그대로 시크릿을 유지합니다. `mktemp -d`는 사용자만 열 수 있는 새 디렉터리(모드 700)를 생성하고, `printf`는 끝에 줄바꿈 없이 시크릿을 씁니다. AWS CLI는 `file://` 뒤에 명명된 파일에서 `--secret-string`의 값을 읽고 변경하지 않고 전달하므로 파일 끝의 줄바꿈은 시크릿의 일부가 됩니다. 서브셸이 끝나면 `trap` 명령이 디렉터리를 삭제합니다. `aws` 명령이 실패하거나 Ctrl-C를 누르면 이 작업도 수행합니다. 명령은 Linux와 macOS의 기본 셸인 bash와 zsh에서 작동합니다. Windows의 경우 [Mitigate the risks of using the AWS CLI to store your AWS Secrets Manager secrets](https://docs.aws.amazon.com/secretsmanager/latest/userguide/security_cli-exposure-risks.html)를 참조하세요.
 
    `--region`을 스택의 리전으로 설정하세요. 아이덴티티 프로바이더를 추가하는 배포 전에 해당 리전에 시크릿이 존재해야 합니다. Cognito가 전체 시크릿 값을 클라이언트 시크릿으로 받기 때문에 시크릿을 JSON이 아닌 일반 문자열로 저장하세요. Secrets Manager 콘솔에서 Key/value가 아닌 Plaintext를 선택하세요.
 
@@ -343,7 +366,7 @@ Microsoft의 검색 문서와 대조하여 확인되었으며, 실제 로그인�
 - 사용자 풀에서 요구하는 MFA(다단계 인증)는 페더레이션 사용자에게 적용되지 않습니다. Cognito는 인증을 아이덴티티 프로바이더에 맡기므로 아이덴티티 프로바이더에서 MFA를 적용하세요.
 - 웹사이트에서 로그아웃하면 Cognito 세션만 종료됩니다. OIDC 아이덴티티 프로바이더에서 사용자의 세션을 종료하지 않으므로 버튼을 통한 다음 로그인은 비밀번호 없이 완료될 수 있습니다. 공유 컴퓨터에서 사용자는 아이덴티티 프로바이더에서도 로그아웃해야 합니다.
 - 사용자 메뉴에는 Cognito 사용자 이름이 표시됩니다. 페더레이션 사용자의 경우 아이덴티티 프로바이더 이름, 밑줄 및 아이덴티티 프로바이더에서의 사용자 `sub`가 소문자로 표시됩니다. 예를 들어 `okta_00u1abcd`입니다.
-- 아이덴티티 프로바이더에서 사용자를 제거하거나 비활성화하면 해당 사용자의 다음 로그인만 중지됩니다. Cognito는 자체 리프레시 토큰으로 토큰을 갱신하며 아이덴티티 프로바이더에 묻지 않고, 웹사이트는 사용자가 알아차리지 못하게 토큰을 갱신합니다. 따라서 사용자는 리프레시 토큰이 만료될 때까지, 즉 마지막 로그인 후 최대 30일까지 액세스를 유지할 수 있습니다. 사용자의 액세스를 즉시 종료하려면 모든 세션에서 로그아웃시키고 사용자 풀에서 비활성화하세요. 사용자 이름은 `<identity provider name in lowercase>_<sub>`입니다:
+- 아이덴티티 프로바이더에서 사용자를 제거하거나 비활성화하면 해당 사용자의 다음 로그인만 중지됩니다. Cognito는 자체 리프레시 토큰으로 토큰을 갱신하며 아이덴티티 프로바이더에 묻지 않고, 웹사이트는 사용자가 알아차리지 못하게 토큰을 갱신합니다. 따라서 사용자는 리프레시 토큰이 만료될 때까지, 즉 마지막 로그인 후 최대 30일까지 액세스를 유지할 수 있습니다. 사용자가 새 토큰을 받지 못하도록 하려면 모든 세션에서 로그아웃시키고 사용자 풀에서 비활성화하세요. 사용자 이름은 `<identity provider name in lowercase>_<sub>`입니다:
 
   ```bash
   aws cognito-idp admin-user-global-sign-out --user-pool-id <user pool id> --username okta_<sub>
@@ -352,7 +375,9 @@ Microsoft의 검색 문서와 대조하여 확인되었으며, 실제 로그인�
 
   이는 AWS에서 테스트되었습니다. `admin-user-global-sign-out` 및 `admin-disable-user` 후에도 아이덴티티 프로바이더는 여전히 사용자를 로그인시키지만 Cognito는 거부합니다.
 
-  웹 클라이언트의 더 짧은 리프레시 토큰 유효 기간(CDK의 `refreshTokenValidity`, Terraform의 `refresh_token_validity`)은 제거된 사용자가 액세스를 유지하는 시간을 단축합니다. 이는 AWS에서 테스트되지 않았습니다.
+  이러한 명령은 사용자가 이미 가지고 있는 액세스를 종료하지 않습니다. [`admin-user-global-sign-out`](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminUserGlobalSignOut.html)은 사용자의 리프레시 토큰을 취소하므로 웹사이트가 새 토큰을 받을 수 없으며, `admin-disable-user`는 다음 로그인을 중지합니다. Cognito가 이미 발급한 ID 및 액세스 토큰은 만료될 때까지 유효하며, 기본적으로 발급 후 1시간입니다([ID and access token validity](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_CreateUserPoolClient.html#CognitoUserPools-CreateUserPoolClient-request-IdTokenValidity)). 아이덴티티 풀이 웹사이트에 이미 제공한 AWS 자격 증명도 만료될 때까지 유효하며, 발급 후 1시간입니다([identity pools authentication flow](https://docs.aws.amazon.com/cognito/latest/developerguide/concepts.html#authentication-flow-enhanced)). 만료될 때까지 사용자는 여전히 웹사이트와 아이덴티티 풀의 인증된 역할을 사용할 수 있습니다.
+
+  웹 클라이언트의 더 짧은 리프레시 토큰 유효 기간(CDK의 `refreshTokenValidity`, Terraform의 `refresh_token_validity`)은 이러한 명령을 실행하지 않는 경우 제거된 사용자가 액세스를 유지하는 시간을 단축합니다. 더 짧은 ID 및 액세스 토큰 유효 기간(CDK의 `idTokenValidity` 및 `accessTokenValidity`, Terraform의 `id_token_validity` 및 `access_token_validity`)은 명령을 실행한 후 이미 발급된 토큰이 유효한 시간을 단축하지만 항상 일부 시간이 남습니다. 둘 다 AWS에서 테스트되지 않았습니다.
 
 ## 클라이언트 시크릿
 
