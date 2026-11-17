@@ -424,6 +424,23 @@ describe('keepTestIdp', () => {
     expect(result.tagged).toBe(false);
     expect(sdk.calls.filter((c) => c.name === 'TagResource')).toHaveLength(1);
   });
+
+  it('treats a secret that no longer exists as nothing to keep', async () => {
+    sdk.handlers.TagResource = (input) => {
+      if (input.SecretId) {
+        throw notFound();
+      }
+      return {};
+    };
+    sdk.handlers.DescribeUserPool = () => ({
+      UserPool: { Arn: 'arn:aws:cognito-idp:us-west-2:111:userpool/idp' },
+    });
+    await expect(keepTestIdp(createdIdp(), { now })).resolves.toEqual({
+      keepUntil,
+      tagged: true,
+    });
+    expect(console.warn).not.toHaveBeenCalled();
+  });
 });
 
 describe('sweepTestIdps', () => {
@@ -635,6 +652,42 @@ describe('sweepTestIdps', () => {
     });
     await sweepTestIdps(REGION, { now });
     expect(sentNames()).toContain('DeleteUserPool');
+  });
+
+  it('sweeps a resource whose keep-until tag is further ahead than the sweep honours', async () => {
+    sdk.handlers.ListUserPools = () => ({
+      UserPools: [{ Id: 'far', Name: 'e2e-idp-far' }],
+    });
+    describePools({
+      far: {
+        CreationDate: old,
+        UserPoolTags: { ...tagged, [KEEP_UNTIL_TAG]: '2099' },
+      },
+    });
+    sdk.handlers.ListSecrets = () => ({
+      SecretList: [
+        {
+          ARN: 'arn:far',
+          Name: 'e2e-idp-far-client-secret',
+          Tags: [
+            { Key: 'nx-plugin-e2e', Value: 'external-idp' },
+            { Key: KEEP_UNTIL_TAG, Value: '2099' },
+          ],
+          CreatedDate: old,
+        },
+      ],
+    });
+    await sweepTestIdps(REGION, { now });
+    expect(
+      sdk.calls
+        .filter((c) => c.name === 'DeleteUserPool')
+        .map((c) => c.input.UserPoolId),
+    ).toEqual(['far']);
+    expect(
+      sdk.calls
+        .filter((c) => c.name === 'DeleteSecret')
+        .map((c) => c.input.SecretId),
+    ).toEqual(['arn:far']);
   });
 
   it('never throws and still sweeps secrets when listing pools fails', async () => {

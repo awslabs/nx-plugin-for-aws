@@ -60,6 +60,12 @@ export const KEEP_UNTIL_TAG = 'keep-until';
 /** How long `keepTestIdp` keeps a resource out of the sweep. */
 const DEFAULT_KEEP_FOR_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * The longest a `keep-until` tag is honoured, with room for a retry that
+ * writes a fresh deadline before the previous one expires.
+ */
+const MAX_KEEP_FOR_MS = 2 * DEFAULT_KEEP_FOR_MS;
+
 /** OAuth scopes the main user pool requests from the identity provider. */
 const OAUTH_SCOPES = ['openid', 'email', 'profile'];
 
@@ -459,13 +465,21 @@ export const keepTestIdp = async (
       await step();
       console.log(`Tagged ${label} to keep until ${keepUntil}`);
     } catch (e) {
-      tagged = false;
-      console.warn(`Failed to tag ${label}: ${describeError(e)}`);
+      if (isNotFound(e)) {
+        // There is nothing left to keep, and nothing for an operator to
+        // clean up either, so this is not a tagging failure.
+        console.log(`${label} is already deleted, so there is nothing to keep`);
+      } else {
+        tagged = false;
+        console.warn(`Failed to tag ${label}: ${describeError(e)}`);
+      }
     }
   };
 
   await tagStep(`secret ${idp.names.secretName}`, () =>
     secretsClient(idp.region).send(
+      // TagResource appends to the secret's existing tags, so the run and
+      // created-at tags the sweep filters on are kept.
       new TagSecretCommand({
         SecretId: idp.names.secretName,
         Tags: [{ Key: KEEP_UNTIL_TAG, Value: keepUntil }],
@@ -484,6 +498,9 @@ export const keepTestIdp = async (
         throw new Error('DescribeUserPool returned no user pool ARN');
       }
       await cognito.send(
+        // TagResource only adds or overwrites the keys it is given, unlike
+        // UpdateUserPool's UserPoolTags, which replaces the whole set, so
+        // the run and created-at tags the sweep filters on are kept.
         new TagUserPoolCommand({
           ResourceArn: UserPool.Arn,
           Tags: { [KEEP_UNTIL_TAG]: keepUntil },
@@ -504,12 +521,15 @@ interface SweepWindow {
 
 /**
  * Whether a `keep-until` tag value protects a resource from this sweep. An
- * absent or unreadable value protects nothing, so a hand-edited tag cannot
- * keep a resource for ever.
+ * absent or unreadable value protects nothing, and so does one more than
+ * `MAX_KEEP_FOR_MS` ahead of now: `keepTestIdp` never writes a deadline that
+ * far out, and `Date.parse` accepts more than ISO 8601 (it reads `2099` as
+ * 2099-01-01), so a hand-edited or mistyped tag cannot hold a user pool and
+ * its secret out of the sweep for years.
  */
 const isKept = (value: string | undefined, now: number): boolean => {
   const until = value ? Date.parse(value) : Number.NaN;
-  return !Number.isNaN(until) && until > now;
+  return !Number.isNaN(until) && until > now && until - now <= MAX_KEEP_FOR_MS;
 };
 
 /** Deletes tagged identity provider user pools older than the cutoff. */
