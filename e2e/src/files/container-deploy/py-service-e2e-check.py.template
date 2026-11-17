@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import os
+import re
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -18,8 +19,24 @@ def _seconds(name: str, default: float) -> float:
     return float(os.environ.get(name, default))
 
 
-def _log(check: str, token: str, ok: bool, detail: str | None = None) -> None:
-    print("E2E_CHECK " + json.dumps({"check": check, "token": token, "ok": ok, "detail": detail}), flush=True)
+def _log(check: str, token: str, ok: bool, **fields: object) -> None:
+    print("E2E_CHECK " + json.dumps({"check": check, "token": token, "ok": ok, **fields}), flush=True)
+
+
+# AWS signing params (which also cover RDS IAM auth tokens) and passwords.
+_SECRETS = (
+    (re.compile(r"(X-Amz-(?:Security-Token|Signature|Credential|Date|SignedHeaders)=)[^&\s\"']*", re.I), r"\1***"),
+    (re.compile(r"(://[^:/@\s]+:)[^@\s]*@"), r"\1***@"),
+    (re.compile(r"(password=)[^&\s;\"']*", re.I), r"\1***"),
+)
+
+
+def _redact(error: BaseException) -> str:
+    """The error message without its traceback or secrets, cut to one short log line."""
+    text = str(error) or type(error).__name__
+    for pattern, replacement in _SECRETS:
+        text = pattern.sub(replacement, text)
+    return text[:300]
 
 
 def _put_and_get_item(token: str) -> None:
@@ -48,19 +65,22 @@ async def _check_row(token: str) -> None:
 
 
 async def _run_check(check: str, token: str, run: Callable[[str], Awaitable[None]]) -> None:
-    deadline = time.monotonic() + _seconds("E2E_CHECK_TIMEOUT_SECONDS", 3600)
+    # The default stays below the test's 10 minute wait for the final line.
+    deadline = time.monotonic() + _seconds("E2E_CHECK_TIMEOUT_SECONDS", 480)
     interval = _seconds("E2E_CHECK_INTERVAL_SECONDS", 15)
     attempt = 1
     while True:
         try:
             await run(token)
-            _log(check, token, True)
+            _log(check, token, True, final=True)
             return
         except Exception as error:
+            message = _redact(error)
             if time.monotonic() + interval > deadline:
-                _log(check, token, False, str(error))
+                _log(check, token, False, final=True, attempt=attempt, detail=message, error=message)
                 return
-            print(f"e2e-check {check} attempt {attempt}: {error}", flush=True)
+            # A non-final line, so the test can show the latest error if it times out.
+            _log(check, token, False, final=False, attempt=attempt, error=message)
         attempt += 1
         await asyncio.sleep(interval)
 

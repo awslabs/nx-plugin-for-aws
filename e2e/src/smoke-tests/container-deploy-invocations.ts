@@ -26,8 +26,9 @@ import { getRegion } from './deploy-invocations';
  * Checks the container-deploy test makes on its deployed container services.
  * A service has no load balancer and its security group admits nothing, so
  * the test cannot call it. Instead each service runs its own data connection
- * checks at startup and logs one `E2E_CHECK {...}` line per check, and the
- * test reads those lines from the service's log group. The test also checks,
+ * checks at startup and logs `E2E_CHECK {...}` lines: one for each failed
+ * attempt and a final one per check. The test reads those lines from the
+ * service's log group. The test also checks,
  * with read-only describe calls, that the service is running, private and
  * healthy.
  */
@@ -49,6 +50,14 @@ export interface E2eCheckLine {
   check: string;
   token: string;
   ok: boolean;
+  /**
+   * Whether the line decides the check. A service logs a non-final
+   * `ok: false` line for each failed attempt it retries. A line without a
+   * `final` field is final.
+   */
+  final: boolean;
+  attempt?: number;
+  error?: string;
   detail?: string;
 }
 
@@ -81,6 +90,11 @@ export function parseE2eCheckLine(message: string): E2eCheckLine | undefined {
       check: parsed.check,
       token: parsed.token,
       ok: parsed.ok,
+      final: typeof parsed.final === 'boolean' ? parsed.final : true,
+      ...(typeof parsed.attempt === 'number'
+        ? { attempt: parsed.attempt }
+        : {}),
+      ...(typeof parsed.error === 'string' ? { error: parsed.error } : {}),
       ...(typeof parsed.detail === 'string' ? { detail: parsed.detail } : {}),
     };
   } catch {
@@ -178,22 +192,35 @@ export function taskHealthProblems(
 
 /**
  * Compares a service's `E2E_CHECK` lines with the checks it must pass. Only
- * lines with this run's token count. A check with an `ok: false` line has
- * failed; a check with no `ok: true` line is missing.
+ * lines with this run's token count, and only an `ok: true` line or a final
+ * `ok: false` line decides a check. A check with a final `ok: false` line has
+ * failed; a check with no `ok: true` line is missing. `latestErrors` holds,
+ * for each missing check, the last non-final error the service logged.
  */
 export function e2eCheckProblems(
   lines: E2eCheckLine[],
   expectedChecks: string[],
   token: string,
-): { failed: string[]; missing: string[] } {
+): { failed: string[]; missing: string[]; latestErrors: string[] } {
   const thisRun = lines.filter((line) => line.token === token);
+  const missing = expectedChecks.filter(
+    (check) => !thisRun.some((line) => line.ok && line.check === check),
+  );
   return {
     failed: thisRun
-      .filter((line) => !line.ok)
+      .filter((line) => !line.ok && line.final)
       .map((line) => `${line.check}: ${line.detail ?? 'no detail'}`),
-    missing: expectedChecks.filter(
-      (check) => !thisRun.some((line) => line.ok && line.check === check),
-    ),
+    missing,
+    latestErrors: missing.flatMap((check) => {
+      const latest = thisRun
+        .filter((line) => line.check === check && !line.ok && !line.final)
+        .at(-1);
+      return latest
+        ? [
+            `${check}: attempt ${latest.attempt ?? '?'}: ${latest.error ?? 'no error'}`,
+          ]
+        : [];
+    }),
   };
 }
 
@@ -357,17 +384,21 @@ async function readE2eCheckLines(
 
 /**
  * Waits up to 10 minutes for the service to log an `ok: true` line with this
- * run's token for every expected check. Fails at once on an `ok: false`
- * line, with the detail the service logged.
+ * run's token for every expected check. Fails at once on a final `ok: false`
+ * line, with the detail the service logged. On a timeout, the failure shows
+ * each undecided check's last failed attempt.
  */
 export async function waitForE2eChecks(
   service: DeployedContainerService,
   token: string,
   sinceMs: number,
+  // The services' default check deadline (480 s) must stay below this wait,
+  // so a failing check logs its final line before the wait ends.
   { timeoutMs = 10 * 60_000, intervalMs = 20_000 }: WaitOptions = {},
 ): Promise<void> {
   const logs = new CloudWatchLogsClient({ region: getRegion() });
   let failed: string[] = [];
+  let latestErrors: string[] = [];
   const missing = await poll(
     async () => {
       const result = e2eCheckProblems(
@@ -376,6 +407,7 @@ export async function waitForE2eChecks(
         token,
       );
       failed = result.failed;
+      latestErrors = result.latestErrors;
       // A failed check ends the wait.
       return failed.length > 0 ? [] : result.missing;
     },
@@ -386,7 +418,10 @@ export async function waitForE2eChecks(
   }
   if (missing.length > 0) {
     throw new Error(
-      `${describeName(service)} logged no passing startup check with this run's token for: ${missing.join(', ')}`,
+      `${describeName(service)} logged no passing startup check with this run's token for: ${missing.join(', ')}` +
+        (latestErrors.length > 0
+          ? `\nLast failed attempts:\n- ${latestErrors.join('\n- ')}`
+          : ''),
     );
   }
   console.log(

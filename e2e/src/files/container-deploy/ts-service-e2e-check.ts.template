@@ -10,8 +10,20 @@ const seconds = (name: string, fallback: number) =>
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const errorText = (error: unknown) =>
-  error instanceof Error ? error.message : String(error);
+// The error message without its stack or secrets (AWS signing params, which
+// also cover RDS IAM auth tokens, and passwords), cut to one short log line.
+const redact = (error: unknown) =>
+  (error instanceof Error ? error.message || error.name : String(error))
+    .replace(
+      /(X-Amz-(?:Security-Token|Signature|Credential|Date|SignedHeaders)=)[^&\s"']*/gi,
+      '$1***',
+    )
+    .replace(/(:\/\/[^:/@\s]+:)[^@\s]*@/g, '$1***@')
+    .replace(/(password=)[^&\s;"']*/gi, '$1***')
+    .slice(0, 300);
+
+const log = (line: Record<string, unknown>) =>
+  console.log(`E2E_CHECK ${JSON.stringify(line)}`);
 
 const putAndGetItem = async (token: string) => {
   const entity = await createExampleEntity();
@@ -58,21 +70,30 @@ const runCheck = async (
   token: string,
   run: (token: string) => Promise<void>,
 ) => {
-  const deadline = Date.now() + seconds('E2E_CHECK_TIMEOUT_SECONDS', 3600);
+  // The default stays below the test's 10 minute wait for the final line.
+  const deadline = Date.now() + seconds('E2E_CHECK_TIMEOUT_SECONDS', 480);
   const interval = seconds('E2E_CHECK_INTERVAL_SECONDS', 15);
   for (let attempt = 1; ; attempt++) {
     try {
       await run(token);
-      console.log(`E2E_CHECK ${JSON.stringify({ check, token, ok: true })}`);
+      log({ check, token, ok: true, final: true });
       return;
     } catch (error) {
+      const message = redact(error);
       if (Date.now() + interval > deadline) {
-        console.log(
-          `E2E_CHECK ${JSON.stringify({ check, token, ok: false, detail: errorText(error) })}`,
-        );
+        log({
+          check,
+          token,
+          ok: false,
+          final: true,
+          attempt,
+          detail: message,
+          error: message,
+        });
         return;
       }
-      console.log(`e2e-check ${check} attempt ${attempt}: ${errorText(error)}`);
+      // A non-final line, so the test can show the latest error if it times out.
+      log({ check, token, ok: false, final: false, attempt, error: message });
       await sleep(interval);
     }
   }
