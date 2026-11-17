@@ -29,8 +29,34 @@ export type ContainerInfra = 'ecs' | 'none';
 /** Port the vended server listens on inside the container (`PORT`). */
 export const CONTAINER_PORT = 8080;
 
-/** Path the vended server answers health checks on. */
+/** Path the container health check calls. */
 export const CONTAINER_HEALTH_CHECK_PATH = '/health';
+
+/** The runtime of the vended image, which the health check command runs on. */
+export type ContainerRuntime = 'node' | 'python';
+
+/**
+ * The container health check command for the vended image of `runtime`, in
+ * the ECS task definition `healthCheck.command` form. It calls
+ * `CONTAINER_HEALTH_CHECK_PATH` on the port in `PORT` (default
+ * `CONTAINER_PORT`) and exits non-zero on a non-2xx answer or no answer.
+ */
+export const containerHealthCheckCommand = (
+  runtime: ContainerRuntime,
+): string[] =>
+  runtime === 'node'
+    ? [
+        'CMD',
+        'node',
+        '-e',
+        `fetch('http://127.0.0.1:'+(process.env.PORT||'${CONTAINER_PORT}')+'${CONTAINER_HEALTH_CHECK_PATH}',{signal:AbortSignal.timeout(3000)}).then(r=>process.exit(r.ok?0:1),()=>process.exit(1))`,
+      ]
+    : [
+        'CMD',
+        'python',
+        '-c',
+        `import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '${CONTAINER_PORT}') + '${CONTAINER_HEALTH_CHECK_PATH}', timeout=3)`,
+      ];
 
 export interface AddContainerServiceInfraOptions {
   /** PascalCase service name: class names. */
@@ -48,6 +74,11 @@ export interface AddContainerServiceInfraOptions {
   dockerBuildContextDir: string;
   /** Port the server listens on inside the container. */
   containerPort: number;
+  /**
+   * Command ECS runs inside the container to check its health; it exits
+   * non-zero when the server is unhealthy. See `containerHealthCheckCommand`.
+   */
+  healthCheckCommand: string[];
   containers: Containers;
 }
 

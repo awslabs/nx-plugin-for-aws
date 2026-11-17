@@ -1,9 +1,7 @@
 import * as path from 'path';
 import * as url from 'url';
+import { Duration } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-<%_ if (ingress === 'http-api' && auth === 'cognito') { _%>
-import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
-<%_ } _%>
 <%_ /* Alias the core imports only when this service's name would shadow them. */ _%>
 <%_ const collides = ['EcsService', 'EcsServiceImage', 'EcsServiceProps'].includes(nameClassName); _%>
 <%_ const coreService = collides ? 'CoreEcsService' : 'EcsService'; _%>
@@ -24,7 +22,7 @@ const dockerBuildContextDir = path.join(
 
 export type <%= nameClassName %>Props = Omit<
   <%= coreProps %>,
-  'serviceName' | 'image' | 'ingress' | 'auth'
+  'serviceName' | 'image'
 > & {
   /**
    * The image to run.
@@ -32,53 +30,32 @@ export type <%= nameClassName %>Props = Omit<
    * @default the image built from <%- dockerBuildContextDir %>
    */
   readonly image?: <%= coreImage %>;
-<%_ if (ingress === 'http-api' && auth === 'cognito') { _%>
-  /**
-   * Identity details for Cognito authentication
-   */
-  readonly identity: {
-    readonly userPool: IUserPool;
-    readonly userPoolClient: IUserPoolClient;
-  };
-<%_ } _%>
 };
 
 /**
- * The <%= nameClassName %> container service on Amazon ECS. The container gets
- * `RUNTIME_CONFIG_APP_ID` and its task role may read runtime configuration
- * from AWS AppConfig.
+ * The <%= nameClassName %> container service on Amazon ECS. The container runs a
+ * health check on `/health`, gets `RUNTIME_CONFIG_APP_ID`, and its task role may
+ * read runtime configuration from AWS AppConfig.
  */
 export class <%= nameClassName %> extends <%= coreService %> {
   constructor(scope: Construct, id: string, props: <%= nameClassName %>Props) {
-<%_ if (ingress === 'http-api' && auth === 'cognito') { _%>
-    const { identity, ...rest } = props;
-<%_ } _%>
     const rc = RuntimeConfig.ensure(scope);
     super(scope, id, {
       containerPort: <%= containerPort %>,
-      ...<% if (ingress === 'http-api' && auth === 'cognito') { %>rest<% } else { %>props<% } %>,
+      healthCheck: {
+        command: <%- JSON.stringify(healthCheckCommand) %>,
+        interval: Duration.seconds(30),
+        timeout: Duration.seconds(5),
+        retries: 3,
+        startPeriod: Duration.seconds(30),
+      },
+      ...props,
       serviceName: '<%= nameClassName %>',
       image: props.image ?? { directory: dockerBuildContextDir },
       environment: {
         RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
         ...props.environment,
       },
-      ...(props.loadBalancer === false
-        ? {}
-        : {
-            ingress: '<%= ingress %>',
-<%_ if (ingress === 'http-api') { _%>
-<%_ if (auth === 'cognito') { _%>
-            auth: {
-              type: 'cognito',
-              userPool: identity.userPool,
-              userPoolClient: identity.userPoolClient,
-            },
-<%_ } else { _%>
-            auth: { type: '<%= auth %>' },
-<%_ } _%>
-<%_ } _%>
-          }),
     });
 
     rc.grantReadAppConfig(this.taskRole);

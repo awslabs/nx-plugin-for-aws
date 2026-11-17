@@ -91,10 +91,7 @@ describe('ts#container generator', () => {
   });
 
   it.each<[string, Partial<TsContainerGeneratorSchema>]>([
-    ['http-api iam', {}],
-    ['http-api cognito', { auth: 'cognito' }],
-    ['http-api none', { auth: 'none' }],
-    ['private', { ingress: 'private' }],
+    ['ecs', {}],
     ['infra none', { infra: 'none' }],
   ])('should match the generated files snapshot (%s)', async (_, options) => {
     await run(options);
@@ -249,6 +246,52 @@ describe('ts#container generator', () => {
     ).toContainEqual(expect.stringMatching(/test-project:build$/));
   });
 
+  it('should vend a private CDK service with a node health check', async () => {
+    await run();
+
+    const serviceFile = tree.read(SERVICE_FILE, 'utf-8') ?? '';
+    expect(serviceFile).toMatch(
+      /command: \[\s*['"]CMD['"],\s*['"]node['"],\s*['"]-e['"],/,
+    );
+    expect(serviceFile).toContain('Duration.seconds(30)');
+    for (const text of ['ingress', 'auth:', 'loadBalancer']) {
+      expect(serviceFile).not.toContain(text);
+    }
+    const core =
+      tree.read(`${CONSTRUCTS_SRC}/core/container/ecs-service.ts`, 'utf-8') ??
+      '';
+    for (const text of [
+      'ApplicationLoadBalancer',
+      'HttpApi',
+      'VpcLink',
+      "'connection', 'services'",
+    ]) {
+      expect(core).not.toContain(text);
+    }
+  });
+
+  it('should vend a private Terraform service with a node health check', async () => {
+    await run({ iac: 'terraform' });
+
+    const terraformSrc = 'packages/common/terraform/src';
+    const appModule =
+      tree.read(
+        `${terraformSrc}/app/services/test-project-service/test-project-service.tf`,
+        'utf-8',
+      ) ?? '';
+    expect(appModule).toMatch(
+      /^\s*health_check_command\s*=\s*\["CMD", "node", "-e", /m,
+    );
+    const core =
+      tree.read(
+        `${terraformSrc}/core/container/ecs-service/ecs-service.tf`,
+        'utf-8',
+      ) ?? '';
+    expect(core).not.toBe('');
+    expect(core).not.toContain('aws_lb');
+    expect(core).not.toContain('aws_apigatewayv2');
+  });
+
   it('should add the Terraform artifact dependency for iac=terraform', async () => {
     await ensureAwsNxPluginConfig(tree);
     await updateAwsNxPluginConfig(tree, { iac: { provider: 'terraform' } });
@@ -274,6 +317,12 @@ describe('ts#container generator', () => {
     expect(component).not.toHaveProperty('ingress');
     expect(component).not.toHaveProperty('auth');
     expect(component).not.toHaveProperty('iac');
+    expect(
+      tree
+        .listChanges()
+        .map((change) => change.path)
+        .filter((path) => path.startsWith('packages/common/')),
+    ).toEqual([]);
   });
 
   it('should add the infrastructure when infra=none is re-run with infra=ecs', async () => {
@@ -288,12 +337,12 @@ describe('ts#container generator', () => {
     expect(components[0]).toEqual(
       expect.objectContaining({
         infra: 'ecs',
-        ingress: 'http-api',
-        auth: 'iam',
         iac: 'cdk',
         port: before.port,
       }),
     );
+    expect(components[0]).not.toHaveProperty('ingress');
+    expect(components[0]).not.toHaveProperty('auth');
     expect(tree.read(`${CONSTRUCTS_SRC}/app/services/index.ts`, 'utf-8')).toBe(
       "export * from './test-project-service.js';\n",
     );
@@ -328,24 +377,6 @@ describe('ts#container generator', () => {
     );
   });
 
-  it('should warn and keep the recorded ingress when re-run with another ingress', async () => {
-    await run();
-    const serviceFile = tree.read(SERVICE_FILE, 'utf-8');
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    await run({ ingress: 'private' });
-
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'packages/common/constructs/src/app/services/test-project-service.ts',
-      ),
-    );
-    const [component] = componentsOf(tree);
-    expect(component.ingress).toBe('http-api');
-    expect(component.auth).toBe('iam');
-    expect(tree.read(SERVICE_FILE, 'utf-8')).toBe(serviceFile);
-  });
-
   it('should leave the first service alone when adding a second one', async () => {
     await run();
     const firstServiceFile = tree.read(SERVICE_FILE, 'utf-8');
@@ -371,17 +402,6 @@ describe('ts#container generator', () => {
     tree.delete(`${PROJECT_ROOT}/tsconfig.json`);
 
     await expect(run()).rejects.toThrow(/Unsupported project test-project/);
-  });
-
-  it('should drop auth with private ingress', async () => {
-    await run({ ingress: 'private', auth: 'iam' });
-
-    const [component] = componentsOf(tree);
-    expect(component.ingress).toBe('private');
-    expect(component).not.toHaveProperty('auth');
-    const serviceFile = tree.read(SERVICE_FILE, 'utf-8');
-    expect(serviceFile).toContain("ingress: 'private'");
-    expect(serviceFile).not.toContain('auth:');
   });
 
   it('should add the generator metric to app.ts', async () => {

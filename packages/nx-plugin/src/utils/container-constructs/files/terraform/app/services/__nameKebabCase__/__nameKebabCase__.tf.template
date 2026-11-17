@@ -23,7 +23,7 @@ variable "vpc_id" {
 }
 
 variable "subnet_ids" {
-  description = "Private subnets with egress for the tasks and the internal load balancer."
+  description = "Private subnets with egress for the tasks."
   type        = list(string)
 }
 
@@ -47,18 +47,6 @@ variable "appconfig_application_arn" {
   type        = string
 }
 
-<%_ if (ingress === 'http-api' && auth === 'cognito') { _%>
-variable "user_pool_id" {
-  description = "Cognito User Pool ID for authentication"
-  type        = string
-}
-
-variable "user_pool_client_ids" {
-  description = "List of Cognito User Pool Client IDs"
-  type        = list(string)
-}
-
-<%_ } _%>
 variable "cluster_arn" {
   description = "ARN of an existing ECS cluster to run in. Null creates a cluster for this service."
   type        = string
@@ -157,26 +145,11 @@ module "ecs_service" {
   image_uri                   = "${null_resource.docker_publish.triggers.repository_url}:${null_resource.docker_publish.triggers.image_tag}"
   image_repository_arn        = var.asset_ecr_repository_arn
   container_port              = <%= containerPort %>
+  health_check_command        = [<%- healthCheckCommand.map((part) => JSON.stringify(part)).join(', ') %>]
   environment                 = local.environment
   secrets                     = var.secrets
   task_role_policy_statements = local.task_role_policy_statements
-  ingress                     = "<%= ingress %>"
-<%_ if (ingress === 'http-api') { _%>
-  auth                        = "<%= auth %>"
-<%_ } _%>
-<%_ if (ingress === 'http-api' && auth === 'cognito') { _%>
-  user_pool_id                = var.user_pool_id
-  user_pool_client_ids        = var.user_pool_client_ids
-<%_ } _%>
   tags                        = var.tags
-}
-
-module "add_url_to_runtime_config" {
-  source = "../../../core/runtime-config/entry"
-
-  namespace = "connection"
-  key       = "services"
-  value     = { "<%= nameClassName %>" = module.ecs_service.url }
 }
 
 output "cluster_arn" {
@@ -212,29 +185,4 @@ output "security_group_id" {
 output "log_group_name" {
   description = "Name of the log group the container writes its output to."
   value       = module.ecs_service.log_group_name
-}
-
-output "load_balancer_arn" {
-  description = "ARN of the internal load balancer."
-  value       = module.ecs_service.load_balancer_arn
-}
-
-output "load_balancer_dns_name" {
-  description = "DNS name of the internal load balancer."
-  value       = module.ecs_service.load_balancer_dns_name
-}
-
-output "api_id" {
-  description = "Id of the HTTP API, or null unless ingress is http-api."
-  value       = module.ecs_service.api_id
-}
-
-output "api_execution_arn" {
-  description = "Execution ARN of the HTTP API, for execute-api:Invoke grants, or null unless ingress is http-api."
-  value       = module.ecs_service.api_execution_arn
-}
-
-output "url" {
-  description = "URL callers use: the HTTP API URL, or the internal load balancer URL for private."
-  value       = module.ecs_service.url
 }

@@ -304,11 +304,11 @@ describe('py#container generator', () => {
     expect(components(tree)).toEqual([
       expect.objectContaining({
         infra: 'ecs',
-        ingress: 'http-api',
-        auth: 'iam',
         iac: 'cdk',
       }),
     ]);
+    expect(components(tree)[0]).not.toHaveProperty('ingress');
+    expect(components(tree)[0]).not.toHaveProperty('auth');
   });
 
   describe('dispatcher options', () => {
@@ -319,8 +319,12 @@ describe('py#container generator', () => {
       dockerImageTag: 'proj-my-proj-service:latest',
       dockerBuildContextDir: 'dist/packages/my_proj/docker/my-proj-service',
       containerPort: CONTAINER_PORT,
-      ingress: 'http-api',
-      auth: 'iam',
+      healthCheckCommand: [
+        'CMD',
+        'python',
+        '-c',
+        "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '8080') + '/health', timeout=3)",
+      ],
       containers: 'docker',
     };
 
@@ -328,33 +332,6 @@ describe('py#container generator', () => {
       await pyContainerGenerator(tree, { project: PROJECT, iac: 'cdk' });
       expect(addContainerServiceCdkConstructs).toHaveBeenCalledWith(tree, {
         ...expected,
-        iac: 'cdk',
-      });
-    });
-
-    it('should pass auth none for a private service', async () => {
-      await pyContainerGenerator(tree, {
-        project: PROJECT,
-        ingress: 'private',
-        iac: 'cdk',
-      });
-      expect(addContainerServiceCdkConstructs).toHaveBeenCalledWith(tree, {
-        ...expected,
-        ingress: 'private',
-        auth: 'none',
-        iac: 'cdk',
-      });
-    });
-
-    it('should pass cognito auth', async () => {
-      await pyContainerGenerator(tree, {
-        project: PROJECT,
-        auth: 'cognito',
-        iac: 'cdk',
-      });
-      expect(addContainerServiceCdkConstructs).toHaveBeenCalledWith(tree, {
-        ...expected,
-        auth: 'cognito',
         iac: 'cdk',
       });
     });
@@ -406,40 +383,23 @@ describe('py#container generator', () => {
     ).rejects.toThrow(/source root/);
   });
 
-  it('should drop ingress and auth with infra=none', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  it('should vend no infrastructure with infra=none', async () => {
     await pyContainerGenerator(tree, {
       project: PROJECT,
       infra: 'none',
-      ingress: 'private',
-      auth: 'cognito',
       iac: 'cdk',
     });
 
-    expect(warn).toHaveBeenCalled();
     const [component] = components(tree);
-    expect(component).not.toHaveProperty('ingress');
-    expect(component).not.toHaveProperty('auth');
     expect(component).not.toHaveProperty('iac');
     expect(addContainerServiceCdkConstructs).not.toHaveBeenCalled();
     expect(addContainerServiceTerraformModules).not.toHaveBeenCalled();
-    warn.mockRestore();
-  });
-
-  it('should drop auth with ingress=private', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    await pyContainerGenerator(tree, {
-      project: PROJECT,
-      ingress: 'private',
-      auth: 'cognito',
-      iac: 'cdk',
-    });
-
-    expect(warn).toHaveBeenCalled();
-    const [component] = components(tree);
-    expect(component.ingress).toBe('private');
-    expect(component).not.toHaveProperty('auth');
-    warn.mockRestore();
+    expect(
+      tree
+        .listChanges()
+        .map((change) => change.path)
+        .filter((path) => path.startsWith('packages/common/')),
+    ).toEqual([]);
   });
 
   it('should record the contract metadata and metric', async () => {
@@ -451,8 +411,6 @@ describe('py#container generator', () => {
         path: 'proj_my_proj/service',
         name: 'service',
         infra: 'ecs',
-        ingress: 'http-api',
-        auth: 'iam',
         port: 8081,
         rc: 'MyProjService',
         iac: 'cdk',

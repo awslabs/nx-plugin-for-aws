@@ -18,6 +18,7 @@ import {
 import {
   addContainerServiceInfra,
   CONTAINER_PORT,
+  containerHealthCheckCommand,
 } from '../../utils/container-constructs/container-constructs.js';
 import type { ContainerMetadata } from '../../utils/container-constructs/container-metadata.js';
 import { resolveContainers } from '../../utils/containers.js';
@@ -199,6 +200,7 @@ export const tsContainerGenerator = async (
       dockerImageTag,
       dockerBuildContextDir: bundleOutputDir,
       containerPort: CONTAINER_PORT,
+      healthCheckCommand: containerHealthCheckCommand('node'),
       containers,
       iac,
     });

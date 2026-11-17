@@ -15,6 +15,7 @@ import { addPythonBundleTarget } from '../../utils/bundle/bundle.js';
 import {
   addContainerServiceInfra,
   CONTAINER_PORT,
+  containerHealthCheckCommand,
 } from '../../utils/container-constructs/container-constructs.js';
 import type { ContainerMetadata } from '../../utils/container-constructs/container-metadata.js';
 import { resolveContainers } from '../../utils/containers.js';
@@ -221,6 +222,7 @@ export const pyContainerGenerator = async (
       dockerImageTag,
       dockerBuildContextDir,
       containerPort: CONTAINER_PORT,
+      healthCheckCommand: containerHealthCheckCommand('python'),
       containers,
       iac,
     });

@@ -1,4 +1,4 @@
-# Reusable ECS service module: an AWS Fargate service in an existing VPC behind an internal load balancer.
+# Reusable ECS service module: an AWS Fargate service in an existing VPC, with no load balancer and no inbound rule.
 
 terraform {
   required_version = ">= 1.0"
@@ -21,12 +21,6 @@ data "aws_caller_identity" "current" {}
 
 data "aws_partition" "current" {}
 
-data "aws_vpc" "this" {
-  count = local.private_lb ? 1 : 0
-
-  id = var.vpc_id
-}
-
 resource "random_id" "suffix" {
   byte_length = 4
 }
@@ -39,14 +33,9 @@ locals {
   create_cluster = var.cluster_arn == null
   cluster_arn    = local.create_cluster ? aws_ecs_cluster.this[0].arn : var.cluster_arn
   cluster_name   = element(split("/", local.cluster_arn), 1)
-  create_lb      = var.load_balancer
-  create_api     = var.load_balancer && var.ingress == "http-api"
-  private_lb     = var.load_balancer && var.ingress == "private"
-  listener_port  = 80
   container_name = "app"
 
-  log_group_name     = "/aws/ecs/${local.name}"
-  api_log_group_name = "/aws/apigateway/${local.name}"
+  log_group_name = "/aws/ecs/${local.name}"
 
   # ECS Container Insights writes performance events to this log group.
   container_insights_log_group_name = "/aws/ecs/containerinsights/${local.name}/performance"
@@ -59,9 +48,15 @@ locals {
     if !can(regex("^arn:[^:]+:ssm:", arn))
   ])
 
-  route_keys = flatten([
-    for method in ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"] : ["${method} /{proxy+}", "${method} /"]
-  ])
+  container_health_check = var.health_check_command == null ? {} : {
+    healthCheck = {
+      command     = var.health_check_command
+      interval    = 30
+      timeout     = 5
+      retries     = 3
+      startPeriod = 30
+    }
+  }
 }
 
 resource "aws_kms_key" "logs" {
@@ -99,7 +94,6 @@ resource "aws_kms_key" "logs" {
           ArnLike = {
             "kms:EncryptionContext:aws:logs:arn" = [
               "arn:${local.partition}:logs:${local.region}:${local.account_id}:log-group:${local.log_group_name}",
-              "arn:${local.partition}:logs:${local.region}:${local.account_id}:log-group:${local.api_log_group_name}",
               "arn:${local.partition}:logs:${local.region}:${local.account_id}:log-group:${local.container_insights_log_group_name}"
             ]
           }
@@ -113,16 +107,6 @@ resource "aws_kms_key" "logs" {
 
 resource "aws_cloudwatch_log_group" "service" {
   name              = local.log_group_name
-  retention_in_days = var.log_retention_days
-  kms_key_id        = aws_kms_key.logs.arn
-
-  tags = var.tags
-}
-
-resource "aws_cloudwatch_log_group" "api" {
-  count = local.create_api ? 1 : 0
-
-  name              = local.api_log_group_name
   retention_in_days = var.log_retention_days
   kms_key_id        = aws_kms_key.logs.arn
 
@@ -290,7 +274,7 @@ resource "aws_ecs_task_definition" "this" {
   }
 
   container_definitions = jsonencode([
-    {
+    merge({
       name                   = local.container_name
       image                  = var.image_uri
       essential              = true
@@ -329,7 +313,7 @@ resource "aws_ecs_task_definition" "this" {
           "awslogs-stream-prefix" = "service"
         }
       }
-    }
+    }, local.container_health_check)
   ])
 
   tags = var.tags
@@ -354,154 +338,15 @@ resource "aws_vpc_security_group_egress_rule" "service_https" {
   description       = "Allow outbound HTTPS to AWS service endpoints"
 }
 
-resource "aws_vpc_security_group_ingress_rule" "service_from_alb" {
-  count = local.create_lb ? 1 : 0
-
-  security_group_id            = aws_security_group.service.id
-  referenced_security_group_id = aws_security_group.alb[0].id
-  from_port                    = var.container_port
-  to_port                      = var.container_port
-  ip_protocol                  = "tcp"
-  description                  = "Allow the load balancer to reach the container port"
-}
-
-resource "aws_security_group" "alb" {
-  #checkov:skip=CKV2_AWS_5:Attached to aws_lb.this via security_groups; Checkov cannot resolve this reference
-  count = local.create_lb ? 1 : 0
-
-  name_prefix = "${substr(local.name, 0, 40)}-alb-"
-  description = "Internal load balancer of the ${local.name} service"
-  vpc_id      = var.vpc_id
-
-  tags = merge(var.tags, {
-    Name = "${local.name}-alb"
-  })
-}
-
-resource "aws_vpc_security_group_ingress_rule" "alb_from_vpc_link" {
-  count = local.create_api ? 1 : 0
-  #checkov:skip=CKV_AWS_260:Source is the VPC link security group, not a CIDR
-
-  security_group_id            = aws_security_group.alb[0].id
-  referenced_security_group_id = aws_security_group.vpc_link[0].id
-  from_port                    = local.listener_port
-  to_port                      = local.listener_port
-  ip_protocol                  = "tcp"
-  description                  = "Allow the HTTP API VPC link to reach the listener"
-}
-
-resource "aws_vpc_security_group_ingress_rule" "alb_from_vpc" {
-  count = local.private_lb ? 1 : 0
-
-  security_group_id = aws_security_group.alb[0].id
-  cidr_ipv4         = data.aws_vpc.this[0].cidr_block
-  from_port         = local.listener_port
-  to_port           = local.listener_port
-  ip_protocol       = "tcp"
-  description       = "Allow callers inside the VPC to reach the listener"
-}
-
-resource "aws_vpc_security_group_egress_rule" "alb_to_service" {
-  count = local.create_lb ? 1 : 0
-
-  security_group_id            = aws_security_group.alb[0].id
-  referenced_security_group_id = aws_security_group.service.id
-  from_port                    = var.container_port
-  to_port                      = var.container_port
-  ip_protocol                  = "tcp"
-  description                  = "Allow the load balancer to reach the tasks"
-}
-
-resource "aws_security_group" "vpc_link" {
-  #checkov:skip=CKV2_AWS_5:Attached to aws_apigatewayv2_vpc_link.this via security_group_ids; Checkov cannot resolve this reference
-  count = local.create_api ? 1 : 0
-
-  name_prefix = "${substr(local.name, 0, 40)}-vpc-link-"
-  description = "HTTP API VPC link of the ${local.name} service"
-  vpc_id      = var.vpc_id
-
-  tags = merge(var.tags, {
-    Name = "${local.name}-vpc-link"
-  })
-}
-
-resource "aws_vpc_security_group_egress_rule" "vpc_link_to_alb" {
-  count = local.create_api ? 1 : 0
-
-  security_group_id            = aws_security_group.vpc_link[0].id
-  referenced_security_group_id = aws_security_group.alb[0].id
-  from_port                    = local.listener_port
-  to_port                      = local.listener_port
-  ip_protocol                  = "tcp"
-  description                  = "Allow the VPC link to reach the load balancer listener"
-}
-
-resource "aws_lb" "this" {
-  #checkov:skip=CKV2_AWS_20:Internal ALB reachable only from the VPC link security group or the VPC CIDR; TLS terminates at API Gateway and no certificate is vended
-  #checkov:skip=CKV_AWS_91:Requests are logged in the HTTP API access log; ALB access logs need an S3 bucket with an ELB delivery policy, which is not vended
-  #checkov:skip=CKV_AWS_150:Deletion protection off so the service can be destroyed with the stack, as the shared asset ECR repository uses force_delete
-  count = local.create_lb ? 1 : 0
-
-  internal                   = true
-  load_balancer_type         = "application"
-  subnets                    = var.subnet_ids
-  security_groups            = [aws_security_group.alb[0].id]
-  drop_invalid_header_fields = true
-  desync_mitigation_mode     = "defensive"
-  enable_deletion_protection = false
-
-  tags = merge(var.tags, {
-    Name = local.name
-  })
-}
-
-resource "aws_lb_target_group" "this" {
-  #checkov:skip=CKV_AWS_378:Internal ALB reachable only from the VPC link security group or the VPC CIDR; TLS terminates at API Gateway and no certificate is vended
-  count = local.create_lb ? 1 : 0
-
-  port                 = var.container_port
-  protocol             = "HTTP"
-  target_type          = "ip"
-  vpc_id               = var.vpc_id
-  deregistration_delay = var.deregistration_delay
-
-  health_check {
-    path    = var.health_check_path
-    matcher = "200"
-  }
-
-  tags = merge(var.tags, {
-    Name = local.name
-  })
-}
-
-resource "aws_lb_listener" "this" {
-  #checkov:skip=CKV_AWS_2:Internal ALB reachable only from the VPC link security group or the VPC CIDR; TLS terminates at API Gateway and no certificate is vended
-  #checkov:skip=CKV_AWS_103:Internal ALB reachable only from the VPC link security group or the VPC CIDR; TLS terminates at API Gateway and no certificate is vended
-  count = local.create_lb ? 1 : 0
-
-  load_balancer_arn = aws_lb.this[0].arn
-  port              = local.listener_port
-  protocol          = "HTTP"
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.this[0].arn
-  }
-
-  tags = var.tags
-}
-
 resource "aws_ecs_service" "this" {
-  name                              = local.name
-  cluster                           = local.cluster_arn
-  task_definition                   = aws_ecs_task_definition.this.arn
-  launch_type                       = "FARGATE"
-  platform_version                  = "LATEST"
-  desired_count                     = var.desired_count
-  enable_execute_command            = false
-  propagate_tags                    = "SERVICE"
-  health_check_grace_period_seconds = local.create_lb ? 60 : null
+  name                   = local.name
+  cluster                = local.cluster_arn
+  task_definition        = aws_ecs_task_definition.this.arn
+  launch_type            = "FARGATE"
+  platform_version       = "LATEST"
+  desired_count          = var.desired_count
+  enable_execute_command = false
+  propagate_tags         = "SERVICE"
 
   deployment_circuit_breaker {
     enable   = true
@@ -514,23 +359,13 @@ resource "aws_ecs_service" "this" {
     assign_public_ip = false
   }
 
-  dynamic "load_balancer" {
-    for_each = local.create_lb ? [1] : []
-
-    content {
-      target_group_arn = aws_lb_target_group.this[0].arn
-      container_name   = local.container_name
-      container_port   = var.container_port
-    }
-  }
-
   lifecycle {
     ignore_changes = [desired_count]
   }
 
   tags = var.tags
 
-  depends_on = [aws_lb_listener.this, aws_iam_role_policy.execution]
+  depends_on = [aws_iam_role_policy.execution]
 }
 
 resource "aws_appautoscaling_target" "this" {
@@ -557,105 +392,4 @@ resource "aws_appautoscaling_policy" "cpu" {
       predefined_metric_type = "ECSServiceAverageCPUUtilization"
     }
   }
-}
-
-resource "aws_apigatewayv2_vpc_link" "this" {
-  count = local.create_api ? 1 : 0
-
-  name               = local.name
-  security_group_ids = [aws_security_group.vpc_link[0].id]
-  subnet_ids         = var.subnet_ids
-
-  tags = var.tags
-}
-
-resource "aws_apigatewayv2_api" "this" {
-  count = local.create_api ? 1 : 0
-
-  name          = local.name
-  protocol_type = "HTTP"
-
-  cors_configuration {
-    allow_headers = ["authorization", "content-type", "x-amz-content-sha256", "x-amz-date", "x-amz-security-token"]
-    allow_methods = ["*"]
-    allow_origins = var.cors_allow_origins
-    max_age       = 86400
-  }
-
-  tags = var.tags
-}
-
-resource "aws_apigatewayv2_integration" "this" {
-  count = local.create_api ? 1 : 0
-
-  api_id                 = aws_apigatewayv2_api.this[0].id
-  integration_type       = "HTTP_PROXY"
-  integration_method     = "ANY"
-  integration_uri        = aws_lb_listener.this[0].arn
-  connection_type        = "VPC_LINK"
-  connection_id          = aws_apigatewayv2_vpc_link.this[0].id
-  payload_format_version = "1.0"
-  timeout_milliseconds   = 30000
-}
-
-resource "aws_apigatewayv2_authorizer" "cognito" {
-  count = local.create_api && var.auth == "cognito" ? 1 : 0
-
-  api_id           = aws_apigatewayv2_api.this[0].id
-  authorizer_type  = "JWT"
-  identity_sources = ["$request.header.Authorization"]
-  name             = "${local.name}-authorizer"
-
-  jwt_configuration {
-    audience = var.user_pool_client_ids
-    issuer   = "https://cognito-idp.${local.region}.amazonaws.com/${var.user_pool_id}"
-  }
-
-  lifecycle {
-    precondition {
-      condition     = var.user_pool_id != null && length(var.user_pool_client_ids) > 0
-      error_message = "user_pool_id and at least one user_pool_client_ids entry are required when auth is cognito."
-    }
-  }
-}
-
-resource "aws_apigatewayv2_route" "this" {
-  for_each = local.create_api ? toset(local.route_keys) : toset([])
-
-  api_id             = aws_apigatewayv2_api.this[0].id
-  route_key          = each.key
-  target             = "integrations/${aws_apigatewayv2_integration.this[0].id}"
-  authorization_type = var.auth == "iam" ? "AWS_IAM" : var.auth == "cognito" ? "JWT" : "NONE"
-  authorizer_id      = one(aws_apigatewayv2_authorizer.cognito[*].id)
-}
-
-resource "aws_apigatewayv2_stage" "this" {
-  count = local.create_api ? 1 : 0
-
-  api_id      = aws_apigatewayv2_api.this[0].id
-  name        = "$default"
-  auto_deploy = true
-
-  access_log_settings {
-    destination_arn = aws_cloudwatch_log_group.api[0].arn
-    format = jsonencode({
-      requestId        = "$context.requestId"
-      ip               = "$context.identity.sourceIp"
-      requestTime      = "$context.requestTime"
-      httpMethod       = "$context.httpMethod"
-      routeKey         = "$context.routeKey"
-      status           = "$context.status"
-      protocol         = "$context.protocol"
-      responseLength   = "$context.responseLength"
-      error            = "$context.error.message"
-      integrationError = "$context.integrationErrorMessage"
-    })
-  }
-
-  default_route_settings {
-    throttling_burst_limit = 5000
-    throttling_rate_limit  = 10000
-  }
-
-  tags = var.tags
 }

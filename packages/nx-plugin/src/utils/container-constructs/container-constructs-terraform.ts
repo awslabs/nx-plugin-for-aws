@@ -20,8 +20,8 @@ import type { AddContainerServiceInfraOptions } from './container-constructs.js'
  * `core/container/ecs-service` module (from
  * `files/terraform/core/container/ecs-service/`) and the per-service module
  * under `app/services/<name>/<name>.tf`, which publishes the image to the
- * shared `core/asset-ecr` repository and writes the service URL to runtime
- * config. Existing files are kept, so a second service reuses the core module.
+ * shared `core/asset-ecr` repository. Existing files are kept, so a second
+ * service reuses the core module.
  */
 export const addContainerServiceTerraformModules = async (
   tree: Tree,
@@ -41,14 +41,7 @@ export const addContainerServiceTerraformModules = async (
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'terraform', 'app'),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'app'),
-    // Interim values for the templates that still render a load balancer and
-    // an HTTP API: an internal load balancer and no API.
-    {
-      ...options,
-      ingress: 'private',
-      auth: 'none',
-      ...terraformProviderVersions(),
-    },
+    { ...options, ...terraformProviderVersions() },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },

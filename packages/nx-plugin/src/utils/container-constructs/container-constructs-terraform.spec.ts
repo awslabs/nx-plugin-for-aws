@@ -11,6 +11,8 @@ import { createTreeUsingTsSolutionSetup } from '../test.js';
 import {
   type AddContainerServiceInfraOptions,
   addContainerServiceInfra,
+  type ContainerRuntime,
+  containerHealthCheckCommand,
 } from './container-constructs.js';
 import { addContainerServiceTerraformModules } from './container-constructs-terraform.js';
 
@@ -31,6 +33,11 @@ const CONTRACT_OUTPUTS = [
   'task_role_arn',
   'task_role_name',
   'security_group_id',
+  'log_group_name',
+];
+
+/** Outputs the contract removed. */
+const REMOVED_OUTPUTS = [
   'load_balancer_arn',
   'load_balancer_dns_name',
   'api_id',
@@ -38,7 +45,7 @@ const CONTRACT_OUTPUTS = [
   'url',
 ];
 
-/** Variable names fixed by the contract. */
+/** Variable names fixed by the contract, in declaration order. */
 const CONTRACT_VARIABLES = [
   'service_name',
   'vpc_id',
@@ -54,6 +61,16 @@ const CONTRACT_VARIABLES = [
   'target_cpu_utilization',
   'environment',
   'secrets',
+  'log_retention_days',
+  'task_role_policy_statements',
+  'tags',
+  'image_repository_arn',
+  'container_user',
+  'health_check_command',
+];
+
+/** Variables the contract removed. */
+const REMOVED_VARIABLES = [
   'load_balancer',
   'health_check_path',
   'deregistration_delay',
@@ -61,10 +78,11 @@ const CONTRACT_VARIABLES = [
   'auth',
   'user_pool_id',
   'user_pool_client_ids',
-  'log_retention_days',
-  'task_role_policy_statements',
-  'tags',
+  'cors_allow_origins',
 ];
+
+const NODE_HEALTH_CHECK_LINE = `  health_check_command        = ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||'8080')+'/health',{signal:AbortSignal.timeout(3000)}).then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]`;
+const PYTHON_HEALTH_CHECK_LINE = `  health_check_command        = ["CMD", "python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '8080') + '/health', timeout=3)"]`;
 
 const outputNames = (hcl: string): string[] =>
   [...hcl.matchAll(/^output "([^"]+)" \{/gm)].map(([, name]) => name);
@@ -105,18 +123,9 @@ const BASE_OPTIONS: AddContainerServiceInfraOptions = {
   dockerImageTag: 'proj-orders:latest',
   dockerBuildContextDir: 'dist/packages/svc/orders/docker',
   containerPort: 8080,
-  ingress: 'http-api',
-  auth: 'iam',
+  healthCheckCommand: containerHealthCheckCommand('node'),
   containers: 'docker',
 };
-
-const VARIANTS: Pick<AddContainerServiceInfraOptions, 'ingress' | 'auth'>[] = [
-  { ingress: 'http-api', auth: 'iam' },
-  { ingress: 'http-api', auth: 'cognito' },
-  { ingress: 'http-api', auth: 'none' },
-  // auth is passed but must be ignored for private
-  { ingress: 'private', auth: 'iam' },
-];
 
 describe('addContainerServiceTerraformModules', () => {
   let tree: Tree;
@@ -170,10 +179,12 @@ describe('addContainerServiceTerraformModules', () => {
       expect(core.outputs).toMatchSnapshot('outputs.tf');
     });
 
-    it.each(VARIANTS)(
-      'should render the app module for ingress=$ingress auth=$auth',
-      async (variant) => {
-        await render(variant);
+    it.each<ContainerRuntime>(['node', 'python'])(
+      'should render the app module (%s)',
+      async (runtime) => {
+        await render({
+          healthCheckCommand: containerHealthCheckCommand(runtime),
+        });
 
         expect(tree.exists(APP_FILE)).toBe(true);
         expect(read(APP_FILE)).toMatchSnapshot();
@@ -203,19 +214,84 @@ describe('addContainerServiceTerraformModules', () => {
     expect(readCore()).toEqual(core);
   });
 
-  it('should write the service URL to runtime config under connection.services', async () => {
+  it('should not write to runtime config', async () => {
     await render();
 
-    const [entry] = topLevelBlocks(read(APP_FILE)).filter((block) =>
-      /source\s*=\s*"[^"]*runtime-config\/entry"/.test(block),
+    const app = read(APP_FILE);
+    expect(
+      topLevelBlocks(app).filter((block) =>
+        /source\s*=\s*"[^"]*runtime-config\/entry"/.test(block),
+      ),
+    ).toEqual([]);
+    expect(outputNames(app)).not.toContain('url');
+  });
+
+  it('should render no load balancer, API or inbound rule', async () => {
+    await render();
+
+    for (const contents of [
+      read(CORE_FILES.module),
+      read(CORE_FILES.variables),
+      read(CORE_FILES.outputs),
+      read(APP_FILE),
+    ]) {
+      expect(contents).not.toContain('resource "aws_lb');
+      expect(contents).not.toContain('aws_apigatewayv2_');
+      expect(contents).not.toContain(
+        'resource "aws_vpc_security_group_ingress_rule"',
+      );
+      expect(contents).not.toContain('data "aws_vpc"');
+      expect(contents).not.toContain('cors_configuration');
+    }
+  });
+
+  it.each<[ContainerRuntime, string]>([
+    ['node', NODE_HEALTH_CHECK_LINE],
+    ['python', PYTHON_HEALTH_CHECK_LINE],
+  ])(
+    'should pass the %s health check command to the core module',
+    async (runtime, line) => {
+      await render({
+        healthCheckCommand: containerHealthCheckCommand(runtime),
+      });
+
+      const [ecsService] = blocksOf(read(APP_FILE), 'module "ecs_service"');
+      expect(ecsService.split('\n')).toContain(line);
+      expect(line).not.toContain('${');
+      expect(line).not.toContain('%{');
+    },
+  );
+
+  it('should run the health check command in the container when one is given', async () => {
+    await render();
+
+    const core = read(CORE_FILES.module);
+    const [locals] = blocksOf(core, 'locals {');
+    expect(locals).toContain(
+      'container_health_check = var.health_check_command == null ? {} : {',
     );
-    expect(entry).toBeDefined();
-    expect(entry).toContain('source = "../../../core/runtime-config/entry"');
-    expect(/^\s*namespace\s*=\s*"([^"]+)"\s*$/m.exec(entry)?.[1]).toBe(
-      'connection',
+    for (const line of [
+      'command     = var.health_check_command',
+      'interval    = 30',
+      'timeout     = 5',
+      'retries     = 3',
+      'startPeriod = 30',
+    ]) {
+      expect(locals.split('\n').map((l) => l.trim())).toContain(line);
+    }
+    const [taskDefinition] = blocksOf(
+      core,
+      'resource "aws_ecs_task_definition" "this"',
     );
-    expect(entry).toMatch(/^\s*key\s*=\s*"services"\s*$/m);
-    expect(entry).toContain('"Orders" = module.ecs_service.url');
+    expect(taskDefinition).toContain('container_definitions = jsonencode([');
+    expect(taskDefinition).toContain('merge({');
+    expect(taskDefinition).toContain('}, local.container_health_check)');
+    const [variable] = blocksOf(
+      read(CORE_FILES.variables),
+      'variable "health_check_command"',
+    );
+    expect(variable).toContain('type        = list(string)');
+    expect(variable).toMatch(/^\s*default\s*=\s*null$/m);
   });
 
   it('should give the service RUNTIME_CONFIG_APP_ID and read access to runtime config', async () => {
@@ -254,36 +330,34 @@ describe('addContainerServiceTerraformModules', () => {
     expect(locals).toMatch(/\], var\.task_role_policy_statements\)$/m);
   });
 
-  it.each(VARIANTS)(
-    'should open no security group to the internet for ingress=$ingress auth=$auth',
-    async (variant) => {
-      await render(variant);
+  it('should open no security group, with HTTPS egress only', async () => {
+    await render();
 
-      for (const contents of [read(CORE_FILES.module), read(APP_FILE)]) {
-        const ingressRules = blocksOf(
-          contents,
-          'resource "aws_vpc_security_group_ingress_rule"',
-        );
-        for (const rule of ingressRules) {
-          expect(rule).not.toContain('0.0.0.0/0');
-          expect(rule).not.toContain('::/0');
-        }
-        for (const group of blocksOf(
-          contents,
-          'resource "aws_security_group" ',
-        )) {
-          expect(group).not.toMatch(/^\s*ingress\s*\{/m);
-          expect(group).not.toMatch(/^\s*egress\s*\{/m);
-        }
-      }
+    for (const contents of [read(CORE_FILES.module), read(APP_FILE)]) {
       expect(
-        blocksOf(
-          read(CORE_FILES.module),
-          'resource "aws_vpc_security_group_ingress_rule"',
-        ).length,
-      ).toBeGreaterThan(0);
-    },
-  );
+        blocksOf(contents, 'resource "aws_vpc_security_group_ingress_rule"'),
+      ).toEqual([]);
+      for (const group of blocksOf(
+        contents,
+        'resource "aws_security_group" ',
+      )) {
+        expect(group).not.toMatch(/^\s*ingress\s*\{/m);
+        expect(group).not.toMatch(/^\s*egress\s*\{/m);
+      }
+    }
+    const core = read(CORE_FILES.module);
+    expect(blocksOf(core, 'resource "aws_security_group" ')).toHaveLength(1);
+    const egress = blocksOf(
+      core,
+      'resource "aws_vpc_security_group_egress_rule"',
+    );
+    expect(egress).toHaveLength(1);
+    expect(egress[0]).toContain(
+      'resource "aws_vpc_security_group_egress_rule" "service_https"',
+    );
+    expect(egress[0]).toMatch(/^\s*from_port\s*=\s*443$/m);
+    expect(egress[0]).toMatch(/^\s*to_port\s*=\s*443$/m);
+  });
 
   it('should vend the hardening defaults', async () => {
     await render();
@@ -291,10 +365,10 @@ describe('addContainerServiceTerraformModules', () => {
     const core = read(CORE_FILES.module);
     expect(core).toContain('assign_public_ip = false');
     expect(core).toContain('readonlyRootFilesystem = true');
-    expect(core).toMatch(/^\s*internal\s*=\s*true$/m);
     expect(core).toMatch(/^\s*enable_execute_command\s*=\s*false$/m);
     expect(core).toMatch(/^\s*rollback\s*=\s*true$/m);
     expect(core).toContain('cpu_architecture        = "ARM64"');
+    expect(core).not.toContain('health_check_grace_period_seconds');
   });
 
   it('should manage the Container Insights log group so destroy removes it', async () => {
@@ -360,9 +434,16 @@ describe('addContainerServiceTerraformModules', () => {
     expect(outputNames(core.outputs)).toEqual(CONTRACT_OUTPUTS);
     expect(core.outputs).not.toContain('TODO');
     expect(core.outputs).not.toMatch(/value\s*=\s*null/);
-    expect(variableNames(core.variables)).toEqual(
-      expect.arrayContaining(CONTRACT_VARIABLES),
-    );
+    expect(variableNames(core.variables)).toEqual(CONTRACT_VARIABLES);
+    for (const name of REMOVED_OUTPUTS) {
+      expect(outputNames(core.outputs)).not.toContain(name);
+    }
+    for (const name of REMOVED_VARIABLES) {
+      expect(variableNames(core.variables)).not.toContain(name);
+    }
+    const app = read(APP_FILE);
+    expect(variableNames(app)).not.toContain('user_pool_id');
+    expect(variableNames(app)).not.toContain('user_pool_client_ids');
   });
 
   it('should re-export every core output from the app module', async () => {
@@ -373,61 +454,6 @@ describe('addContainerServiceTerraformModules', () => {
     for (const name of CONTRACT_OUTPUTS) {
       expect(app).toContain(`value       = module.ecs_service.${name}`);
     }
-  });
-
-  describe('variant wiring', () => {
-    it('should pass no auth for private ingress', async () => {
-      await render({ ingress: 'private', auth: 'iam' });
-
-      const app = read(APP_FILE);
-      expect(app).toMatch(/^\s*ingress\s*=\s*"private"$/m);
-      expect(app).not.toMatch(/^\s*auth\s*=/m);
-      expect(app).not.toContain('user_pool_id');
-    });
-
-    it('should take and pass the user pool for cognito', async () => {
-      await render({ auth: 'cognito' });
-
-      const app = read(APP_FILE);
-      expect(variableNames(app)).toEqual(
-        expect.arrayContaining(['user_pool_id', 'user_pool_client_ids']),
-      );
-      expect(app).toMatch(/^\s*auth\s*=\s*"cognito"$/m);
-      expect(app).toMatch(/^\s*user_pool_id\s*=\s*var\.user_pool_id$/m);
-      expect(app).toMatch(
-        /^\s*user_pool_client_ids\s*=\s*var\.user_pool_client_ids$/m,
-      );
-    });
-
-    it.each(['iam', 'none'] as const)(
-      'should take no user pool for auth=%s',
-      async (auth) => {
-        await render({ auth });
-
-        const app = read(APP_FILE);
-        expect(app).toMatch(new RegExp(`^\\s*auth\\s*=\\s*"${auth}"$`, 'm'));
-        expect(app).not.toContain('user_pool_id');
-      },
-    );
-
-    it('should render the same core module for every variant', async () => {
-      const cores = [];
-      for (const variant of VARIANTS) {
-        tree = createTreeUsingTsSolutionSetup();
-        await sharedConstructsGenerator(
-          tree,
-          { iac: 'terraform' },
-          declareDependencies()({ ts: [...SHARED_CONSTRUCTS_DEPENDENCIES] }),
-        );
-        await render(variant);
-        cores.push(readCore());
-      }
-
-      expect(cores[0].module).not.toBe('');
-      for (const core of cores.slice(1)) {
-        expect(core).toEqual(cores[0]);
-      }
-    });
   });
 
   describe('image publish', () => {

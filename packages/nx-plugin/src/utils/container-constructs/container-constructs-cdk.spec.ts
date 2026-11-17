@@ -14,10 +14,10 @@ import {
   sharedConstructsGenerator,
 } from '../shared-constructs.js';
 import { createTreeUsingTsSolutionSetup } from '../test.js';
-import type {
-  AddContainerServiceInfraOptions,
-  ContainerAuth,
-  ContainerIngress,
+import {
+  type AddContainerServiceInfraOptions,
+  type ContainerRuntime,
+  containerHealthCheckCommand,
 } from './container-constructs.js';
 import { addContainerServiceCdkConstructs } from './container-constructs-cdk.js';
 
@@ -43,8 +43,7 @@ const serviceOptions = (
   dockerImageTag: 'proj-orders:latest',
   dockerBuildContextDir: 'dist/apps/shop/bundle/container/orders',
   containerPort: 8080,
-  ingress: 'http-api',
-  auth: 'iam',
+  healthCheckCommand: containerHealthCheckCommand('node'),
   containers: 'docker',
   ...overrides,
 });
@@ -122,15 +121,14 @@ describe('addContainerServiceCdkConstructs', () => {
     expect(readOrThrow(tree, servicePath)).toBe('// edited by the user\n');
   });
 
-  it.each<[string, ContainerIngress, ContainerAuth]>([
-    ['http-api iam', 'http-api', 'iam'],
-    ['http-api cognito', 'http-api', 'cognito'],
-    ['http-api none', 'http-api', 'none'],
-    ['private', 'private', 'none'],
-  ])(
+  it.each<ContainerRuntime>(['node', 'python'])(
     'should match the vended files snapshot (%s)',
-    async (_, ingress, auth) => {
-      const tree = await renderTree(serviceOptions({ ingress, auth }));
+    async (runtime) => {
+      const tree = await renderTree(
+        serviceOptions({
+          healthCheckCommand: containerHealthCheckCommand(runtime),
+        }),
+      );
 
       expect(
         readOrThrow(tree, `${CONSTRUCTS_SRC}/core/container/ecs-service.ts`),
@@ -169,10 +167,13 @@ describe('vended container constructs compile', () => {
   // declarations loaded once.
   const compile = async (format: 'esm' | 'cjs') => {
     const renders: [string, AddContainerServiceInfraOptions][] = [
-      ['iam', serviceOptions()],
-      ['cognito', serviceOptions({ auth: 'cognito' })],
-      ['none', serviceOptions({ auth: 'none' })],
-      ['private', serviceOptions({ ingress: 'private', auth: 'none' })],
+      ['node', serviceOptions()],
+      [
+        'python',
+        serviceOptions({
+          healthCheckCommand: containerHealthCheckCommand('python'),
+        }),
+      ],
     ];
     const formatDir = join(COMPILE_DIR, format);
     mkdirSync(formatDir, { recursive: true });
@@ -227,11 +228,7 @@ interface EcsServiceInstance {
   readonly taskRole: import('aws-cdk-lib/aws-iam').IRole;
   readonly securityGroup: unknown;
   readonly connections: unknown;
-  readonly loadBalancer?: unknown;
-  readonly httpApi?: unknown;
-  readonly url?: string;
-  grantInvoke: (grantee: import('aws-cdk-lib/aws-iam').IGrantable) => unknown;
-  restrictCorsTo: (...origins: string[]) => void;
+  readonly logGroup: import('aws-cdk-lib/aws-logs').ILogGroup;
 }
 
 interface EcsServiceModuleShape {
@@ -275,7 +272,6 @@ describe('EcsService synth', () => {
   let ec2: typeof import('aws-cdk-lib/aws-ec2');
   let ecs: typeof import('aws-cdk-lib/aws-ecs');
   let iam: typeof import('aws-cdk-lib/aws-iam');
-  let cognito: typeof import('aws-cdk-lib/aws-cognito');
   let secretsmanager: typeof import('aws-cdk-lib/aws-secretsmanager');
   let assertions: typeof import('aws-cdk-lib/assertions');
   let EcsServiceModule: EcsServiceModuleShape;
@@ -327,7 +323,6 @@ describe('EcsService synth', () => {
     ec2 = await import('aws-cdk-lib/aws-ec2');
     ecs = await import('aws-cdk-lib/aws-ecs');
     iam = await import('aws-cdk-lib/aws-iam');
-    cognito = await import('aws-cdk-lib/aws-cognito');
     secretsmanager = await import('aws-cdk-lib/aws-secretsmanager');
     assertions = await import('aws-cdk-lib/assertions');
     EcsServiceModule = await import(
@@ -402,10 +397,7 @@ describe('EcsService synth', () => {
     return taskDefinitions[0].Properties;
   };
 
-  const skipIds = (resource: CfnResourceJson): string[] =>
-    (resource.Metadata?.checkov?.skip ?? []).map((s: any) => s.id);
-
-  describe('defaults (http-api, iam)', () => {
+  describe('defaults', () => {
     let env: ReturnType<typeof newService>;
     let out: ReturnType<typeof synth>;
 
@@ -488,58 +480,53 @@ describe('EcsService synth', () => {
       expect(cluster.DependsOn).toContain(logGroupId);
     });
 
-    it('should create an internal load balancer that drops invalid headers', () => {
-      const [[, alb]] = out.ofType('AWS::ElasticLoadBalancingV2::LoadBalancer');
-      expect(alb.Properties.Scheme).toBe('internal');
-      expect(alb.Properties.LoadBalancerAttributes).toContainEqual({
-        Key: 'routing.http.drop_invalid_header_fields.enabled',
-        Value: 'true',
-      });
-      expect(skipIds(alb)).toEqual(['CKV_AWS_91']);
+    it('should create no load balancer, API or inbound rule', () => {
+      expect(
+        Object.values(out.resources)
+          .map((r) => r.Type)
+          .filter(
+            (type) =>
+              type.startsWith('AWS::ElasticLoadBalancingV2::') ||
+              type.startsWith('AWS::ApiGatewayV2::'),
+          ),
+      ).toEqual([]);
+      expect(out.ofType('AWS::EC2::SecurityGroupIngress')).toEqual([]);
+      const serviceSgId = env.stack.resolve(
+        (
+          env.service
+            .securityGroup as import('aws-cdk-lib/aws-ec2').ISecurityGroup
+        ).securityGroupId,
+      )['Fn::GetAtt'][0];
+      expect(
+        out.resources[serviceSgId].Properties.SecurityGroupIngress,
+      ).toBeUndefined();
     });
 
-    it('should register the tasks as IP targets with the health check and deregistration delay', () => {
-      const [[, targetGroup]] = out.ofType(
-        'AWS::ElasticLoadBalancingV2::TargetGroup',
-      );
-      expect(targetGroup.Properties.TargetType).toBe('ip');
-      expect(targetGroup.Properties.Port).toBe(8080);
-      expect(targetGroup.Properties.HealthCheckPath).toBe('/health');
-      expect(targetGroup.Properties.TargetGroupAttributes).toContainEqual({
-        Key: 'deregistration_delay.timeout_seconds',
-        Value: '30',
-      });
+    it('should write nothing to runtime config and add no output', () => {
+      expect(
+        RuntimeConfigModule.RuntimeConfig.ensure(env.stack).get('connection')
+          .services,
+      ).toBeUndefined();
+      expect(
+        Object.keys(out.template.toJSON().Outputs ?? {}).filter((key) =>
+          key.includes('Url'),
+        ),
+      ).toEqual([]);
     });
 
-    it('should listen on HTTP 80 with the checkov skips', () => {
-      const [[, listener]] = out.ofType(
-        'AWS::ElasticLoadBalancingV2::Listener',
-      );
-      expect(listener.Properties.Protocol).toBe('HTTP');
-      expect(listener.Properties.Port).toBe(80);
-      expect(skipIds(listener).sort()).toEqual(['CKV_AWS_103', 'CKV_AWS_2']);
+    it('should run no container health check unless one is passed', () => {
+      const [container] = taskDefinitionOf(out.resources).ContainerDefinitions;
+      expect(container.HealthCheck).toBeUndefined();
     });
 
-    it('should front the load balancer with an HTTP API through a VPC link', () => {
-      expect(out.ofType('AWS::ApiGatewayV2::Api')).toHaveLength(1);
-      expect(out.ofType('AWS::ApiGatewayV2::VpcLink')).toHaveLength(1);
-      const [[, integration]] = out.ofType('AWS::ApiGatewayV2::Integration');
-      expect(integration.Properties.IntegrationType).toBe('HTTP_PROXY');
-      expect(integration.Properties.ConnectionType).toBe('VPC_LINK');
-      const [[, route]] = out.ofType('AWS::ApiGatewayV2::Route');
-      expect(route.Properties.AuthorizationType).toBe('AWS_IAM');
-      const [[, stage]] = out.ofType('AWS::ApiGatewayV2::Stage');
-      expect(stage.Properties.AutoDeploy).toBe(true);
-      expect(stage.Properties.AccessLogSettings.DestinationArn).toBeDefined();
-      expect(stage.Properties.DefaultRouteSettings).toEqual(
-        expect.objectContaining({
-          ThrottlingRateLimit: 10000,
-          ThrottlingBurstLimit: 5000,
-        }),
+    it('should expose the container log group', () => {
+      const [container] = taskDefinitionOf(out.resources).ContainerDefinitions;
+      expect(env.stack.resolve(env.service.logGroup.logGroupName)).toEqual(
+        container.LogConfiguration.Options['awslogs-group'],
       );
     });
 
-    it('should allow no ingress from anywhere, egress 443 only, with a description on every rule', () => {
+    it('should allow no ingress at all, egress 443 only, with a description on every rule', () => {
       const ingress = [
         ...out
           .ofType('AWS::EC2::SecurityGroup')
@@ -548,12 +535,7 @@ describe('EcsService synth', () => {
           .ofType('AWS::EC2::SecurityGroupIngress')
           .map(([, rule]) => rule.Properties),
       ];
-      expect(ingress.length).toBeGreaterThan(0);
-      for (const rule of ingress) {
-        expect(rule.CidrIp).not.toBe('0.0.0.0/0');
-        expect(rule.CidrIpv6).not.toBe('::/0');
-        expect(rule.Description).toBeTruthy();
-      }
+      expect(ingress).toEqual([]);
       const egress = [
         ...out
           .ofType('AWS::EC2::SecurityGroup')
@@ -653,8 +635,8 @@ describe('EcsService synth', () => {
 
     it('should keep logs for a year, encrypted with a rotated KMS key', () => {
       const logGroups = out.ofType('AWS::Logs::LogGroup');
-      // Container logs, HTTP API access logs and Container Insights logs.
-      expect(logGroups).toHaveLength(3);
+      // Container logs and Container Insights logs.
+      expect(logGroups).toHaveLength(2);
       for (const [, logGroup] of logGroups) {
         expect(logGroup.Properties.RetentionInDays).toBe(365);
         expect(logGroup.Properties.KmsKeyId).toBeDefined();
@@ -663,140 +645,27 @@ describe('EcsService synth', () => {
         expect(key.Properties.EnableKeyRotation).toBe(true);
       }
     });
-
-    it('should write the URL to runtime config and as an output', () => {
-      const services = RuntimeConfigModule.RuntimeConfig.ensure(env.stack).get(
-        'connection',
-      ).services;
-      expect(Object.keys(services)).toEqual(['Orders']);
-      expect(services.Orders).toBe(env.service.url);
-      const [[, hostedConfiguration]] = out
-        .ofType('AWS::AppConfig::HostedConfigurationVersion')
-        .filter(([id]) => id.includes('connection'));
-      expect(JSON.stringify(hostedConfiguration.Properties.Content)).toContain(
-        '\\"Orders\\"',
-      );
-      expect(Object.keys(out.template.toJSON().Outputs)).toContainEqual(
-        expect.stringContaining('OrdersUrl'),
-      );
-    });
-
-    it('should grant execute-api:Invoke on the API', () => {
-      const { stack, service } = newService();
-      const role = new iam.Role(stack, 'Caller', {
-        assumedBy: new iam.AccountRootPrincipal(),
-      });
-      service.grantInvoke(role);
-      const { resources } = synth(stack);
-      const statements = policyStatementsForRole(
-        resources,
-        stack.resolve(role.roleName).Ref,
-      );
-      expect(statements).toHaveLength(1);
-      expect(statements[0].Action).toBe('execute-api:Invoke');
-      expect(JSON.stringify(statements[0].Resource)).toContain(':execute-api:');
-    });
   });
 
-  it('should use a Cognito JWT authorizer, and refuse grantInvoke', () => {
-    const env = newStack();
-    const userPool = new cognito.UserPool(env.stack, 'UserPool');
-    const userPoolClient = userPool.addClient('Client');
-    const { service } = newService(
-      { auth: { type: 'cognito', userPool, userPoolClient } },
-      env,
-    );
-    const { ofType } = synth(env.stack);
-
-    const [[, route]] = ofType('AWS::ApiGatewayV2::Route');
-    expect(route.Properties.AuthorizationType).toBe('JWT');
-    const [[, authorizer]] = ofType('AWS::ApiGatewayV2::Authorizer');
-    expect(authorizer.Properties.JwtConfiguration.Audience).toEqual([
-      env.stack.resolve(userPoolClient.userPoolClientId),
-    ]);
-    expect(() => service.grantInvoke(new iam.AccountRootPrincipal())).toThrow(
-      /grantInvoke needs an HTTP API with IAM auth \(service Orders\)/,
-    );
-  });
-
-  it('should leave the API open with auth none, and refuse grantInvoke', () => {
-    const { stack, service } = newService({ auth: { type: 'none' } });
-    const { ofType } = synth(stack);
-
-    const [[, route]] = ofType('AWS::ApiGatewayV2::Route');
-    expect(route.Properties.AuthorizationType).toBe('NONE');
-    expect(ofType('AWS::ApiGatewayV2::Authorizer')).toEqual([]);
-    expect(() => service.grantInvoke(new iam.AccountRootPrincipal())).toThrow(
-      /grantInvoke needs an HTTP API with IAM auth/,
-    );
-  });
-
-  it('should restrict CORS to the given origins', () => {
-    const { stack, service } = newService();
-    service.restrictCorsTo('https://example.com');
-    const { ofType } = synth(stack);
-
-    const [[, api]] = ofType('AWS::ApiGatewayV2::Api');
-    expect(api.Properties.CorsConfiguration.AllowOrigins).toEqual([
-      'https://example.com',
-    ]);
-    expect(api.Properties.CorsConfiguration.AllowHeaders).toContain(
-      'x-amz-security-token',
-    );
-  });
-
-  it('should reach a private service only from inside the VPC', () => {
-    const { stack, vpc, service } = newService({ ingress: 'private' });
-    const { ofType, resources } = synth(stack);
-
-    expect(
-      Object.values(resources).filter((r) =>
-        r.Type.startsWith('AWS::ApiGatewayV2::'),
-      ),
-    ).toEqual([]);
-    const albSgId = stack.resolve(
-      (
-        service.loadBalancer as import('aws-cdk-lib/aws-elasticloadbalancingv2').ApplicationLoadBalancer
-      ).connections.securityGroups[0].securityGroupId,
-    )['Fn::GetAtt'][0];
-    expect(resources[albSgId].Properties.SecurityGroupIngress).toEqual([
-      {
-        CidrIp: stack.resolve(vpc.vpcCidrBlock),
-        Description: 'HTTP from inside the VPC',
-        FromPort: 80,
-        IpProtocol: 'tcp',
-        ToPort: 80,
+  it('should pass the health check to the container', () => {
+    const { stack } = newService({
+      healthCheck: {
+        command: ['CMD', 'true'],
+        interval: cdkLib.Duration.seconds(10),
+        retries: 2,
       },
-    ]);
-    expect(ofType('AWS::ElasticLoadBalancingV2::LoadBalancer')).toHaveLength(1);
-    const services =
-      RuntimeConfigModule.RuntimeConfig.ensure(stack).get(
-        'connection',
-      ).services;
-    expect(JSON.stringify(stack.resolve(services.Orders))).toContain('http://');
-  });
-
-  it('should run a worker with no load balancer, API or URL', () => {
-    const { stack, service } = newService({ loadBalancer: false });
-    const { resources, template } = synth(stack);
+    });
+    const { resources } = synth(stack);
 
     expect(
-      Object.values(resources).filter(
-        (r) =>
-          r.Type.startsWith('AWS::ElasticLoadBalancingV2::') ||
-          r.Type.startsWith('AWS::ApiGatewayV2::'),
-      ),
-    ).toEqual([]);
-    expect(service.url).toBeUndefined();
-    expect(service.loadBalancer).toBeUndefined();
-    expect(service.httpApi).toBeUndefined();
-    expect(Object.keys(template.toJSON().Outputs ?? {})).not.toContainEqual(
-      expect.stringContaining('Url'),
-    );
-    expect(
-      RuntimeConfigModule.RuntimeConfig.ensure(stack).get('connection')
-        .services,
-    ).toBeUndefined();
+      taskDefinitionOf(resources).ContainerDefinitions[0].HealthCheck,
+    ).toEqual({
+      Command: ['CMD', 'true'],
+      Interval: 10,
+      Retries: 2,
+      // CDK's default timeout.
+      Timeout: 5,
+    });
   });
 
   it('should use a public image URI as is, with no asset', () => {
@@ -930,7 +799,6 @@ describe('EcsService synth', () => {
       vpc: env.vpc,
       cluster,
       image: { directory: IMAGE_DIR },
-      ingress: 'private',
     });
     const { ofType } = synth(env.stack);
 
@@ -945,11 +813,9 @@ describe('EcsService synth', () => {
       ),
     ).toHaveLength(0);
     expect(
-      Object.keys(
-        RuntimeConfigModule.RuntimeConfig.ensure(env.stack).get('connection')
-          .services,
-      ).sort(),
-    ).toEqual(['One', 'Two']);
+      RuntimeConfigModule.RuntimeConfig.ensure(env.stack).get('connection')
+        .services,
+    ).toBeUndefined();
   });
 
   describe('service construct', () => {
@@ -963,6 +829,39 @@ describe('EcsService synth', () => {
       });
       return { ...env, service, out: synth(env.stack) };
     };
+
+    it('should run the vended node health check inside the container', () => {
+      const { out } = newOrders();
+
+      expect(
+        taskDefinitionOf(out.resources).ContainerDefinitions[0].HealthCheck,
+      ).toEqual({
+        Command: [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:'+(process.env.PORT||'8080')+'/health',{signal:AbortSignal.timeout(3000)}).then(r=>process.exit(r.ok?0:1),()=>process.exit(1))",
+        ],
+        Interval: 30,
+        Timeout: 5,
+        Retries: 3,
+        StartPeriod: 30,
+      });
+    });
+
+    it('should let a healthCheck prop replace the vended health check', () => {
+      const { out } = newOrders({ healthCheck: { command: ['CMD', 'true'] } });
+
+      expect(
+        taskDefinitionOf(out.resources).ContainerDefinitions[0].HealthCheck,
+      ).toEqual({
+        Command: ['CMD', 'true'],
+        // CDK's defaults; no StartPeriod, so nothing of the vended check is left.
+        Interval: 30,
+        Retries: 3,
+        Timeout: 5,
+      });
+    });
 
     it('should pass RUNTIME_CONFIG_APP_ID to the container', () => {
       const { stack, out } = newOrders({ environment: { FOO: 'bar' } });
@@ -1027,25 +926,5 @@ describe('EcsService synth', () => {
         }),
       );
     });
-  });
-
-  it.each<[string, Record<string, unknown>, RegExp]>([
-    [
-      'ingress without a load balancer',
-      { loadBalancer: false, ingress: 'http-api' },
-      /ingress and auth need a load balancer \(service Orders\)/,
-    ],
-    [
-      'auth without a load balancer',
-      { loadBalancer: false, auth: { type: 'iam' } },
-      /ingress and auth need a load balancer \(service Orders\)/,
-    ],
-    [
-      'auth with private ingress',
-      { ingress: 'private', auth: { type: 'iam' } },
-      /auth needs ingress 'http-api' \(service Orders\)/,
-    ],
-  ])('should reject %s', (_, props, message) => {
-    expect(() => newService(props)).toThrow(message);
   });
 });

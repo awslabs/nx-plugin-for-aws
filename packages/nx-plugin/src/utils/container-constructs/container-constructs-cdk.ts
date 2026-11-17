@@ -32,14 +32,7 @@ export const addContainerServiceCdkConstructs = async (
     SHARED_CONSTRUCTS_DIR,
     'src',
   );
-  // Interim values for the templates that still render a load balancer and
-  // an HTTP API: an internal load balancer and no API.
-  const templateVars = {
-    ...options,
-    ingress: 'private',
-    auth: 'none',
-    ...esmVars(tree),
-  };
+  const templateVars = { ...options, ...esmVars(tree) };
 
   generateFiles(
     tree,
