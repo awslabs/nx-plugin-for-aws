@@ -19,37 +19,21 @@ import {
 import { addContainerServiceCdkConstructs } from './container-constructs-cdk.js';
 import { addContainerServiceTerraformModules } from './container-constructs-terraform.js';
 
-/** The compute a container service runs on. `none` vends no infrastructure. */
-export type ContainerInfra = 'ecs' | 'none';
-
 /**
- * How callers reach a container service.
- *
- * `http-api` fronts an internal Application Load Balancer with an API Gateway
- * HTTP API through a VPC link. `private` vends only the internal load balancer,
- * for callers inside the VPC.
+ * The compute a container service runs on. `ecs` runs it as a private Amazon
+ * ECS service on AWS Fargate, with no load balancer and no inbound rule on its
+ * security group. `none` vends no infrastructure.
  */
-export type ContainerIngress = 'http-api' | 'private';
-
-/** How the HTTP API in front of a service authenticates (`http-api` only). */
-export type ContainerAuth = 'iam' | 'cognito' | 'none';
+export type ContainerInfra = 'ecs' | 'none';
 
 /** Port the vended server listens on inside the container (`PORT`). */
 export const CONTAINER_PORT = 8080;
 
-/** Path the load balancer target group health check calls. */
+/** Path the vended server answers health checks on. */
 export const CONTAINER_HEALTH_CHECK_PATH = '/health';
 
-/**
- * Runtime-config namespace and key a deployed service's URL is written under,
- * as `connection.services.<NameClassName>`, the same shape API URLs use
- * (`connection.apis.<ApiNameClassName>`).
- */
-export const CONTAINER_RUNTIME_CONFIG_NAMESPACE = 'connection';
-export const CONTAINER_RUNTIME_CONFIG_KEY = 'services';
-
 export interface AddContainerServiceInfraOptions {
-  /** PascalCase service name: class names and the runtime-config key. */
+  /** PascalCase service name: class names. */
   nameClassName: string;
   /** kebab-case service name: file names, module names, resource names. */
   nameKebabCase: string;
@@ -64,8 +48,6 @@ export interface AddContainerServiceInfraOptions {
   dockerBuildContextDir: string;
   /** Port the server listens on inside the container. */
   containerPort: number;
-  ingress: ContainerIngress;
-  auth: ContainerAuth;
   containers: Containers;
 }
 

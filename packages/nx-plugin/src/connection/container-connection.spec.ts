@@ -4,13 +4,13 @@
  */
 import type { ProjectConfiguration } from '@nx/devkit';
 import { describe, expect, it } from 'vitest';
-import { CONNECTION_CONSTRAINTS } from '../../../connection/scaffold-catalog.js';
 import {
   assertContainerConnectionConstraints,
   containerServiceNames,
   resolveContainerComponent,
   terraformRolePolicy,
 } from './container-connection.js';
+import { CONNECTION_CONSTRAINTS } from './scaffold-catalog.js';
 
 const container = (overrides: Record<string, unknown> = {}) => ({
   generator: 'ts#container',

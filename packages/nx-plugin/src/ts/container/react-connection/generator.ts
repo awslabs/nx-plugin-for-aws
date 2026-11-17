@@ -10,6 +10,11 @@ import {
   OverwriteStrategy,
   type Tree,
 } from '@nx/devkit';
+import {
+  assertContainerConnectionConstraints,
+  containerServiceNames,
+  resolveContainerComponent,
+} from '../../../connection/container-connection.js';
 import { addContainerServiceTargetToLocalDev } from '../../../connection/local-dev.js';
 import { addTsDependencies } from '../../../utils/add-dependencies.js';
 import { declareDependencies } from '../../../utils/declared-dependencies.js';
@@ -25,11 +30,6 @@ import {
 import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { toProjectRelativePath } from '../../../utils/paths.js';
 import { runtimeConfigGenerator } from '../../react-website/runtime-config/generator.js';
-import {
-  assertContainerConnectionConstraints,
-  containerServiceNames,
-  resolveContainerComponent,
-} from './container-connection.js';
 import type { TsContainerReactConnectionGeneratorSchema } from './schema';
 import { reactContainerWiringMessage } from './wiring.js';
 

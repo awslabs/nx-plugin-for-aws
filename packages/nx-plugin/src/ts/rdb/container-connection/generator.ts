@@ -11,6 +11,11 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import {
+  assertContainerConnectionConstraints,
+  containerServiceNames,
+  resolveContainerComponent,
+} from '../../../connection/container-connection.js';
 import { formatFilesInSubtree } from '../../../utils/format.js';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';
 import {
@@ -22,11 +27,6 @@ import {
 } from '../../../utils/nx.js';
 import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { toProjectRelativePath } from '../../../utils/paths.js';
-import {
-  assertContainerConnectionConstraints,
-  containerServiceNames,
-  resolveContainerComponent,
-} from '../../container/react-connection/container-connection.js';
 import { injectRdsCaBundleIntoDockerfile } from '../utils.js';
 import type { TsRdbContainerConnectionGeneratorSchema } from './schema';
 import { dataStoreNames, rdbContainerWiringMessage } from './wiring.js';

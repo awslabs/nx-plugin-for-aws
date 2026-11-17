@@ -2,11 +2,11 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import type { ContainerServiceNames } from './container-connection.js';
+import type { ContainerServiceNames } from '../../../connection/container-connection.js';
 import {
   executeApiInvokeStatement,
   terraformRolePolicy,
-} from './container-connection.js';
+} from '../../../connection/container-connection.js';
 
 type Names = Pick<
   ContainerServiceNames,

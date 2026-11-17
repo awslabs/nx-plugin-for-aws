@@ -17,7 +17,6 @@ import {
   CONTAINER_PORT,
 } from '../../utils/container-constructs/container-constructs.js';
 import type { ContainerMetadata } from '../../utils/container-constructs/container-metadata.js';
-import { resolveContainerOptions } from '../../utils/container-constructs/container-metadata.js';
 import { resolveContainers } from '../../utils/containers.js';
 import {
   declareDependencies,
@@ -116,9 +115,8 @@ export const pyContainerGenerator = async (
   const sourceDir = joinPathFragments(project.sourceRoot, nameSnakeCase);
   const moduleName = project.sourceRoot.split('/').pop();
 
-  const resolved = resolveContainerOptions(options);
-  const iac =
-    resolved.infra === 'ecs' ? await resolveIac(tree, options.iac) : undefined;
+  const infra = options.infra ?? 'ecs';
+  const iac = infra === 'ecs' ? await resolveIac(tree, options.iac) : undefined;
 
   const port = assignPort(tree, project, 8081, {
     component: { info: PY_CONTAINER_GENERATOR_INFO, name: targetPrefix },
@@ -214,7 +212,7 @@ export const pyContainerGenerator = async (
     targets: sortObjectKeys(project.targets),
   });
 
-  if (resolved.infra === 'ecs') {
+  if (infra === 'ecs') {
     await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
     await addContainerServiceInfra(tree, {
       nameClassName,
@@ -223,18 +221,13 @@ export const pyContainerGenerator = async (
       dockerImageTag,
       dockerBuildContextDir,
       containerPort: CONTAINER_PORT,
-      ingress: resolved.ingress,
-      // A private service has no HTTP API to authenticate.
-      auth: resolved.auth ?? 'none',
       containers,
       iac,
     });
   }
 
   const metadata: PyContainerMetadata = {
-    infra: resolved.infra,
-    ...(resolved.ingress ? { ingress: resolved.ingress } : {}),
-    ...(resolved.auth ? { auth: resolved.auth } : {}),
+    infra,
     port,
     rc: nameClassName,
     ...(iac ? { iac } : {}),

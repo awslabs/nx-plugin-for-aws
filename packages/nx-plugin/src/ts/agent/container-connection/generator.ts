@@ -11,6 +11,11 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import {
+  assertContainerConnectionConstraints,
+  containerServiceNames,
+  resolveContainerComponent,
+} from '../../../connection/container-connection.js';
 import { addTsDependencies } from '../../../utils/add-dependencies.js';
 import {
   AGENT_CONNECTION_DEPENDENCIES,
@@ -35,11 +40,6 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
 import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
-import {
-  assertContainerConnectionConstraints,
-  containerServiceNames,
-  resolveContainerComponent,
-} from '../../container/react-connection/container-connection.js';
 import type { TsAgentContainerConnectionGeneratorSchema } from './schema';
 import { agentContainerWiringMessage } from './wiring.js';
 

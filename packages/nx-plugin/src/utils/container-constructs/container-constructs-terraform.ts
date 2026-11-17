@@ -41,7 +41,14 @@ export const addContainerServiceTerraformModules = async (
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'terraform', 'app'),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'app'),
-    { ...options, ...terraformProviderVersions() },
+    // Interim values for the templates that still render a load balancer and
+    // an HTTP API: an internal load balancer and no API.
+    {
+      ...options,
+      ingress: 'private',
+      auth: 'none',
+      ...terraformProviderVersions(),
+    },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },

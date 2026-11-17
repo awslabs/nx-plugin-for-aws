@@ -11,12 +11,12 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { agentContainerWiringMessage } from '../../../ts/agent/container-connection/wiring.js';
 import {
   assertContainerConnectionConstraints,
   containerServiceNames,
   resolveContainerComponent,
-} from '../../../ts/container/react-connection/container-connection.js';
+} from '../../../connection/container-connection.js';
+import { agentContainerWiringMessage } from '../../../ts/agent/container-connection/wiring.js';
 import { addPyDependencies } from '../../../utils/add-dependencies.js';
 import {
   AGENT_CONNECTION_PY_DEPENDENCIES,

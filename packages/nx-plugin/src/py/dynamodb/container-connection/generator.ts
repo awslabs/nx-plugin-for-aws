@@ -12,7 +12,7 @@ import {
   assertContainerConnectionConstraints,
   containerServiceNames,
   resolveContainerComponent,
-} from '../../../ts/container/react-connection/container-connection.js';
+} from '../../../connection/container-connection.js';
 import { formatFilesInSubtree } from '../../../utils/format.js';
 import { installDependencies } from '../../../utils/install.js';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';

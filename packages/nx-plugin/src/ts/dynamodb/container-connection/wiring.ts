@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { terraformRolePolicy } from '../../container/react-connection/container-connection.js';
+import { terraformRolePolicy } from '../../../connection/container-connection.js';
 import type {
   DataStoreNames,
   ServiceWiringNames,

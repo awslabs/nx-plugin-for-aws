@@ -477,7 +477,7 @@ export const internalTestMatrixGenerator = async (
     ...projectDefaults,
   });
 
-  // Container services on ECS: the default HTTP API ingress, and a private one.
+  // Container services on ECS, one per language.
   await tsContainerGenerator(tree, {
     project: 'ts-project',
     name: 'my-ts-container',
@@ -487,7 +487,6 @@ export const internalTestMatrixGenerator = async (
   await pyContainerGenerator(tree, {
     project: 'py_project',
     name: 'my-py-container',
-    ingress: 'private',
     iac: 'inherit',
     ...defaults,
   });

@@ -20,7 +20,6 @@ import {
   CONTAINER_PORT,
 } from '../../utils/container-constructs/container-constructs.js';
 import type { ContainerMetadata } from '../../utils/container-constructs/container-metadata.js';
-import { resolveContainerOptions } from '../../utils/container-constructs/container-metadata.js';
 import { resolveContainers } from '../../utils/containers.js';
 import {
   declareDependencies,
@@ -57,12 +56,7 @@ import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs.js';
-import {
-  type IacMetadata,
-  PACKAGES_DIR,
-  SHARED_CONSTRUCTS_DIR,
-  SHARED_TERRAFORM_DIR,
-} from '../../utils/shared-constructs-constants.js';
+import type { IacMetadata } from '../../utils/shared-constructs-constants.js';
 import { BASE_IMAGES } from '../../utils/versions.js';
 import type { TsContainerGeneratorSchema } from './schema';
 
@@ -121,9 +115,8 @@ export const tsContainerGenerator = async (
     sourceDirRelativeToProjectRoot,
   );
 
-  const resolved = resolveContainerOptions(options);
-  const iac =
-    resolved.infra === 'ecs' ? await resolveIac(tree, options.iac) : undefined;
+  const infra = options.infra ?? 'ecs';
+  const iac = infra === 'ecs' ? await resolveIac(tree, options.iac) : undefined;
 
   const port = assignPort(tree, project, 8081, {
     component: { info: TS_CONTAINER_GENERATOR_INFO, name: targetPrefix },
@@ -197,7 +190,7 @@ export const tsContainerGenerator = async (
     DEPENDENCIES,
   );
 
-  if (resolved.infra === 'ecs' && iac) {
+  if (infra === 'ecs' && iac) {
     await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
     await addContainerServiceInfra(tree, {
       nameClassName,
@@ -206,9 +199,6 @@ export const tsContainerGenerator = async (
       dockerImageTag,
       dockerBuildContextDir: bundleOutputDir,
       containerPort: CONTAINER_PORT,
-      ingress: resolved.ingress ?? 'http-api',
-      // Read only with http-api; private ingress has no auth.
-      auth: resolved.auth ?? 'none',
       containers,
       iac,
     });
@@ -237,9 +227,7 @@ export const tsContainerGenerator = async (
   });
 
   const metadata: TsContainerMetadata = {
-    infra: resolved.infra,
-    ...(resolved.ingress ? { ingress: resolved.ingress } : {}),
-    ...(resolved.auth ? { auth: resolved.auth } : {}),
+    infra,
     port,
     rc: nameClassName,
     ...(iac ? { iac } : {}),
@@ -259,7 +247,7 @@ export const tsContainerGenerator = async (
     targetPrefix,
     metadata,
   );
-  if (recorded?.infra === 'none' && resolved.infra === 'ecs') {
+  if (recorded?.infra === 'none' && infra === 'ecs') {
     // Escalating from infra=none: record what the infrastructure was built with.
     updateComponentGeneratorMetadata(
       tree,
@@ -268,19 +256,8 @@ export const tsContainerGenerator = async (
       targetPrefix,
       {
         infra: metadata.infra,
-        ingress: metadata.ingress,
-        ...(metadata.auth ? { auth: metadata.auth } : {}),
         iac: metadata.iac,
       },
-    );
-  } else if (
-    recorded?.infra === 'ecs' &&
-    resolved.infra === 'ecs' &&
-    (recorded.ingress !== resolved.ingress || recorded.auth !== resolved.auth)
-  ) {
-    console.warn(
-      `Warning: ${targetPrefix} was generated with ingress ${recorded.ingress}${recorded.auth ? ` and auth ${recorded.auth}` : ''}. ` +
-        `Re-running does not change it; edit ${serviceInfraPath(recorded.iac, name)} instead`,
     );
   }
 
@@ -292,27 +269,6 @@ export const tsContainerGenerator = async (
       languages: ['typescript'],
     });
 };
-
-/** The user-owned file that sets a service's ingress and auth. */
-const serviceInfraPath = (iac: string | undefined, name: string) =>
-  iac === 'terraform'
-    ? joinPathFragments(
-        PACKAGES_DIR,
-        SHARED_TERRAFORM_DIR,
-        'src',
-        'app',
-        'services',
-        name,
-        `${name}.tf`,
-      )
-    : joinPathFragments(
-        PACKAGES_DIR,
-        SHARED_CONSTRUCTS_DIR,
-        'src',
-        'app',
-        'services',
-        `${name}.ts`,
-      );
 
 /** The metadata a previous run recorded for this component, if any. */
 const recordedMetadata = (

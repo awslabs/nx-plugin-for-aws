@@ -2,14 +2,15 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+
+import type { ContainerServiceNames } from '../../../connection/container-connection.js';
+import { terraformRolePolicy } from '../../../connection/container-connection.js';
 import {
   camelCase,
   kebabCase,
   snakeCase,
   toClassName,
 } from '../../../utils/names.js';
-import type { ContainerServiceNames } from '../../container/react-connection/container-connection.js';
-import { terraformRolePolicy } from '../../container/react-connection/container-connection.js';
 
 export interface DataStoreNames {
   /** PascalCase: the data construct's class, eg `MyDatabase`. */

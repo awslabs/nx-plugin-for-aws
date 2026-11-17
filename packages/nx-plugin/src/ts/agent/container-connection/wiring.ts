@@ -2,9 +2,10 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+
+import type { ContainerServiceNames } from '../../../connection/container-connection.js';
+import { executeApiInvokeStatement } from '../../../connection/container-connection.js';
 import { camelCase, kebabCase, snakeCase } from '../../../utils/names.js';
-import type { ContainerServiceNames } from '../../container/react-connection/container-connection.js';
-import { executeApiInvokeStatement } from '../../container/react-connection/container-connection.js';
 
 export interface AgentContainerWiringNames
   extends Pick<

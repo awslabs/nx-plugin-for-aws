@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { joinPathFragments, type ProjectConfiguration } from '@nx/devkit';
+import { camelCase, kebabCase, snakeCase } from '../utils/names.js';
+import type { ComponentMetadata } from '../utils/nx.js';
 import {
   CONNECTION_CONSTRAINTS,
   type ConnectionConstraint,
-} from '../../../connection/scaffold-catalog.js';
-import { camelCase, kebabCase, snakeCase } from '../../../utils/names.js';
-import type { ComponentMetadata } from '../../../utils/nx.js';
+} from './scaffold-catalog.js';
 
 /** The generators whose components are container services. */
 export const CONTAINER_GENERATOR_IDS = ['ts#container', 'py#container'];
