@@ -401,37 +401,6 @@ const GATEWAY_TO_AGENT: readonly ConnectionConstraint[] = [
   },
 ];
 
-// A website and an agent reach a container service through its HTTP API; an
-// internal load balancer (`private`) or no infrastructure leaves nothing they
-// can call.
-const CALLER_TO_CONTAINER: readonly ConnectionConstraint[] = [
-  {
-    side: 'target',
-    option: 'infra',
-    equals: 'ecs',
-    reason:
-      'A container service is reached through the infrastructure ecs vends.',
-  },
-  {
-    side: 'target',
-    option: 'ingress',
-    equals: 'http-api',
-    reason:
-      'A website or agent reaches a container service through its HTTP API. A private service is reachable only from inside its VPC.',
-  },
-];
-
-const AGENT_TO_CONTAINER: readonly ConnectionConstraint[] = [
-  ...CALLER_TO_CONTAINER,
-  {
-    side: 'target',
-    option: 'auth',
-    equals: 'iam',
-    reason:
-      'An agent signs its request to a container service with IAM from its own role.',
-  },
-];
-
 // The grants and security group rules a container service needs are attached
 // to its ECS task role and task security group, which exist only with ecs.
 const CONTAINER_TO_DATA: readonly ConnectionConstraint[] = [
@@ -509,12 +478,6 @@ export const CONNECTION_CONSTRAINTS = {
     },
   ],
   // Container services (ts#container / py#container)
-  'ts#react-website -> ts#container': CALLER_TO_CONTAINER,
-  'ts#react-website -> py#container': CALLER_TO_CONTAINER,
-  'ts#agent -> ts#container': AGENT_TO_CONTAINER,
-  'ts#agent -> py#container': AGENT_TO_CONTAINER,
-  'py#agent -> ts#container': AGENT_TO_CONTAINER,
-  'py#agent -> py#container': AGENT_TO_CONTAINER,
   'ts#container -> ts#rdb': CONTAINER_TO_DATA,
   'py#container -> py#rdb': CONTAINER_TO_DATA,
   'ts#container -> ts#dynamodb': CONTAINER_TO_DATA,

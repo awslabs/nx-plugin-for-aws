@@ -6,11 +6,66 @@ import type { ProjectConfiguration } from '@nx/devkit';
 import { describe, expect, it } from 'vitest';
 import {
   assertContainerConnectionConstraints,
+  CONTAINER_GENERATOR_IDS,
   containerServiceNames,
   resolveContainerComponent,
   terraformRolePolicy,
 } from './container-connection.js';
 import { CONNECTION_CONSTRAINTS } from './scaffold-catalog.js';
+import { SUPPORTED_CONNECTIONS } from './supported-connections.js';
+
+const CONTAINER_DATA_CONNECTIONS = [
+  'py#container -> py#dynamodb',
+  'py#container -> py#rdb',
+  'ts#container -> ts#dynamodb',
+  'ts#container -> ts#rdb',
+];
+
+describe('container connection registry', () => {
+  it('keeps only the four container data connections', () => {
+    expect(
+      SUPPORTED_CONNECTIONS.filter(
+        ({ source, target }) =>
+          CONTAINER_GENERATOR_IDS.includes(source) ||
+          CONTAINER_GENERATOR_IDS.includes(target),
+      )
+        .map(({ source, target }) => `${source} -> ${target}`)
+        .sort(),
+    ).toEqual(CONTAINER_DATA_CONNECTIONS);
+  });
+
+  it('constrains each kept pair to a source with infra ecs', () => {
+    const entries = Object.entries(CONNECTION_CONSTRAINTS).filter(([key]) =>
+      key.includes('#container'),
+    );
+    expect(entries.map(([key]) => key).sort()).toEqual(
+      CONTAINER_DATA_CONNECTIONS,
+    );
+    for (const [, constraints] of entries) {
+      expect(constraints).toEqual([
+        expect.objectContaining({
+          side: 'source',
+          option: 'infra',
+          equals: 'ecs',
+        }),
+      ]);
+    }
+  });
+
+  it('exports only the shared container helpers', async () => {
+    expect(
+      Object.keys(await import('./container-connection.js')).sort(),
+    ).toEqual(
+      [
+        'CONTAINER_GENERATOR_IDS',
+        'assertContainerConnectionConstraints',
+        'containerServiceNames',
+        'resolveContainerComponent',
+        'terraformRolePolicy',
+      ].sort(),
+    );
+  });
+});
 
 const container = (overrides: Record<string, unknown> = {}) => ({
   generator: 'ts#container',
@@ -19,8 +74,6 @@ const container = (overrides: Record<string, unknown> = {}) => ({
   port: 8083,
   rc: 'Orders',
   infra: 'ecs',
-  ingress: 'http-api',
-  auth: 'iam',
   iac: 'cdk',
   ...overrides,
 });
@@ -34,65 +87,6 @@ const reasonOf = (key: string, option: string) =>
   )[key].find((c) => c.option === option)?.reason as string;
 
 describe('assertContainerConnectionConstraints', () => {
-  describe('caller to container', () => {
-    const key = 'ts#react-website -> ts#container';
-
-    it('accepts an ecs service behind an HTTP API', () => {
-      expect(() =>
-        assertContainerConnectionConstraints(key, { target: container() }),
-      ).not.toThrow();
-    });
-
-    it.each([
-      ['infra', { infra: 'none', ingress: undefined, auth: undefined }],
-      ['ingress', { ingress: 'private', auth: undefined }],
-    ])('rejects a service whose %s breaks the catalog', (option, values) => {
-      expect(() =>
-        assertContainerConnectionConstraints(key, {
-          target: container(values),
-        }),
-      ).toThrow(reasonOf(key, option));
-    });
-
-    it('treats a missing ingress as a violation', () => {
-      expect(() =>
-        assertContainerConnectionConstraints(key, {
-          target: container({ ingress: undefined }),
-        }),
-      ).toThrow(reasonOf(key, 'ingress'));
-    });
-
-    it('names both ends in the message', () => {
-      expect(() =>
-        assertContainerConnectionConstraints(
-          key,
-          { target: container({ ingress: 'private' }) },
-          { source: 'website', target: 'svc (orders)' },
-        ),
-      ).toThrow(/^Cannot connect website to svc \(orders\): /);
-    });
-  });
-
-  describe('agent to container', () => {
-    const key = 'py#agent -> py#container';
-
-    it('accepts an IAM service', () => {
-      expect(() =>
-        assertContainerConnectionConstraints(key, {
-          target: container({ generator: 'py#container' }),
-        }),
-      ).not.toThrow();
-    });
-
-    it.each(['cognito', 'none'])('rejects a service with %s auth', (auth) => {
-      expect(() =>
-        assertContainerConnectionConstraints(key, {
-          target: container({ generator: 'py#container', auth }),
-        }),
-      ).toThrow(reasonOf(key, 'auth'));
-    });
-  });
-
   describe('container to data', () => {
     const key = 'ts#container -> ts#rdb';
 
@@ -108,6 +102,16 @@ describe('assertContainerConnectionConstraints', () => {
           source: container({ infra: 'none' }),
         }),
       ).toThrow(reasonOf(key, 'infra'));
+    });
+
+    it('names both ends in the message', () => {
+      expect(() =>
+        assertContainerConnectionConstraints(
+          key,
+          { source: container({ infra: 'none' }) },
+          { source: 'svc (orders)', target: 'db' },
+        ),
+      ).toThrow(/^Cannot connect svc \(orders\) to db: /);
     });
   });
 
@@ -169,7 +173,7 @@ describe('containerServiceNames', () => {
   it('derives the names from the component metadata', () => {
     expect(
       containerServiceNames(
-        { name: 'svc', root: 'packages/svc' },
+        { root: 'packages/svc' },
         container({ rc: 'MyProjectService', name: 'service', port: 8090 }),
       ),
     ).toEqual({
@@ -189,27 +193,27 @@ describe('terraformRolePolicy', () => {
   it('formats an aws_iam_role_policy for the given role', () => {
     expect(
       terraformRolePolicy({
-        label: 'my_service_invoke',
-        role: 'module.user_identity.authenticated_role_name',
+        label: 'orders_my_table_access',
+        role: 'module.orders.task_role_name',
         statements: [
           `{
   Effect   = "Allow"
-  Action   = ["execute-api:Invoke"]
-  Resource = ["\${module.my_service.api_execution_arn}/*"]
+  Action   = ["dynamodb:GetItem"]
+  Resource = [module.my_table.table_arn]
 },`,
         ],
       }),
-    ).toBe(`resource "aws_iam_role_policy" "my_service_invoke" {
-  name = "my-service-invoke"
-  role = module.user_identity.authenticated_role_name
+    ).toBe(`resource "aws_iam_role_policy" "orders_my_table_access" {
+  name = "orders-my-table-access"
+  role = module.orders.task_role_name
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
         Effect   = "Allow"
-        Action   = ["execute-api:Invoke"]
-        Resource = ["\${module.my_service.api_execution_arn}/*"]
+        Action   = ["dynamodb:GetItem"]
+        Resource = [module.my_table.table_arn]
       },
     ]
   })

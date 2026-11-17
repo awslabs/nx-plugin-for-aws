@@ -741,6 +741,116 @@ describe('connection generator', () => {
       });
     });
 
+    describe('container services', () => {
+      const service = (generator: string) => ({
+        generator,
+        name: 'orders',
+        path: 'src/orders',
+        infra: 'ecs',
+      });
+
+      it('rejects a website to container connection', async () => {
+        setupReactProject('frontend');
+        setupUnknownProject('svc', [service('ts#container')]);
+        await expect(
+          resolveConnection(tree, {
+            sourceProject: 'frontend',
+            targetProject: 'svc',
+            targetComponent: 'orders',
+          }),
+        ).rejects.toThrow(
+          /does not support a connection from frontend.*to svc/,
+        );
+      });
+
+      it('rejects an agent to container connection', async () => {
+        setupUnknownProject('host', [
+          { generator: 'py#agent', name: 'agent', path: 'src/agent' },
+        ]);
+        setupUnknownProject('svc', [service('py#container')]);
+        await expect(
+          resolveConnection(tree, {
+            sourceProject: 'host',
+            sourceComponent: 'agent',
+            targetProject: 'svc',
+            targetComponent: 'orders',
+          }),
+        ).rejects.toThrow(/does not support a connection from host.*to svc/);
+      });
+
+      describe('when the container shares its project with an agent', () => {
+        const setupSharedProject = () =>
+          setupUnknownProject('svc', [
+            {
+              generator: 'ts#container',
+              name: 'ts-service',
+              path: 'src/ts-service',
+              infra: 'ecs',
+            },
+            { generator: 'ts#agent', name: 'agent', path: 'src/agent' },
+          ]);
+
+        it('rejects a website to container connection instead of connecting the agent', async () => {
+          setupReactProject('frontend');
+          setupSharedProject();
+          await expect(
+            resolveConnection(tree, {
+              sourceProject: 'frontend',
+              targetProject: 'svc',
+              targetComponent: 'ts-service',
+            }),
+          ).rejects.toThrow(
+            'This generator does not support a connection from frontend (ts#react-website) to svc (ts#container)',
+          );
+        });
+
+        it('rejects an agent to container connection instead of connecting the agent to itself', async () => {
+          setupSharedProject();
+          await expect(
+            resolveConnection(tree, {
+              sourceProject: 'svc',
+              sourceComponent: 'agent',
+              targetProject: 'svc',
+              targetComponent: 'ts-service',
+            }),
+          ).rejects.toThrow(
+            'This generator does not support a connection from svc (ts#agent) to svc (ts#container)',
+          );
+        });
+
+        it('rejects a py agent to container connection instead of connecting the ts agent', async () => {
+          setupUnknownProject('host', [
+            { generator: 'py#agent', name: 'py-agent', path: 'src/py_agent' },
+          ]);
+          setupSharedProject();
+          await expect(
+            resolveConnection(tree, {
+              sourceProject: 'host',
+              sourceComponent: 'py-agent',
+              targetProject: 'svc',
+              targetComponent: 'ts-service',
+            }),
+          ).rejects.toThrow(
+            'This generator does not support a connection from host (py#agent) to svc (ts#container)',
+          );
+        });
+      });
+
+      it('still resolves a container to rdb connection', async () => {
+        setupUnknownProject('svc', [service('ts#container')]);
+        setupRdbProject('db');
+        const result = await resolveConnection(tree, {
+          sourceProject: 'svc',
+          sourceComponent: 'orders',
+          targetProject: 'db',
+        });
+        expect(result.connection).toEqual({
+          source: 'ts#container',
+          target: 'ts#rdb',
+        });
+      });
+    });
+
     describe('error message quality', () => {
       it('should include project types in unsupported error', async () => {
         setupTrpcProject('a1');

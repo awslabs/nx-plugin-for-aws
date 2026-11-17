@@ -372,8 +372,8 @@ const pyMcp = async (opts: Opts, s: string): Promise<Side> => {
   );
   return { project: `py_mcp_host_${s}`, component: `mcp-${s}` };
 };
-// Container services keep the default ecs / http-api / iam options, which every
-// container connection's constraints require (see CONNECTION_CONSTRAINTS).
+// Container services keep the default ecs infra, which the container data
+// connections require (see CONNECTION_CONSTRAINTS).
 const tsContainer = async (opts: Opts, s: string): Promise<Side> => {
   await runCLI(
     `generate @aws/nx-plugin:ts#project --name=ts-svc-host-${s} --no-interactive`,
@@ -463,12 +463,6 @@ const CONNECTION_CASES = {
   'py#fast-api -> py#rdb': [pair(fastApi, pyRdb)],
   'py#agent -> py#rdb': [pair(pyAgent, pyRdb)],
   'py#mcp-server -> py#rdb': [pair(pyMcp, pyRdb)],
-  'ts#react-website -> ts#container': [pair(website, tsContainer)],
-  'ts#react-website -> py#container': [pair(website, pyContainer)],
-  'ts#agent -> ts#container': [pair(tsAgent, tsContainer)],
-  'ts#agent -> py#container': [pair(tsAgent, pyContainer)],
-  'py#agent -> ts#container': [pair(pyAgent, tsContainer)],
-  'py#agent -> py#container': [pair(pyAgent, pyContainer)],
   'ts#container -> ts#rdb': [pair(tsContainer, rdb)],
   'py#container -> py#rdb': [pair(pyContainer, pyRdb)],
   'ts#container -> ts#dynamodb': [pair(tsContainer, tsDynamodb)],

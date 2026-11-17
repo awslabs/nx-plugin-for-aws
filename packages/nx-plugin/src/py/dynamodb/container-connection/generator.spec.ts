@@ -48,8 +48,6 @@ const service = (overrides: Record<string, unknown> = {}) => ({
   port: 8084,
   rc: 'Reports',
   infra: 'ecs',
-  ingress: 'http-api',
-  auth: 'iam',
   iac: 'cdk',
   ...overrides,
 });
@@ -142,9 +140,7 @@ dependencies = []
   });
 
   it('should reject a service with no infrastructure', async () => {
-    await expect(
-      run({ infra: 'none', ingress: undefined, auth: undefined }),
-    ).rejects.toThrow(
+    await expect(run({ infra: 'none' })).rejects.toThrow(
       "Cannot connect proj.py_svc (reports) to proj.my_table: Access is granted to the container service's ECS task role, which only infra ecs creates.",
     );
   });

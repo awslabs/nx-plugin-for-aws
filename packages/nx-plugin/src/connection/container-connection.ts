@@ -88,7 +88,7 @@ export const assertContainerConnectionConstraints = (
 
 /** The names a container connection derives from the service's component. */
 export interface ContainerServiceNames {
-  /** PascalCase: construct class and runtime-config key, eg `MyService`. */
+  /** PascalCase: construct class and Terraform module name, eg `MyService`. */
   readonly nameClassName: string;
   /** kebab-case: file and Terraform module folder names, eg `my-service`. */
   readonly nameKebabCase: string;
@@ -122,16 +122,6 @@ export const containerServiceNames = (
     sourceDir: joinPathFragments(project.root, component.path ?? ''),
   };
 };
-
-/**
- * An IAM statement allowing `execute-api:Invoke` on every route of the
- * service's HTTP API, from the Terraform module's `api_execution_arn` output.
- */
-export const executeApiInvokeStatement = (moduleName: string): string => `{
-  Effect   = "Allow"
-  Action   = ["execute-api:Invoke"]
-  Resource = ["\${module.${moduleName}.api_execution_arn}/*"]
-},`;
 
 const indent = (text: string, spaces: number) =>
   text

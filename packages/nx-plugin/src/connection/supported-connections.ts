@@ -59,12 +59,6 @@ export const SUPPORTED_CONNECTIONS = [
   { source: 'py#agent', target: 'py#rdb' },
   { source: 'py#mcp-server', target: 'py#rdb' },
   // Container services (ts#container / py#container)
-  { source: 'ts#react-website', target: 'ts#container' },
-  { source: 'ts#react-website', target: 'py#container' },
-  { source: 'ts#agent', target: 'ts#container' },
-  { source: 'ts#agent', target: 'py#container' },
-  { source: 'py#agent', target: 'ts#container' },
-  { source: 'py#agent', target: 'py#container' },
   { source: 'ts#container', target: 'ts#rdb' },
   { source: 'py#container', target: 'py#rdb' },
   { source: 'ts#container', target: 'ts#dynamodb' },
