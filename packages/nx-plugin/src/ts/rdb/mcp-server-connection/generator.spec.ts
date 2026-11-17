@@ -201,6 +201,68 @@ CMD [ "node", "--require", "@aws/aws-distro-opentelemetry-node-autoinstrumentati
     ).toMatchSnapshot();
   });
 
+  describe('NODE_EXTRA_CA_CERTS in the Dockerfile', () => {
+    // The CA step as the connection generator wrote it before it set
+    // NODE_EXTRA_CA_CERTS. Node ignores the OS trust store it fills.
+    const OLD_VENDED_STEP = [
+      'RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \\',
+      '    rm -rf /var/lib/apt/lists/* && \\',
+      '    curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \\',
+      '    -o /usr/local/share/ca-certificates/rds-bundle.crt && \\',
+      '    update-ca-certificates',
+    ].join('\n');
+    const COMMENT_LINE =
+      '# Node trusts only its bundled CA store unless it is given extra certificates.';
+    const ENV_LINE =
+      'ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/rds-bundle.crt';
+    const DOCKERFILE = 'packages/my-service/src/my-mcp/Dockerfile';
+
+    const connect = () =>
+      tsRdbMcpServerConnectionGenerator(tree, {
+        sourceProject: 'my-service',
+        targetProject: 'db',
+        sourceComponent: { generator: 'ts#mcp-server', name: 'my-mcp' },
+      });
+    const readDockerfile = () => tree.read(DOCKERFILE, 'utf-8')!;
+    const count = (content: string, text: string) =>
+      content.split(text).length - 1;
+
+    beforeEach(() => {
+      setupMcpServerProject('my-service', 'my-mcp');
+      setupRdbProject();
+    });
+
+    it('fresh Dockerfile sets NODE_EXTRA_CA_CERTS after the CA step', async () => {
+      await connect();
+
+      const content = readDockerfile();
+      expect(count(content, ENV_LINE)).toBe(1);
+      expect(content.indexOf(ENV_LINE)).toBeGreaterThan(
+        content.indexOf('update-ca-certificates\n'),
+      );
+      expect(content.indexOf(ENV_LINE)).toBeLessThan(
+        content.indexOf('EXPOSE 8000'),
+      );
+      expect(content).toContain(`${COMMENT_LINE}\n${ENV_LINE}\n`);
+    });
+
+    it('old Dockerfile with the CA step and no ENV gets the ENV once', async () => {
+      const original = readDockerfile();
+      await connect();
+      const fresh = readDockerfile();
+
+      tree.write(
+        DOCKERFILE,
+        original.replace('EXPOSE 8000', `${OLD_VENDED_STEP}\n\nEXPOSE 8000`),
+      );
+      await connect();
+
+      const content = readDockerfile();
+      expect(count(content, ENV_LINE)).toBe(1);
+      expect(content).toBe(fresh);
+    });
+  });
+
   it('should not add dependency when mcp-server dev target does not exist', async () => {
     tree.write(
       `packages/my-service/project.json`,
