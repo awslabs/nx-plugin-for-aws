@@ -1,0 +1,293 @@
+/**
+ * OpenID Connect identity providers that users can sign in through, next to
+ * the user pool's own sign-in. List them on UserIdentity, for example:
+ *
+ *   new UserIdentity(this, 'Identity', {
+ *     oidcIdentityProviders: [
+ *       {
+ *         name: 'Okta',
+ *         issuerUrl: 'https://example.okta.com',
+ *         clientId: '0oa1example',
+ *         clientSecretName: 'okta-oidc-client-secret',
+ *       },
+ *     ],
+ *   });
+ *
+ * See https://awslabs.github.io/nx-plugin-for-aws/en/guides/react-website-auth-idp/
+ */
+import { CfnOutput, SecretValue, Token } from 'aws-cdk-lib';
+import {
+  type AttributeMapping,
+  type IUserPool,
+  OidcAttributeRequestMethod,
+  ProviderAttribute,
+  type UserPoolDomain,
+  UserPoolIdentityProviderOidc,
+} from 'aws-cdk-lib/aws-cognito';
+import { Construct } from 'constructs';
+
+/** An OpenID Connect identity provider that users can sign in through, next to the user pool's own sign-in. */
+export interface OidcIdentityProviderProps {
+  /**
+   * Shown on the sign-in button. Cognito prefixes federated usernames with it in
+   * lower case (<name>_<sub>). 3-32 letters, digits and hyphens, starting with a
+   * letter; not COGNITO; unique in the list ignoring case. Must be a literal string.
+   */
+  readonly name: string;
+  /** The issuer exactly as it appears in the iss claim of the identity provider's tokens. Must use https://. */
+  readonly issuerUrl: string;
+  /** Client ID of the application registered at the identity provider. */
+  readonly clientId: string;
+  /** Name of the AWS Secrets Manager secret that holds the client secret as a plain string. */
+  readonly clientSecretName: string;
+  /** OAuth scopes to request. Must include openid. @default ['openid', 'email', 'profile'] */
+  readonly scopes?: string[];
+  /**
+   * User pool attribute (Cognito name, e.g. given_name or custom:team) to identity provider claim.
+   * Must map email, given_name and family_name, which the user pool requires.
+   * @default { email: 'email', given_name: 'given_name', family_name: 'family_name' }
+   */
+  readonly attributeMapping?: Record<string, string>;
+  /** Identifiers, such as email domains, that Cognito can use to send a user to this identity provider. @default none */
+  readonly identifiers?: string[];
+}
+
+export interface OidcIdentityProvidersProps {
+  readonly userPool: IUserPool;
+  readonly userPoolDomain: UserPoolDomain;
+  readonly providers: OidcIdentityProviderProps[];
+}
+
+const DEFAULT_SCOPES = ['openid', 'email', 'profile'];
+
+const DEFAULT_ATTRIBUTE_MAPPING: Record<string, string> = {
+  email: 'email',
+  given_name: 'given_name',
+  family_name: 'family_name',
+};
+
+/** The attributes the user pool requires, so every sign-in must supply them. */
+const REQUIRED_ATTRIBUTES = ['email', 'given_name', 'family_name'];
+
+/** Cognito standard attribute names to the AttributeMapping property CDK takes for them. */
+const STANDARD_ATTRIBUTES = new Map<string, keyof AttributeMapping>([
+  ['address', 'address'],
+  ['birthdate', 'birthdate'],
+  ['email', 'email'],
+  ['email_verified', 'emailVerified'],
+  ['family_name', 'familyName'],
+  ['gender', 'gender'],
+  ['given_name', 'givenName'],
+  ['locale', 'locale'],
+  ['middle_name', 'middleName'],
+  ['name', 'fullname'],
+  ['nickname', 'nickname'],
+  ['phone_number', 'phoneNumber'],
+  ['picture', 'profilePicture'],
+  ['preferred_username', 'preferredUsername'],
+  ['profile', 'profilePage'],
+  ['zoneinfo', 'timezone'],
+  ['updated_at', 'lastUpdateTime'],
+  ['website', 'website'],
+]);
+
+/** Attributes CDK takes under custom. */
+const OTHER_ATTRIBUTE = /^(phone_number_verified|custom:\w{1,20})$/;
+
+const ENTRA_HOST = 'login.microsoftonline.com';
+
+/** Entra ID tenants that accept accounts from any organisation or any personal Microsoft account. */
+const ENTRA_MULTI_TENANTS = [
+  'common',
+  'organizations',
+  'consumers',
+  '9188040d-6c67-4c5b-b112-36a304b66dad',
+];
+
+const isToken = (value: unknown): boolean => Token.isUnresolved(value);
+
+const validateIssuerUrl = (issuerUrl: string): string | undefined => {
+  if (/\s/.test(issuerUrl)) {
+    return 'issuerUrl must not contain whitespace';
+  }
+  let url: URL;
+  try {
+    url = new URL(issuerUrl);
+  } catch {
+    return `issuerUrl must be a URL, but is ${issuerUrl}`;
+  }
+  if (url.protocol !== 'https:') {
+    return 'issuerUrl must use https://';
+  }
+  if (url.search || url.hash || url.username || url.password) {
+    return 'issuerUrl must not have a query, fragment, user name or password';
+  }
+  const host = url.hostname.toLowerCase();
+  if (host === ENTRA_HOST) {
+    const [tenant = ''] = url.pathname.split('/').filter(Boolean);
+    if (ENTRA_MULTI_TENANTS.includes(tenant.toLowerCase())) {
+      return `Microsoft Entra ID multi-tenant issuers (${ENTRA_MULTI_TENANTS.join(', ')}) are not supported. Use your tenant's issuer, https://${ENTRA_HOST}/<tenant-id>/v2.0`;
+    }
+    if (issuerUrl.endsWith('/')) {
+      return `Microsoft Entra ID issuers have no trailing slash. Use ${issuerUrl.replace(/\/+$/, '')}`;
+    }
+  }
+  if (host.endsWith('.auth0.com') && !issuerUrl.endsWith('/')) {
+    return `Auth0 issuers end with a slash. Use ${issuerUrl}/`;
+  }
+  return undefined;
+};
+
+const validateScopes = (scopes: string[]): string | undefined => {
+  if (isToken(scopes)) {
+    return undefined;
+  }
+  const literal = scopes.filter((scope) => !isToken(scope));
+  if (literal.some((scope) => scope.length === 0 || /\s/.test(scope))) {
+    return 'scopes must be non-empty and must not contain whitespace';
+  }
+  if (literal.length === scopes.length && !scopes.includes('openid')) {
+    return 'scopes must include openid';
+  }
+  return undefined;
+};
+
+const validateAttributeMapping = (
+  attributeMapping: Record<string, string>,
+): string | undefined => {
+  const entries = Object.entries(attributeMapping);
+  for (const [attribute, claim] of entries) {
+    if (!(STANDARD_ATTRIBUTES.has(attribute) || OTHER_ATTRIBUTE.test(attribute))) {
+      return `attributeMapping has an unknown user pool attribute ${attribute}. Use a standard attribute such as given_name, phone_number_verified or custom:<name>`;
+    }
+    if (!isToken(claim) && (claim.length < 1 || claim.length > 128)) {
+      return `attributeMapping must map ${attribute} to a claim name of 1-128 characters`;
+    }
+  }
+  const missing = REQUIRED_ATTRIBUTES.find((attribute) => !(attribute in attributeMapping));
+  if (missing) {
+    return `attributeMapping must map ${missing}, which the user pool requires`;
+  }
+  return undefined;
+};
+
+const validateIdentifiers = (identifiers: string[]): string | undefined => {
+  if (isToken(identifiers)) {
+    return undefined;
+  }
+  if (identifiers.length > 50) {
+    return 'identifiers must have at most 50 entries';
+  }
+  if (
+    identifiers.some(
+      (identifier) => !isToken(identifier) && !/^[\w\s+=.@-]{1,40}$/.test(identifier),
+    )
+  ) {
+    return 'each identifier must be 1-40 letters, digits, spaces or _ + = . @ -';
+  }
+  return undefined;
+};
+
+/** The first rule the identity provider breaks, if any. Values that are tokens are not checked. */
+const validate = (provider: OidcIdentityProviderProps): string | undefined => {
+  const { name, issuerUrl, clientId, clientSecretName } = provider;
+  if (!/^[A-Za-z][A-Za-z0-9-]{2,31}$/.test(name)) {
+    return 'name must be 3-32 letters, digits and hyphens, starting with a letter';
+  }
+  if (name.toUpperCase() === 'COGNITO') {
+    return 'name must not be COGNITO, which Cognito reserves for sign-in with the user pool itself';
+  }
+  if (!isToken(issuerUrl)) {
+    const issuerError = validateIssuerUrl(issuerUrl);
+    if (issuerError) {
+      return issuerError;
+    }
+  }
+  if (!isToken(clientId) && clientId.trim().length === 0) {
+    return 'clientId must not be empty';
+  }
+  if (!isToken(clientSecretName) && !/^[A-Za-z0-9/_+=.@-]{1,512}$/.test(clientSecretName)) {
+    return 'clientSecretName must be the name of a secret: 1-512 letters, digits and / _ + = . @ -';
+  }
+  return (
+    validateScopes(provider.scopes ?? DEFAULT_SCOPES) ??
+    validateAttributeMapping(provider.attributeMapping ?? DEFAULT_ATTRIBUTE_MAPPING) ??
+    validateIdentifiers(provider.identifiers ?? [])
+  );
+};
+
+/** Standard attributes go under their CDK property, the rest under custom. */
+const toAttributeMapping = (attributeMapping: Record<string, string>): AttributeMapping => {
+  const standard: Record<string, ProviderAttribute> = {};
+  const custom: Record<string, ProviderAttribute> = {};
+  for (const [attribute, claim] of Object.entries(attributeMapping)) {
+    const property = STANDARD_ATTRIBUTES.get(attribute);
+    if (property) {
+      standard[property] = ProviderAttribute.other(claim);
+    } else {
+      custom[attribute] = ProviderAttribute.other(claim);
+    }
+  }
+  return {
+    ...standard,
+    ...(Object.keys(custom).length > 0 ? { custom } : {}),
+  };
+};
+
+/**
+ * Creates the OpenID Connect identity providers of a user pool. Create it
+ * before the user pool client, so the client lists them.
+ */
+export class OidcIdentityProviders extends Construct {
+  public readonly providers: UserPoolIdentityProviderOidc[];
+
+  constructor(
+    scope: Construct,
+    id: string,
+    { userPool, userPoolDomain, providers }: OidcIdentityProvidersProps,
+  ) {
+    super(scope, id);
+
+    const names = new Set<string>();
+    providers.forEach((provider, index) => {
+      if (isToken(provider.name)) {
+        throw new Error(
+          `UserIdentity: oidcIdentityProviders[${index}]: name must be a literal string, not a token`,
+        );
+      }
+      const error =
+        validate(provider) ??
+        (names.has(provider.name.toLowerCase())
+          ? 'names must be unique ignoring case, because Cognito prefixes federated usernames with the lower-case name'
+          : undefined);
+      if (error) {
+        throw new Error(
+          `UserIdentity: oidcIdentityProviders[${index}] (${provider.name}): ${error}`,
+        );
+      }
+      names.add(provider.name.toLowerCase());
+    });
+
+    this.providers = providers.map(
+      (provider) =>
+        new UserPoolIdentityProviderOidc(this, provider.name, {
+          userPool,
+          name: provider.name,
+          issuerUrl: provider.issuerUrl,
+          clientId: provider.clientId,
+          clientSecret: SecretValue.secretsManager(provider.clientSecretName).unsafeUnwrap(),
+          scopes: provider.scopes ?? DEFAULT_SCOPES,
+          attributeRequestMethod: OidcAttributeRequestMethod.GET,
+          attributeMapping: toAttributeMapping(
+            provider.attributeMapping ?? DEFAULT_ATTRIBUTE_MAPPING,
+          ),
+          identifiers: provider.identifiers,
+        }),
+    );
+
+    new CfnOutput(this, 'IdpRedirectUri', {
+      description: 'Redirect URI to register at each OpenID Connect identity provider',
+      value: `${userPoolDomain.baseUrl()}/oauth2/idpresponse`,
+    });
+  }
+}

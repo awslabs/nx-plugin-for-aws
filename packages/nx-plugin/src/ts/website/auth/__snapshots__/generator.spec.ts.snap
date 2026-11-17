@@ -1,0 +1,1095 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ts#website#auth generator federation > oidc (cdk) > should add the oidcIdentityProviders prop to UserIdentity 1`] = `
+"import {
+  OidcIdentityProviders,
+  type OidcIdentityProviderProps,
+} from './oidc-identity-providers.js';
+import {
+  IdentityPool,
+  UserPoolAuthenticationProvider,
+} from 'aws-cdk-lib/aws-cognito-identitypool';
+import {
+  CfnOutput,
+  CfnResource,
+  Duration,
+  Lazy,
+  RemovalPolicy,
+  Stack,
+} from 'aws-cdk-lib';
+import {
+  AccountRecovery,
+  CfnManagedLoginBranding,
+  FeaturePlan,
+  ManagedLoginVersion,
+  Mfa,
+  type MfaSecondFactor,
+  OAuthScope,
+  StandardThreatProtectionMode,
+  UserPool,
+  UserPoolClient,
+  UserPoolDomain,
+} from 'aws-cdk-lib/aws-cognito';
+import {
+  CfnLoggingConfiguration,
+  CfnWebACL,
+  CfnWebACLAssociation,
+} from 'aws-cdk-lib/aws-wafv2';
+import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { Effect, PolicyStatement, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
+import { Construct } from 'constructs';
+import { RuntimeConfig } from './runtime-config.js';
+import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
+import { findCloudFrontDomainNames } from './cloudfront.js';
+import { suppressRules } from './checkov.js';
+
+const WEB_CLIENT_ID = 'WebClient';
+
+/** Local dev server origins permitted to complete the sign-in redirect */
+const LOCAL_CALLBACK_URLS = ['http://localhost:4200', 'http://localhost:4300'];
+
+export interface UserIdentityProps {
+  /**
+   * Whether to enable AWS WAFv2 with the default managed ruleset
+   * (AWSManagedRulesCommonRuleSet and AWSManagedRulesKnownBadInputsRuleSet)
+   * and associate it with the user pool.
+   *
+   * @default true
+   */
+  readonly enableWaf?: boolean;
+
+  /**
+   * Whether users must configure MFA, may optionally configure MFA, or cannot use MFA at all.
+   *
+   * @default Mfa.REQUIRED
+   */
+  readonly mfa?: Mfa;
+
+  /**
+   * The MFA methods available to users when MFA is not off.
+   *
+   * @default { sms: true, otp: true }
+   */
+  readonly mfaSecondFactor?: MfaSecondFactor;
+
+  /**
+   * OpenID Connect identity providers users can sign in through, next to the user pool's own sign-in.
+   * Applies to every website that uses this user pool.
+   *
+   * @example
+   * [{ name: 'Okta', issuerUrl: 'https://example.okta.com', clientId: '0oa1example', clientSecretName: 'okta-oidc-client-secret' }]
+   *
+   * @default no identity providers
+   */
+  readonly oidcIdentityProviders?: OidcIdentityProviderProps[];
+}
+
+/**
+ * Creates a UserPool and Identity Pool with sane defaults configured intended for usage from a web client.
+ */
+export class UserIdentity extends Construct {
+  public readonly region: string;
+  public readonly identityPool: IdentityPool;
+  public readonly userPool: UserPool;
+  public readonly userPoolClient: UserPoolClient;
+  public readonly userPoolDomain: UserPoolDomain;
+
+  /** The WAFv2 Web ACL associated with the user pool, if WAF is enabled */
+  public readonly webAcl?: CfnWebACL;
+
+  constructor(
+    scope: Construct,
+    id: string,
+    {
+      enableWaf = true,
+      mfa = Mfa.REQUIRED,
+      mfaSecondFactor = { sms: true, otp: true },
+      oidcIdentityProviders = [],
+    }: UserIdentityProps = {},
+  ) {
+    super(scope, id);
+
+    if (mfa === Mfa.REQUIRED && !mfaSecondFactor.sms && !mfaSecondFactor.otp) {
+      throw new Error(
+        'UserIdentity: mfa is REQUIRED but mfaSecondFactor has no methods enabled (sms and otp are both false)',
+      );
+    }
+
+    this.region = Stack.of(this).region;
+    this.userPool = this.createUserPool(mfa, mfaSecondFactor);
+
+    if (enableWaf) {
+      this.webAcl = this.createWebAcl(
+        id,
+        this.userPool,
+        LOCAL_CALLBACK_URLS.length > 0,
+      );
+    }
+    this.userPoolDomain = this.createUserPoolDomain(this.userPool);
+    new OidcIdentityProviders(this, 'OidcIdentityProviders', {
+      userPool: this.userPool,
+      userPoolDomain: this.userPoolDomain,
+      providers: oidcIdentityProviders,
+    });
+    this.userPoolClient = this.createUserPoolClient(this.userPool);
+    this.identityPool = this.createIdentityPool(
+      this.userPool,
+      this.userPoolClient,
+    );
+    this.createManagedLoginBranding(
+      this.userPool,
+      this.userPoolClient,
+      this.userPoolDomain,
+    );
+
+    RuntimeConfig.ensure(this).set('connection', 'cognitoProps', {
+      region: Stack.of(this).region,
+      identityPoolId: this.identityPool.identityPoolId,
+      userPoolId: this.userPool.userPoolId,
+      userPoolWebClientId: this.userPoolClient.userPoolClientId,
+    });
+
+    suppressRules(
+      this.userPool,
+      ['CKV_AWS_111'],
+      'SMS Role requires wildcard resource',
+      (c) => c.node.path.includes('/smsRole/'),
+    );
+
+    new CfnOutput(this, \`\${id}-UserPoolId\`, {
+      value: this.userPool.userPoolId,
+    });
+
+    new CfnOutput(this, \`\${id}-UserPoolClientId\`, {
+      value: this.userPoolClient.userPoolClientId,
+    });
+
+    new CfnOutput(this, \`\${id}-IdentityPoolId\`, {
+      value: this.identityPool.identityPoolId,
+    });
+  }
+
+  private createUserPool = (mfa: Mfa, mfaSecondFactor: MfaSecondFactor) => {
+    // Cognito rejects SmsConfiguration (emitted whenever phone is auto-verified) unless SMS is
+    // also an enabled MFA method, for any non-OFF MfaConfiguration. So phone verification via SMS
+    // can only be offered when SMS is actually usable as a second factor.
+    const phoneVerificationEnabled = mfa === Mfa.OFF || mfaSecondFactor.sms;
+
+    const userPool = new UserPool(this, 'UserPool', {
+      deletionProtection: true,
+      passwordPolicy: {
+        minLength: 8,
+        requireLowercase: true,
+        requireUppercase: true,
+        requireDigits: true,
+        requireSymbols: true,
+        tempPasswordValidity: Duration.days(3),
+      },
+      mfa,
+      featurePlan: FeaturePlan.PLUS,
+      // Audit-only logs threat assessments without blocking sign-in. Switch to FULL_FUNCTION to enforce automatic responses.
+      standardThreatProtectionMode: StandardThreatProtectionMode.AUDIT_ONLY,
+      mfaSecondFactor,
+      signInCaseSensitive: false,
+      signInAliases: { username: true, email: true },
+      accountRecovery: AccountRecovery.EMAIL_ONLY,
+      selfSignUpEnabled: true,
+      standardAttributes: {
+        phoneNumber: { required: false },
+        email: { required: true },
+        givenName: { required: true },
+        familyName: { required: true },
+      },
+      autoVerify: {
+        email: true,
+        phone: phoneVerificationEnabled,
+      },
+      keepOriginal: {
+        email: true,
+        phone: phoneVerificationEnabled,
+      },
+    });
+    // Retain the SMS role alongside the pool so the pool can still be updated and deleted manually
+    const poolCfn = userPool.node.defaultChild as CfnResource;
+    const smsRoleNode = userPool.node.tryFindChild('smsRole');
+    if (smsRoleNode) {
+      const smsRoleCfn = smsRoleNode.node.defaultChild as CfnResource;
+      smsRoleCfn.cfnOptions.deletionPolicy = poolCfn.cfnOptions.deletionPolicy;
+      smsRoleCfn.cfnOptions.updateReplacePolicy =
+        poolCfn.cfnOptions.updateReplacePolicy;
+    }
+    return userPool;
+  };
+
+  private createWebAcl = (
+    id: string,
+    userPool: UserPool,
+    allowsLocalCallback: boolean,
+  ) => {
+    const webAcl = new CfnWebACL(this, 'WebAcl', {
+      defaultAction: { allow: {} },
+      scope: 'REGIONAL',
+      visibilityConfig: {
+        cloudWatchMetricsEnabled: true,
+        metricName: \`\${id}WebAcl\`,
+        sampledRequestsEnabled: true,
+      },
+      rules: [
+        {
+          name: 'CRSRule',
+          priority: 0,
+          statement: {
+            managedRuleGroupStatement: {
+              name: 'AWSManagedRulesCommonRuleSet',
+              vendorName: 'AWS',
+              // EC2MetaDataSSRF_QUERYARGUMENTS treats the loopback redirect_uri the
+              // Hosted UI receives during local sign-in as an SSRF attempt. Counted
+              // only while a local callback URL is allowed; every other rule blocks.
+              ruleActionOverrides: allowsLocalCallback
+                ? [
+                    {
+                      name: 'EC2MetaDataSSRF_QUERYARGUMENTS',
+                      actionToUse: { count: {} },
+                    },
+                  ]
+                : undefined,
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: \`\${id}WebAcl-CRS\`,
+            sampledRequestsEnabled: true,
+          },
+          overrideAction: {
+            none: {},
+          },
+        },
+        {
+          name: 'KnownBadInputsRule',
+          priority: 1,
+          statement: {
+            managedRuleGroupStatement: {
+              name: 'AWSManagedRulesKnownBadInputsRuleSet',
+              vendorName: 'AWS',
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: \`\${id}WebAcl-KnownBadInputs\`,
+            sampledRequestsEnabled: true,
+          },
+          overrideAction: {
+            none: {},
+          },
+        },
+      ],
+    });
+
+    new CfnWebACLAssociation(this, 'WebAclAssociation', {
+      resourceArn: userPool.userPoolArn,
+      webAclArn: webAcl.attrArn,
+    });
+
+    // The log group name must start with \`aws-waf-logs-\` to satisfy the WAFv2
+    // logging destination requirement.
+    const stack = Stack.of(this);
+    const wafLogGroupName = \`aws-waf-logs-\${id}-\${this.node.addr.slice(-8)}\`;
+
+    // KMS key for encrypting WAF logs at rest, usable by CloudWatch Logs
+    const logsKey = new Key(this, 'WebAclLogsKey', {
+      enableKeyRotation: true,
+    });
+    logsKey.addToResourcePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        principals: [
+          new ServicePrincipal(\`logs.\${stack.region}.amazonaws.com\`),
+        ],
+        actions: [
+          'kms:Encrypt',
+          'kms:Decrypt',
+          'kms:ReEncrypt*',
+          'kms:GenerateDataKey*',
+          'kms:DescribeKey',
+        ],
+        resources: ['*'],
+        conditions: {
+          ArnEquals: {
+            'kms:EncryptionContext:aws:logs:arn': \`arn:aws:logs:\${stack.region}:\${stack.account}:log-group:\${wafLogGroupName}\`,
+          },
+        },
+      }),
+    );
+
+    const wafLogGroup = new LogGroup(this, 'WebAclLogs', {
+      logGroupName: wafLogGroupName,
+      retention: RetentionDays.ONE_MONTH,
+      encryptionKey: logsKey,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+
+    new CfnLoggingConfiguration(this, 'WebAclLoggingConfig', {
+      resourceArn: webAcl.attrArn,
+      logDestinationConfigs: [wafLogGroup.logGroupArn],
+    });
+
+    return webAcl;
+  };
+
+  private createUserPoolDomain = (userPool: UserPool) =>
+    new UserPoolDomain(this, 'UserPoolDomain', {
+      userPool,
+      cognitoDomain: {
+        domainPrefix: \`test-\${Stack.of(this).account}\`,
+      },
+      managedLoginVersion: ManagedLoginVersion.NEWER_MANAGED_LOGIN,
+    });
+
+  private createUserPoolClient = (userPool: UserPool) => {
+    const lazilyComputedCallbackUrls = Lazy.list({
+      produce: () =>
+        LOCAL_CALLBACK_URLS.concat(
+          Stack.of(this)
+            .node.findAll()
+            .filter(
+              (child): child is Distribution => child instanceof Distribution,
+            )
+            .flatMap(findCloudFrontDomainNames)
+            .map((domain) => \`https://\${domain}\`),
+        ),
+    });
+
+    return userPool.addClient(WEB_CLIENT_ID, {
+      authFlows: {
+        userPassword: true,
+        userSrp: true,
+        user: true,
+      },
+      oAuth: {
+        flows: {
+          authorizationCodeGrant: true,
+        },
+        scopes: [OAuthScope.EMAIL, OAuthScope.OPENID, OAuthScope.PROFILE],
+        callbackUrls: lazilyComputedCallbackUrls,
+        logoutUrls: lazilyComputedCallbackUrls,
+      },
+      preventUserExistenceErrors: true,
+    });
+  };
+
+  private createIdentityPool = (
+    userPool: UserPool,
+    userPoolClient: UserPoolClient,
+  ) => {
+    const identityPool = new IdentityPool(this, 'IdentityPool');
+
+    identityPool.addUserPoolAuthentication(
+      new UserPoolAuthenticationProvider({
+        userPool,
+        userPoolClient,
+      }),
+    );
+
+    return identityPool;
+  };
+
+  private createManagedLoginBranding = (
+    userPool: UserPool,
+    userPoolClient: UserPoolClient,
+    userPoolDomain: UserPoolDomain,
+  ) => {
+    new CfnManagedLoginBranding(this, 'ManagedLoginBranding', {
+      userPoolId: userPool.userPoolId,
+      clientId: userPoolClient.userPoolClientId,
+      useCognitoProvidedValues: true,
+    }).node.addDependency(userPoolClient, userPool, userPoolDomain);
+  };
+}
+"
+`;
+
+exports[`ts#website#auth generator federation > oidc (cdk) > should vend the identity providers construct and export it 1`] = `
+"/**
+ * OpenID Connect identity providers that users can sign in through, next to
+ * the user pool's own sign-in. List them on UserIdentity, for example:
+ *
+ *   new UserIdentity(this, 'Identity', {
+ *     oidcIdentityProviders: [
+ *       {
+ *         name: 'Okta',
+ *         issuerUrl: 'https://example.okta.com',
+ *         clientId: '0oa1example',
+ *         clientSecretName: 'okta-oidc-client-secret',
+ *       },
+ *     ],
+ *   });
+ *
+ * See https://awslabs.github.io/nx-plugin-for-aws/en/guides/react-website-auth-idp/
+ */
+import { CfnOutput, SecretValue, Token } from 'aws-cdk-lib';
+import {
+  type AttributeMapping,
+  type IUserPool,
+  OidcAttributeRequestMethod,
+  ProviderAttribute,
+  type UserPoolDomain,
+  UserPoolIdentityProviderOidc,
+} from 'aws-cdk-lib/aws-cognito';
+import { Construct } from 'constructs';
+
+/** An OpenID Connect identity provider that users can sign in through, next to the user pool's own sign-in. */
+export interface OidcIdentityProviderProps {
+  /**
+   * Shown on the sign-in button. Cognito prefixes federated usernames with it in
+   * lower case (<name>_<sub>). 3-32 letters, digits and hyphens, starting with a
+   * letter; not COGNITO; unique in the list ignoring case. Must be a literal string.
+   */
+  readonly name: string;
+  /** The issuer exactly as it appears in the iss claim of the identity provider's tokens. Must use https://. */
+  readonly issuerUrl: string;
+  /** Client ID of the application registered at the identity provider. */
+  readonly clientId: string;
+  /** Name of the AWS Secrets Manager secret that holds the client secret as a plain string. */
+  readonly clientSecretName: string;
+  /** OAuth scopes to request. Must include openid. @default ['openid', 'email', 'profile'] */
+  readonly scopes?: string[];
+  /**
+   * User pool attribute (Cognito name, e.g. given_name or custom:team) to identity provider claim.
+   * Must map email, given_name and family_name, which the user pool requires.
+   * @default { email: 'email', given_name: 'given_name', family_name: 'family_name' }
+   */
+  readonly attributeMapping?: Record<string, string>;
+  /** Identifiers, such as email domains, that Cognito can use to send a user to this identity provider. @default none */
+  readonly identifiers?: string[];
+}
+
+export interface OidcIdentityProvidersProps {
+  readonly userPool: IUserPool;
+  readonly userPoolDomain: UserPoolDomain;
+  readonly providers: OidcIdentityProviderProps[];
+}
+
+const DEFAULT_SCOPES = ['openid', 'email', 'profile'];
+
+const DEFAULT_ATTRIBUTE_MAPPING: Record<string, string> = {
+  email: 'email',
+  given_name: 'given_name',
+  family_name: 'family_name',
+};
+
+/** The attributes the user pool requires, so every sign-in must supply them. */
+const REQUIRED_ATTRIBUTES = ['email', 'given_name', 'family_name'];
+
+/** Cognito standard attribute names to the AttributeMapping property CDK takes for them. */
+const STANDARD_ATTRIBUTES = new Map<string, keyof AttributeMapping>([
+  ['address', 'address'],
+  ['birthdate', 'birthdate'],
+  ['email', 'email'],
+  ['email_verified', 'emailVerified'],
+  ['family_name', 'familyName'],
+  ['gender', 'gender'],
+  ['given_name', 'givenName'],
+  ['locale', 'locale'],
+  ['middle_name', 'middleName'],
+  ['name', 'fullname'],
+  ['nickname', 'nickname'],
+  ['phone_number', 'phoneNumber'],
+  ['picture', 'profilePicture'],
+  ['preferred_username', 'preferredUsername'],
+  ['profile', 'profilePage'],
+  ['zoneinfo', 'timezone'],
+  ['updated_at', 'lastUpdateTime'],
+  ['website', 'website'],
+]);
+
+/** Attributes CDK takes under custom. */
+const OTHER_ATTRIBUTE = /^(phone_number_verified|custom:\\w{1,20})$/;
+
+const ENTRA_HOST = 'login.microsoftonline.com';
+
+/** Entra ID tenants that accept accounts from any organisation or any personal Microsoft account. */
+const ENTRA_MULTI_TENANTS = [
+  'common',
+  'organizations',
+  'consumers',
+  '9188040d-6c67-4c5b-b112-36a304b66dad',
+];
+
+const isToken = (value: unknown): boolean => Token.isUnresolved(value);
+
+const validateIssuerUrl = (issuerUrl: string): string | undefined => {
+  if (/\\s/.test(issuerUrl)) {
+    return 'issuerUrl must not contain whitespace';
+  }
+  let url: URL;
+  try {
+    url = new URL(issuerUrl);
+  } catch {
+    return \`issuerUrl must be a URL, but is \${issuerUrl}\`;
+  }
+  if (url.protocol !== 'https:') {
+    return 'issuerUrl must use https://';
+  }
+  if (url.search || url.hash || url.username || url.password) {
+    return 'issuerUrl must not have a query, fragment, user name or password';
+  }
+  const host = url.hostname.toLowerCase();
+  if (host === ENTRA_HOST) {
+    const [tenant = ''] = url.pathname.split('/').filter(Boolean);
+    if (ENTRA_MULTI_TENANTS.includes(tenant.toLowerCase())) {
+      return \`Microsoft Entra ID multi-tenant issuers (\${ENTRA_MULTI_TENANTS.join(', ')}) are not supported. Use your tenant's issuer, https://\${ENTRA_HOST}/<tenant-id>/v2.0\`;
+    }
+    if (issuerUrl.endsWith('/')) {
+      return \`Microsoft Entra ID issuers have no trailing slash. Use \${issuerUrl.replace(/\\/+$/, '')}\`;
+    }
+  }
+  if (host.endsWith('.auth0.com') && !issuerUrl.endsWith('/')) {
+    return \`Auth0 issuers end with a slash. Use \${issuerUrl}/\`;
+  }
+  return undefined;
+};
+
+const validateScopes = (scopes: string[]): string | undefined => {
+  if (isToken(scopes)) {
+    return undefined;
+  }
+  const literal = scopes.filter((scope) => !isToken(scope));
+  if (literal.some((scope) => scope.length === 0 || /\\s/.test(scope))) {
+    return 'scopes must be non-empty and must not contain whitespace';
+  }
+  if (literal.length === scopes.length && !scopes.includes('openid')) {
+    return 'scopes must include openid';
+  }
+  return undefined;
+};
+
+const validateAttributeMapping = (
+  attributeMapping: Record<string, string>,
+): string | undefined => {
+  const entries = Object.entries(attributeMapping);
+  for (const [attribute, claim] of entries) {
+    if (
+      !(STANDARD_ATTRIBUTES.has(attribute) || OTHER_ATTRIBUTE.test(attribute))
+    ) {
+      return \`attributeMapping has an unknown user pool attribute \${attribute}. Use a standard attribute such as given_name, phone_number_verified or custom:<name>\`;
+    }
+    if (!isToken(claim) && (claim.length < 1 || claim.length > 128)) {
+      return \`attributeMapping must map \${attribute} to a claim name of 1-128 characters\`;
+    }
+  }
+  const missing = REQUIRED_ATTRIBUTES.find(
+    (attribute) => !(attribute in attributeMapping),
+  );
+  if (missing) {
+    return \`attributeMapping must map \${missing}, which the user pool requires\`;
+  }
+  return undefined;
+};
+
+const validateIdentifiers = (identifiers: string[]): string | undefined => {
+  if (isToken(identifiers)) {
+    return undefined;
+  }
+  if (identifiers.length > 50) {
+    return 'identifiers must have at most 50 entries';
+  }
+  if (
+    identifiers.some(
+      (identifier) =>
+        !isToken(identifier) && !/^[\\w\\s+=.@-]{1,40}$/.test(identifier),
+    )
+  ) {
+    return 'each identifier must be 1-40 letters, digits, spaces or _ + = . @ -';
+  }
+  return undefined;
+};
+
+/** The first rule the identity provider breaks, if any. Values that are tokens are not checked. */
+const validate = (provider: OidcIdentityProviderProps): string | undefined => {
+  const { name, issuerUrl, clientId, clientSecretName } = provider;
+  if (!/^[A-Za-z][A-Za-z0-9-]{2,31}$/.test(name)) {
+    return 'name must be 3-32 letters, digits and hyphens, starting with a letter';
+  }
+  if (name.toUpperCase() === 'COGNITO') {
+    return 'name must not be COGNITO, which Cognito reserves for sign-in with the user pool itself';
+  }
+  if (!isToken(issuerUrl)) {
+    const issuerError = validateIssuerUrl(issuerUrl);
+    if (issuerError) {
+      return issuerError;
+    }
+  }
+  if (!isToken(clientId) && clientId.trim().length === 0) {
+    return 'clientId must not be empty';
+  }
+  if (
+    !isToken(clientSecretName) &&
+    !/^[A-Za-z0-9/_+=.@-]{1,512}$/.test(clientSecretName)
+  ) {
+    return 'clientSecretName must be the name of a secret: 1-512 letters, digits and / _ + = . @ -';
+  }
+  return (
+    validateScopes(provider.scopes ?? DEFAULT_SCOPES) ??
+    validateAttributeMapping(
+      provider.attributeMapping ?? DEFAULT_ATTRIBUTE_MAPPING,
+    ) ??
+    validateIdentifiers(provider.identifiers ?? [])
+  );
+};
+
+/** Standard attributes go under their CDK property, the rest under custom. */
+const toAttributeMapping = (
+  attributeMapping: Record<string, string>,
+): AttributeMapping => {
+  const standard: Record<string, ProviderAttribute> = {};
+  const custom: Record<string, ProviderAttribute> = {};
+  for (const [attribute, claim] of Object.entries(attributeMapping)) {
+    const property = STANDARD_ATTRIBUTES.get(attribute);
+    if (property) {
+      standard[property] = ProviderAttribute.other(claim);
+    } else {
+      custom[attribute] = ProviderAttribute.other(claim);
+    }
+  }
+  return {
+    ...standard,
+    ...(Object.keys(custom).length > 0 ? { custom } : {}),
+  };
+};
+
+/**
+ * Creates the OpenID Connect identity providers of a user pool. Create it
+ * before the user pool client, so the client lists them.
+ */
+export class OidcIdentityProviders extends Construct {
+  public readonly providers: UserPoolIdentityProviderOidc[];
+
+  constructor(
+    scope: Construct,
+    id: string,
+    { userPool, userPoolDomain, providers }: OidcIdentityProvidersProps,
+  ) {
+    super(scope, id);
+
+    const names = new Set<string>();
+    providers.forEach((provider, index) => {
+      if (isToken(provider.name)) {
+        throw new Error(
+          \`UserIdentity: oidcIdentityProviders[\${index}]: name must be a literal string, not a token\`,
+        );
+      }
+      const error =
+        validate(provider) ??
+        (names.has(provider.name.toLowerCase())
+          ? 'names must be unique ignoring case, because Cognito prefixes federated usernames with the lower-case name'
+          : undefined);
+      if (error) {
+        throw new Error(
+          \`UserIdentity: oidcIdentityProviders[\${index}] (\${provider.name}): \${error}\`,
+        );
+      }
+      names.add(provider.name.toLowerCase());
+    });
+
+    this.providers = providers.map(
+      (provider) =>
+        new UserPoolIdentityProviderOidc(this, provider.name, {
+          userPool,
+          name: provider.name,
+          issuerUrl: provider.issuerUrl,
+          clientId: provider.clientId,
+          clientSecret: SecretValue.secretsManager(
+            provider.clientSecretName,
+          ).unsafeUnwrap(),
+          scopes: provider.scopes ?? DEFAULT_SCOPES,
+          attributeRequestMethod: OidcAttributeRequestMethod.GET,
+          attributeMapping: toAttributeMapping(
+            provider.attributeMapping ?? DEFAULT_ATTRIBUTE_MAPPING,
+          ),
+          identifiers: provider.identifiers,
+        }),
+    );
+
+    new CfnOutput(this, 'IdpRedirectUri', {
+      description:
+        'Redirect URI to register at each OpenID Connect identity provider',
+      value: \`\${userPoolDomain.baseUrl()}/oauth2/idpresponse\`,
+    });
+  }
+}
+"
+`;
+
+exports[`ts#website#auth generator federation > oidc (terraform) > should pass the variable to module "identity" and list the providers on the web client 1`] = `
+"variable "enable_waf" {
+  description = "Whether to enable AWS WAFv2 with the default managed ruleset and associate it with the user pool"
+  type        = bool
+  default     = true
+}
+
+variable "mfa" {
+  description = "Whether users must configure MFA, may optionally configure MFA, or cannot use MFA at all"
+  type        = string
+  default     = "ON"
+
+  validation {
+    condition     = contains(["OFF", "OPTIONAL", "ON"], var.mfa)
+    error_message = "mfa must be one of OFF, OPTIONAL, ON"
+  }
+}
+
+variable "mfa_second_factor_otp" {
+  description = "Whether users can use a time-based one time password (TOTP), generated by a hardware or software token, as an MFA method"
+  type        = bool
+  default     = true
+}
+
+variable "mfa_second_factor_sms" {
+  description = "Whether users can use SMS to their verified phone numbers as an MFA method. Due to a Terraform AWS provider limitation, disabling this also disables SMS-based phone number verification, unlike the equivalent CDK construct prop"
+  type        = bool
+  default     = true
+}
+
+module "identity" {
+  source = "./identity"
+
+  user_pool_domain_prefix = "test"
+  allow_signup = true
+  enable_waf = var.enable_waf
+  mfa = var.mfa
+  mfa_second_factor_otp = var.mfa_second_factor_otp
+  mfa_second_factor_sms = var.mfa_second_factor_sms
+  oidc_identity_providers = var.oidc_identity_providers
+}
+
+# Outputs
+output "region" {
+  description = "AWS region"
+  value       = module.identity.region
+}
+
+output "user_pool_id" {
+  description = "ID of the Cognito User Pool"
+  value       = module.identity.user_pool_id
+}
+
+output "user_pool_arn" {
+  description = "ARN of the Cognito User Pool"
+  value       = module.identity.user_pool_arn
+}
+
+output "user_pool_client_id" {
+  description = "ID of the Cognito User Pool Client"
+  value       = module.identity.user_pool_client_id
+}
+
+output "identity_pool_id" {
+  description = "ID of the Cognito Identity Pool"
+  value       = module.identity.identity_pool_id
+}
+
+output "authenticated_role_name" {
+  description = "Name of the authenticated IAM role"
+  value       = module.identity.authenticated_role_name
+}
+
+output "authenticated_role_arn" {
+  description = "ARN of the authenticated IAM role"
+  value       = module.identity.authenticated_role_arn
+}
+
+output "user_pool_domain" {
+  description = "Domain of the Cognito User Pool"
+  value       = module.identity.user_pool_domain
+}
+"
+`;
+
+exports[`ts#website#auth generator federation > oidc (terraform) > should vend the oidc_identity_providers variable and the identity provider resources 1`] = `
+"# OpenID Connect identity providers that users can sign in through, next to
+# the user pool's own sign-in. List them where you call this module, for example:
+#
+#   module "user_identity" {
+#     source = "../../common/terraform/src/core/user-identity"
+#
+#     oidc_identity_providers = [
+#       {
+#         name               = "Okta"
+#         issuer_url         = "https://example.okta.com"
+#         client_id          = "0oa1example"
+#         client_secret_name = "okta-oidc-client-secret"
+#       },
+#     ]
+#   }
+#
+# See https://awslabs.github.io/nx-plugin-for-aws/en/guides/react-website-auth-idp/
+
+variable "oidc_identity_providers" {
+  description = "OpenID Connect identity providers that users can sign in through, next to the user pool's own sign-in. Applies to every website that uses this user pool. client_secret_name is the name of an AWS Secrets Manager secret that holds the client secret as a plain string"
+  type = list(object({
+    name               = string
+    issuer_url         = string
+    client_id          = string
+    client_secret_name = string
+    scopes             = optional(list(string), ["openid", "email", "profile"])
+    attribute_mapping = optional(map(string), {
+      email       = "email"
+      given_name  = "given_name"
+      family_name = "family_name"
+    })
+    identifiers = optional(list(string), [])
+  }))
+  default = []
+
+  validation {
+    condition = alltrue([
+      for p in var.oidc_identity_providers :
+      can(regex("^[A-Za-z][A-Za-z0-9-]{2,31}$", p.name)) && upper(p.name) != "COGNITO"
+    ])
+    error_message = "Each name must be 3-32 letters, digits and hyphens, start with a letter, and not be COGNITO, which Cognito reserves for sign-in with the user pool itself."
+  }
+
+  validation {
+    condition     = length(distinct([for p in var.oidc_identity_providers : lower(p.name)])) == length(var.oidc_identity_providers)
+    error_message = "Identity provider names must be unique, ignoring case. Cognito prefixes federated usernames with the lower-case name."
+  }
+
+  validation {
+    condition = alltrue([
+      for p in var.oidc_identity_providers :
+      can(regex("^https://[^/?#@\\\\s]+(/[^?#\\\\s]*)?$", p.issuer_url))
+    ])
+    error_message = "Each issuer_url must use https:// and have no query, fragment, user name, password or whitespace."
+  }
+
+  validation {
+    condition = alltrue([
+      for p in var.oidc_identity_providers :
+      !can(regex("^https://login\\\\.microsoftonline\\\\.com/(common|organizations|consumers|9188040d-6c67-4c5b-b112-36a304b66dad)(/|$)", lower(p.issuer_url)))
+    ])
+    error_message = "Microsoft Entra ID multi-tenant issuers (common, organizations, consumers, 9188040d-6c67-4c5b-b112-36a304b66dad) are not supported. Use your tenant's issuer, https://login.microsoftonline.com/<tenant-id>/v2.0."
+  }
+
+  validation {
+    condition = alltrue([
+      for p in var.oidc_identity_providers :
+      !(startswith(lower(p.issuer_url), "https://login.microsoftonline.com/") && endswith(p.issuer_url, "/"))
+    ])
+    error_message = "Microsoft Entra ID issuers have no trailing slash, for example https://login.microsoftonline.com/<tenant-id>/v2.0."
+  }
+
+  validation {
+    condition = alltrue([
+      for p in var.oidc_identity_providers :
+      !can(regex("^https://[^/]+\\\\.auth0\\\\.com(/|$)", lower(p.issuer_url))) || endswith(p.issuer_url, "/")
+    ])
+    error_message = "Auth0 issuers end with a slash, for example https://example.us.auth0.com/."
+  }
+
+  validation {
+    condition = alltrue([
+      for p in var.oidc_identity_providers : length(trimspace(p.client_id)) > 0
+    ])
+    error_message = "Each client_id must not be empty."
+  }
+
+  validation {
+    condition = alltrue([
+      for p in var.oidc_identity_providers :
+      can(regex("^[A-Za-z0-9/_+=.@-]{1,512}$", p.client_secret_name))
+    ])
+    error_message = "Each client_secret_name must be the name of a secret: 1-512 letters, digits and / _ + = . @ -."
+  }
+
+  validation {
+    condition = alltrue([
+      for p in var.oidc_identity_providers : contains(p.scopes, "openid")
+    ])
+    error_message = "Each scopes list must include openid."
+  }
+
+  validation {
+    condition = alltrue([
+      for p in var.oidc_identity_providers : length(p.identifiers) <= 50
+    ])
+    error_message = "Each identifiers list must have at most 50 entries."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for p in var.oidc_identity_providers : [
+        for i in p.identifiers : can(regex("^[\\\\w\\\\s+=.@-]{1,40}$", i))
+      ]
+    ]))
+    error_message = "Each identifier must be 1-40 letters, digits, spaces or _ + = . @ -."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for p in var.oidc_identity_providers : [
+        for k in keys(p.attribute_mapping) :
+        can(regex("^(address|birthdate|email|email_verified|family_name|gender|given_name|locale|middle_name|name|nickname|phone_number|picture|preferred_username|profile|zoneinfo|updated_at|website|phone_number_verified|custom:\\\\w{1,20})$", k))
+      ]
+    ]))
+    error_message = "Each attribute_mapping key must be a user pool attribute: a standard attribute such as given_name, phone_number_verified or custom:<name>. username is mapped to sub for you."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for p in var.oidc_identity_providers : [
+        for v in values(p.attribute_mapping) : length(v) >= 1 && length(v) <= 128
+      ]
+    ]))
+    error_message = "Each attribute_mapping value must be a claim name of 1-128 characters."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for p in var.oidc_identity_providers : [
+        for a in ["email", "given_name", "family_name"] : contains(keys(p.attribute_mapping), a)
+      ]
+    ]))
+    error_message = "Each attribute_mapping must map email, given_name and family_name, which the user pool requires."
+  }
+}
+
+output "idp_redirect_uri" {
+  description = "Redirect URI to register at each identity provider"
+  value       = module.identity.idp_redirect_uri
+}
+"
+`;
+
+exports[`ts#website#auth generator federation > oidc (terraform) > should vend the oidc_identity_providers variable and the identity provider resources 2`] = `
+"variable "oidc_identity_providers" {
+  description = "OpenID Connect identity providers that users can sign in through. Validated by the user-identity module"
+  type = list(object({
+    name               = string
+    issuer_url         = string
+    client_id          = string
+    client_secret_name = string
+    scopes             = optional(list(string), ["openid", "email", "profile"])
+    attribute_mapping = optional(map(string), {
+      email       = "email"
+      given_name  = "given_name"
+      family_name = "family_name"
+    })
+    identifiers = optional(list(string), [])
+  }))
+  default = []
+}
+
+locals {
+  oidc_identity_providers = { for p in var.oidc_identity_providers : p.name => p }
+}
+
+# The client secret value is stored in plain text in Terraform state and in
+# saved plans. See https://awslabs.github.io/nx-plugin-for-aws/en/guides/react-website-auth-idp/#the-client-secret
+data "aws_secretsmanager_secret_version" "oidc_client_secret" {
+  for_each  = local.oidc_identity_providers
+  secret_id = each.value.client_secret_name
+}
+
+resource "aws_cognito_identity_provider" "oidc" {
+  for_each      = local.oidc_identity_providers
+  user_pool_id  = aws_cognito_user_pool.user_pool.id
+  provider_name = each.key
+  provider_type = "OIDC"
+
+  provider_details = {
+    client_id                     = each.value.client_id
+    client_secret                 = data.aws_secretsmanager_secret_version.oidc_client_secret[each.key].secret_string
+    authorize_scopes              = join(" ", each.value.scopes)
+    attributes_request_method     = "GET"
+    attributes_url_add_attributes = "false"
+    oidc_issuer                   = each.value.issuer_url
+  }
+
+  # Cognito adds username = sub when it reads the provider back
+  attribute_mapping = merge(each.value.attribute_mapping, { username = "sub" })
+  idp_identifiers   = length(each.value.identifiers) > 0 ? each.value.identifiers : null
+}
+
+output "idp_redirect_uri" {
+  description = "Redirect URI to register at each identity provider"
+  value       = "https://\${aws_cognito_user_pool_domain.user_pool_domain.domain}.auth.\${data.aws_region.current.region}.amazoncognito.com/oauth2/idpresponse"
+}
+"
+`;
+
+exports[`ts#website#auth generator federation > should print the cdk next steps 1`] = `
+"OpenID Connect federation is ready to configure. No identity provider is deployed until you add one.
+
+  1. Deploy once. The IdpRedirectUri output of the stack that contains UserIdentity is the redirect URI to register.
+  2. Register an application at your identity provider with that redirect URI, and note its client ID and client secret.
+  3. Store the client secret in AWS Secrets Manager as a plain string, in the region of your stack. Run these commands in bash or zsh. They wait for you to paste the secret and press Enter, and do not show it. The secret goes to a file in a new private temporary directory, not on the command line, so it stays out of your shell history and the process list. The directory is deleted when the commands finish or are interrupted:
+
+       (
+         umask 077
+         d=$(mktemp -d) || exit
+         trap 'rm -rf "$d"' EXIT
+         trap 'exit 1' HUP INT TERM
+         unset CLIENT_SECRET
+         IFS= read -rs CLIENT_SECRET || exit 1
+         printf '%s' "$CLIENT_SECRET" > "$d/secret" || exit 1
+         unset CLIENT_SECRET
+         aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string "file://$d/secret" --region <region>
+       )
+
+  4. Add the identity provider to UserIdentity in your stack, then deploy:
+
+       new UserIdentity(this, 'Identity', {
+         oidcIdentityProviders: [
+           {
+             name: 'Okta',
+             issuerUrl: 'https://example.okta.com',
+             clientId: '<client id>',
+             clientSecretName: 'okta-oidc-client-secret',
+           },
+         ],
+       });
+
+Anyone an identity provider signs in for this application can sign in to every website that uses this user pool, and gets the identity pool's authenticated role, whatever allowSignup says. Limit who can sign in at the identity provider, as https://awslabs.github.io/nx-plugin-for-aws/en/guides/react-website-auth-idp/#who-can-sign-in describes.
+
+See https://awslabs.github.io/nx-plugin-for-aws/en/guides/react-website-auth-idp/"
+`;
+
+exports[`ts#website#auth generator federation > should print the terraform next steps 1`] = `
+"OpenID Connect federation is ready to configure. No identity provider is deployed until you add one.
+
+  1. Add output "idp_redirect_uri" { value = module.user_identity.idp_redirect_uri } to your root module and apply. Its value is the redirect URI to register.
+  2. Register an application at your identity provider with that redirect URI, and note its client ID and client secret.
+  3. Store the client secret in AWS Secrets Manager as a plain string, in the region of your stack. Run these commands in bash or zsh. They wait for you to paste the secret and press Enter, and do not show it. The secret goes to a file in a new private temporary directory, not on the command line, so it stays out of your shell history and the process list. The directory is deleted when the commands finish or are interrupted:
+
+       (
+         umask 077
+         d=$(mktemp -d) || exit
+         trap 'rm -rf "$d"' EXIT
+         trap 'exit 1' HUP INT TERM
+         unset CLIENT_SECRET
+         IFS= read -rs CLIENT_SECRET || exit 1
+         printf '%s' "$CLIENT_SECRET" > "$d/secret" || exit 1
+         unset CLIENT_SECRET
+         aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string "file://$d/secret" --region <region>
+       )
+
+  4. Add the identity provider to module "user_identity" in your root module, then apply:
+
+       module "user_identity" {
+         source = "../../common/terraform/src/core/user-identity"
+
+         oidc_identity_providers = [
+           {
+             name               = "Okta"
+             issuer_url         = "https://example.okta.com"
+             client_id          = "<client id>"
+             client_secret_name = "okta-oidc-client-secret"
+           },
+         ]
+       }
+
+Anyone an identity provider signs in for this application can sign in to every website that uses this user pool, and gets the identity pool's authenticated role, whatever allow_signup says. Limit who can sign in at the identity provider, as https://awslabs.github.io/nx-plugin-for-aws/en/guides/react-website-auth-idp/#who-can-sign-in describes.
+
+See https://awslabs.github.io/nx-plugin-for-aws/en/guides/react-website-auth-idp/"
+`;

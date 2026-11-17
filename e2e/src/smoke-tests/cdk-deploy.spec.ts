@@ -8,9 +8,21 @@ import { join } from 'node:path';
 import { CloudFormation, StackStatus } from '@aws-sdk/client-cloudformation';
 import { ensureDirSync } from 'fs-extra';
 import { runCLI, tmpProjPath } from '../utils';
+import { renderIdpPlaceholders } from '../utils/idp-placeholders';
+import {
+  checkFederation,
+  createTestIdp,
+  deleteTestIdp,
+  newTestIdp,
+  registerIdpCallback,
+  sweepTestIdps,
+  type TestIdp,
+  testIdpPlaceholderValues,
+} from '../utils/test-idp';
 import {
   buildGatewayTargetUrl,
   DENIED_TOPIC_PROMPT,
+  getRegion,
   invokeAgentCoreA2a,
   invokeAgentCoreA2aUrl,
   invokeAgentCoreAgent,
@@ -39,6 +51,7 @@ import {
   type ApiSpec,
   createCognitoTestUser,
   installChromium,
+  runFederatedSignInTest,
   runWebsiteIntegrationTest,
   writeIntegrationTestPage,
 } from './website-integration';
@@ -130,6 +143,10 @@ describe('smoke test - cdk-deploy', () => {
   });
 
   it('should generate and build', async () => {
+    const region = getRegion();
+    // Delete identity providers that killed runs left behind.
+    await sweepTestIdps(region);
+
     const { opts } = await runSmokeTest(
       targetDir,
       pkgMgr,
@@ -169,8 +186,25 @@ describe('smoke test - cdk-deploy', () => {
     writeFileSync(nxJsonPath, JSON.stringify(nxJson, null, 2));
 
     const cdkStageName = `e2e-test-infra-sandbox-${testRunId}`;
+    let idp: TestIdp | undefined;
 
     try {
+      // Create the external identity provider, then wire its real values into
+      // the application stack. The build used sample values; deploy
+      // synthesises again.
+      idp = newTestIdp(testRunId, region);
+      await createTestIdp(idp);
+      writeFileSync(
+        `${opts.cwd}/packages/infra/src/stacks/application-stack.ts`,
+        renderIdpPlaceholders(
+          readFileSync(
+            join(__dirname, '../files/application-stack.ts.template'),
+            'utf-8',
+          ),
+          testIdpPlaceholderValues(idp),
+        ),
+      );
+
       // Apply any pending sync changes (license headers, tsconfig references,
       // the regenerated TanStack route tree) so the subsequent `deploy` does
       // not abort on an out-of-sync workspace.
@@ -497,6 +531,22 @@ describe('smoke test - cdk-deploy', () => {
         expectedAgents: WEBSITE_AGENTS,
         login,
       });
+
+      // Federation: let the identity provider redirect to the main user pool,
+      // check how the pool registers it, then sign in through it.
+      await registerIdpCallback(
+        idp,
+        findOutput('UserIdentityOidcIdentityProvidersIdpRedirectUri'),
+      );
+      await checkFederation({
+        region,
+        userPoolId: findOutput('UserIdentityUserIdentityUserPoolId'),
+        userPoolClientId: findOutput(
+          'UserIdentityUserIdentityUserPoolClientId',
+        ),
+        idp,
+      });
+      await runFederatedSignInTest(`https://${websiteDomain}`, idp);
     } finally {
       try {
         await runCLI(
@@ -509,6 +559,11 @@ describe('smoke test - cdk-deploy', () => {
       // cdk destroy skips cross-region stacks (e.g. WAF in us-east-1) when
       // the main stack is in ROLLBACK_COMPLETE. Clean up any leftovers.
       await deleteLeftoverStacks(cdkStageName);
+      // The main user pool, which reads the identity provider's secret, is
+      // gone, so the identity provider can go too.
+      if (idp) {
+        await deleteTestIdp(idp);
+      }
     }
   });
 });

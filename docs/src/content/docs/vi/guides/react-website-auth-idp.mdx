@@ -1,0 +1,436 @@
+---
+title: Nhà cung cấp danh tính cho Website
+description: Cho phép người dùng đăng nhập vào website của bạn thông qua nhà cung cấp danh tính OpenID Connect bên ngoài như Okta, Auth0 hoặc Microsoft Entra ID
+generator: ts#website#auth
+when:
+  federation: [oidc]
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+
+<Link path="guides/react-website-auth">Xác thực website</Link> tạo một user pool Amazon Cognito, và theo mặc định chỉ những người dùng có tên người dùng và mật khẩu trong pool đó mới có thể đăng nhập. Nếu nhân viên hoặc khách hàng của bạn đã có tài khoản tại một nhà cung cấp danh tính (IdP), chẳng hạn như Okta, Auth0 hoặc Microsoft Entra ID, họ sẽ cần một tài khoản thứ hai chỉ để sử dụng website của bạn.
+
+Chạy `ts#website#auth` với `--federation=oidc` cho phép bạn thêm các nhà cung cấp danh tính [OpenID Connect](https://openid.net/developers/how-connect-works/) (OIDC) bên ngoài vào user pool. Bạn liệt kê các nhà cung cấp danh tính trong infrastructure code của mình: prop `oidcIdentityProviders` của `UserIdentity` trong CDK, hoặc biến `oidc_identity_providers` của module `user_identity` trong Terraform. Trang đăng nhập sau đó sẽ hiển thị một nút cho mỗi nhà cung cấp danh tính bên cạnh biểu mẫu tên người dùng và mật khẩu.
+
+## Cách hoạt động
+
+- Website của bạn vẫn gửi người dùng đến trang đăng nhập Cognito. Trang này giờ có một nút được đặt tên theo mỗi nhà cung cấp danh tính.
+- Người dùng chọn một nút sẽ đăng nhập tại nhà cung cấp danh tính đó. Nhà cung cấp danh tính gửi họ trở lại Cognito tại redirect URI của nó, `https://<cognito domain>/oauth2/idpresponse`.
+- Cognito tạo một người dùng trong user pool của bạn cho họ, một federated user, và sao chép các claims bạn ánh xạ (ví dụ `email`) vào các thuộc tính của người dùng.
+- Sau đó Cognito phát hành cùng loại token mà nó phát hành cho người dùng cục bộ. Các API, agent và identity pool của bạn chấp nhận chúng mà không cần thay đổi gì.
+
+Người dùng có tên người dùng và mật khẩu trong pool vẫn có thể đăng nhập.
+
+## Ai có thể đăng nhập
+
+Thêm một nhà cung cấp danh tính có thể cho phép nhiều người vào website của bạn hơn bạn mong đợi. Tùy chọn `allowSignup` của `ts#website#auth` không áp dụng cho federated users. Cognito tạo một federated user lần đầu tiên ai đó đăng nhập thông qua nhà cung cấp danh tính, ngay cả khi user pool không cho phép người dùng tự đăng ký. Mỗi federated user cũng nhận được authenticated role của identity pool, vì vậy họ có thể gọi các API và agent của bạn như bất kỳ người dùng đã đăng nhập nào.
+
+Các nhà cung cấp danh tính áp dụng cho toàn bộ user pool. Mọi website sử dụng pool đều hiển thị các nút của chúng và chấp nhận người dùng của chúng.
+
+Do đó nhà cung cấp danh tính quyết định ai có thể đăng nhập. Thiết lập nó sao cho nó chỉ cho phép đăng nhập những người cần website của bạn:
+
+- Microsoft Entra ID: trong thuộc tính enterprise application của ứng dụng, đặt "Assignment required?" thành Yes, và chỉ gán những người dùng hoặc nhóm cần quyền truy cập. Với mặc định, No, mọi người dùng trong tenant của bạn đều có thể đăng nhập.
+- Okta: chỉ gán ứng dụng cho các nhóm cần quyền truy cập.
+- Auth0: vô hiệu hóa sign-ups trên mỗi connection mà ứng dụng sử dụng, và chỉ bật cho ứng dụng những connection mà người dùng của chúng cần quyền truy cập. Nếu không, bất kỳ ai đăng ký thông qua một connection đã bật, ví dụ như một social connection, đều có thể đăng nhập.
+
+## Sử dụng
+
+### Thêm OpenID Connect federation
+
+Chạy generator <Link path="guides/react-website-auth">`ts#website#auth`</Link> với `--federation=oidc`. Bạn có thể chạy nó trên một website chưa có xác thực, hoặc trên một website đã có xác thực. Cả hai đều cho kết quả giống nhau.
+
+<RunGenerator generator="ts#website#auth" requiredParameters={{ federation: 'oidc' }} />
+
+Generator không thêm nhà cung cấp danh tính nào. Danh sách bắt đầu trống, vì vậy đăng nhập hoạt động như trước cho đến khi bạn thêm một mục. Bạn thêm các nhà cung cấp danh tính vào infrastructure code của mình, vì vậy việc thêm nhà cung cấp thứ hai không cần chạy lại generator.
+
+Chạy lại generator với `--federation=oidc` không thay đổi file nào. Chạy nó với `--federation=none`, hoặc không có `--federation`, sẽ giữ nguyên federation đã có.
+
+### Thêm nhà cung cấp danh tính
+
+Thêm một mục cho mỗi nhà cung cấp danh tính, sau đó deploy. Client secret không bao giờ đi vào code của bạn. Bạn lưu trữ nó trong AWS Secrets Manager và cung cấp tên của nó, như mô tả trong [Thiết lập nhà cung cấp danh tính của bạn](#set-up-your-identity-provider).
+
+<Infrastructure>
+  <Fragment slot="cdk">
+Truyền các nhà cung cấp danh tính cho `UserIdentity` trong stack của bạn:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyWebsite, UserIdentity } from '@my-scope/common-constructs';
+
+const identity = new UserIdentity(this, 'Identity', {
+  oidcIdentityProviders: [
+    {
+      name: 'Okta',
+      issuerUrl: 'https://example.okta.com',
+      clientId: '0oa1example',
+      clientSecretName: 'okta-oidc-client-secret',
+    },
+    {
+      name: 'Entra',
+      issuerUrl: 'https://login.microsoftonline.com/<tenant-id>/v2.0',
+      clientId: '11111111-2222-3333-4444-555555555555',
+      clientSecretName: 'entra-oidc-client-secret',
+      identifiers: ['example.com'],
+    },
+  ],
+});
+new MyWebsite(this, 'MyWebsite');
+```
+
+`OidcIdentityProviderProps`, kiểu của mỗi mục, được xuất từ shared constructs package của bạn, vì vậy bạn có thể xây dựng danh sách ở nơi khác và import kiểu.
+  </Fragment>
+  <Fragment slot="terraform">
+Truyền các nhà cung cấp danh tính cho module `user_identity` trong root module của bạn, và thêm một output cho redirect URI:
+
+```hcl title="packages/infra/src/main.tf"
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+
+  oidc_identity_providers = [
+    {
+      name               = "Okta"
+      issuer_url         = "https://example.okta.com"
+      client_id          = "0oa1example"
+      client_secret_name = "okta-oidc-client-secret"
+    },
+  ]
+}
+
+output "idp_redirect_uri" {
+  value = module.user_identity.idp_redirect_uri
+}
+```
+
+Để sử dụng các nhà cung cấp danh tính khác nhau trong mỗi môi trường, khai báo một root variable và đặt nó trong file `.tfvars` của mỗi môi trường. Root variable có `type = any`, vì biến của module kiểm tra kiểu:
+
+```hcl
+# packages/infra/src/variables.tf
+variable "oidc_identity_providers" {
+  type    = any
+  default = []
+}
+
+# packages/infra/src/env/dev.tfvars
+oidc_identity_providers = [
+  { name = "Okta", issuer_url = "https://example.okta.com", client_id = "0oa1example", client_secret_name = "okta-oidc-client-secret" },
+]
+
+# packages/infra/src/main.tf, in module "user_identity"
+oidc_identity_providers = var.oidc_identity_providers
+```
+  </Fragment>
+</Infrastructure>
+
+### Tùy chọn
+
+Mỗi nhà cung cấp danh tính trong danh sách có các thuộc tính này. Các tùy chọn generator được mô tả trong <Link path="guides/react-website-auth">xác thực website</Link>.
+
+| CDK prop | Terraform attribute | Required | Default | Description |
+|---|---|---|---|---|
+| `name` | `name` | Yes | | Hiển thị trên nút đăng nhập. Cognito thêm tiền tố cho federated usernames bằng nó ở dạng chữ thường (`<name>_<sub>`). 3-32 chữ cái, chữ số và dấu gạch ngang, bắt đầu bằng một chữ cái. Không phải `COGNITO`. Duy nhất trong danh sách, bỏ qua chữ hoa chữ thường. Trong CDK nó phải là một chuỗi literal, không phải token. |
+| `issuerUrl` | `issuer_url` | Yes | | Issuer chính xác như nó xuất hiện trong claim `iss` của token của nhà cung cấp danh tính. Phải sử dụng `https://`. |
+| `clientId` | `client_id` | Yes | | Client ID của ứng dụng đã đăng ký tại nhà cung cấp danh tính. |
+| `clientSecretName` | `client_secret_name` | Yes | | Tên của Secrets Manager secret chứa client secret dưới dạng chuỗi thuần túy. Một tên, không phải ARN. |
+| `scopes` | `scopes` | No | `openid`, `email`, `profile` | Các OAuth scope để yêu cầu. Phải bao gồm `openid`. |
+| `attributeMapping` | `attribute_mapping` | No | `email`, `given_name` và `family_name`, mỗi cái ánh xạ đến claim có cùng tên | Thuộc tính user pool ánh xạ đến claim của nhà cung cấp danh tính. Xem [Ánh xạ thuộc tính](#attribute-mapping). |
+| `identifiers` | `identifiers` | No | None | Các định danh, chẳng hạn như email domain, mà Cognito có thể sử dụng để gửi người dùng đến nhà cung cấp danh tính này. |
+
+### Validation
+
+Code được tạo ra kiểm tra mỗi mục trước khi bất cứ thứ gì được deploy:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+`UserIdentity` ném lỗi khi bạn tạo nó với một mục vi phạm quy tắc, vì vậy `cdk synth` thất bại. Build của infra project chạy `cdk synth`. Thông báo đặt tên cho mục, ví dụ `UserIdentity: oidcIdentityProviders[1] (Entra): Microsoft Entra ID issuers have no trailing slash. Use https://login.microsoftonline.com/<tenant-id>/v2.0`.
+
+Một giá trị là token, ví dụ như một giá trị được đọc từ AWS Systems Manager Parameter Store, không được kiểm tra. Một giá trị sai sau đó làm thất bại deploy thay vì synth. `name` không được là token.
+  </Fragment>
+  <Fragment slot="terraform">
+Biến `oidc_identity_providers` của module có một khối `validation` cho mỗi quy tắc. Thông báo lỗi của nó không đặt tên cho mục vi phạm quy tắc.
+
+Khi bạn viết danh sách dưới dạng literal trong khối module `user_identity`, `terraform validate` kiểm tra nó. Target `validate` của project chạy `terraform validate`. Khi danh sách đến từ một root variable, như trong mẫu `.tfvars` ở trên, `terraform plan` kiểm tra nó thay thế.
+  </Fragment>
+</Infrastructure>
+
+Các quy tắc:
+
+- `name`: 3-32 chữ cái, chữ số và dấu gạch ngang, bắt đầu bằng một chữ cái. Không phải `COGNITO` ở bất kỳ dạng nào, vì Cognito dành riêng nó cho đăng nhập với chính user pool.
+- Các tên là duy nhất trong danh sách, bỏ qua chữ hoa chữ thường, vì Cognito thêm tiền tố cho federated usernames bằng tên chữ thường. Ví dụ, `Okta` và `OKTA` không thể cùng có trong danh sách. `test-idp` và `testidp` có thể, vì tiền tố của chúng khác nhau.
+- Issuer sử dụng `https://` và không có query, fragment, user name, password hoặc khoảng trắng. Trong CDK nó cũng phải phân tích được dưới dạng URL. Trong Terraform một biểu thức chính quy kiểm tra nó, chấp nhận một số URL không đúng định dạng mà CDK từ chối.
+- Microsoft Entra ID: các issuer multi-tenant (`common`, `organizations`, `consumers` và `9188040d-6c67-4c5b-b112-36a304b66dad`) bị từ chối, và issuer không được kết thúc bằng dấu gạch chéo.
+- Auth0: một issuer trên `*.auth0.com` phải kết thúc bằng dấu gạch chéo.
+- Client ID không được trống.
+- Tên secret là 1-512 chữ cái, chữ số và `/ _ + = . @ -`. Đây là các quy tắc đặt tên của Secrets Manager, vì vậy ARN bị từ chối.
+- Các scope bao gồm `openid`. Trong CDK mỗi scope cũng phải không trống và không có khoảng trắng.
+- Các key và value của attribute mapping tuân theo các quy tắc trong [Ánh xạ thuộc tính](#attribute-mapping).
+- Tối đa 50 định danh. Mỗi cái là 1-40 chữ cái, chữ số, khoảng trắng hoặc `_ + = . @ -`.
+
+## Đầu ra của Generator
+
+Với `--federation=oidc` generator thêm các file và chỉnh sửa này cho nhà cung cấp `iac` bạn đã chọn:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src/core
+        - oidc-identity-providers.ts Construct `OidcIdentityProviders`, props của nó và validation
+        - index.ts Giờ xuất `oidc-identity-providers.ts`
+        - user-identity.ts Giờ có prop `oidcIdentityProviders` và tạo các nhà cung cấp danh tính
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src/core/user-identity
+        - oidc-identity-providers.tf Biến `oidc_identity_providers` với validation của nó, và output `idp_redirect_uri`
+        - main.tf Giờ truyền biến đến identity module
+        - identity
+          - oidc-identity-providers.tf Các nhà cung cấp danh tính, data source đọc mỗi client secret, và output `idp_redirect_uri`
+          - identity.tf Giờ liệt kê các nhà cung cấp danh tính trên web client
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+Các chỉnh sửa cho phép web client của user pool, Cognito app client mà website của bạn đăng nhập qua, chấp nhận các nhà cung cấp danh tính:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```diff lang="ts" title="packages/common/constructs/src/core/user-identity.ts"
++import {
++  OidcIdentityProviders,
++  type OidcIdentityProviderProps,
++} from './oidc-identity-providers.js';
+   readonly mfaSecondFactor?: MfaSecondFactor;
++
++  /**
++   * OpenID Connect identity providers users can sign in through, next to the user pool's own sign-in.
++   * Applies to every website that uses this user pool.
++   * ...
++   */
++  readonly oidcIdentityProviders?: OidcIdentityProviderProps[];
+ }
+       mfaSecondFactor = { sms: true, otp: true },
++      oidcIdentityProviders = [],
+     }: UserIdentityProps = {},
+     this.userPoolDomain = this.createUserPoolDomain(this.userPool);
++    new OidcIdentityProviders(this, 'OidcIdentityProviders', {
++      userPool: this.userPool,
++      userPoolDomain: this.userPoolDomain,
++      providers: oidcIdentityProviders,
++    });
+     this.userPoolClient = this.createUserPoolClient(this.userPool);
+```
+
+`UserIdentity` tạo các nhà cung cấp danh tính trước web client, vì vậy web client liệt kê chúng, theo sau là `COGNITO`.
+  </Fragment>
+  <Fragment slot="terraform">
+```diff lang="hcl" title="packages/common/terraform/src/core/user-identity/main.tf"
+   mfa_second_factor_sms = var.mfa_second_factor_sms
++  oidc_identity_providers = var.oidc_identity_providers
+```
+
+```diff lang="hcl" title="packages/common/terraform/src/core/user-identity/identity/identity.tf"
+-  supported_identity_providers = ["COGNITO"]
++  supported_identity_providers = concat(["COGNITO"], [for p in aws_cognito_identity_provider.oidc : p.provider_name])
+```
+
+Mỗi nhà cung cấp danh tính là một instance `for_each` được khóa bằng tên của nó, ví dụ `aws_cognito_identity_provider.oidc["Okta"]`. Do đó việc đổi tên một mục sẽ thay thế nhà cung cấp danh tính đó.
+  </Fragment>
+</Infrastructure>
+
+Generator không ghi đè các chỉnh sửa của bạn đối với các file mới. Nếu bạn đã thay đổi `user-identity.ts`, hoặc `main.tf` hoặc `identity.tf`, sao cho generator không còn nhận ra nó, generator sẽ để các file đó không thay đổi. Nó vẫn thêm các file mới, và in ra các dòng cần thêm bằng tay.
+
+## Thiết lập nhà cung cấp danh tính của bạn
+
+Lần deploy thêm một nhà cung cấp danh tính sẽ đọc client secret của nó từ Secrets Manager. Nếu secret không tồn tại, deploy sẽ thất bại.
+
+<Infrastructure>
+  <Fragment slot="cdk">
+CloudFormation đọc secret với execution role của stack, theo mặc định là `cdk-hnb659fds-cfn-exec-role-<account>-<region>`. Role đó cần `secretsmanager:GetSecretValue` trên secret, cộng với `kms:Decrypt` trên key nếu secret được mã hóa bằng customer managed AWS KMS key.
+  </Fragment>
+  <Fragment slot="terraform">
+Identity chạy `terraform apply` đọc secret. Nó cần `secretsmanager:GetSecretValue` trên secret, cộng với `kms:Decrypt` trên key nếu secret được mã hóa bằng customer managed AWS KMS key.
+  </Fragment>
+</Infrastructure>
+
+Thực hiện các bước này theo thứ tự. Generator cũng in chúng ra khi nó hoàn thành.
+
+1. Chạy `ts#website#auth` với `--federation=oidc`, và deploy một lần.
+2. Tìm redirect URI của user pool của bạn. Tất cả các nhà cung cấp danh tính của pool sử dụng cùng một URI.
+
+<Infrastructure>
+  <Fragment slot="cdk">
+Stack chứa `UserIdentity` có một output mà key của nó bắt đầu bằng `<id>OidcIdentityProvidersIdpRedirectUri`, trong đó `<id>` là construct ID bạn đã cung cấp cho `UserIdentity`, ví dụ `IdentityOidcIdentityProvidersIdpRedirectUri`. Bạn cũng có thể tính toán nó trước khi deploy, từ `cognitoDomain` bạn đã chọn cho `ts#website#auth`, AWS account ID và region của bạn:
+
+```
+https://<cognitoDomain>-<account>.auth.<region>.amazoncognito.com/oauth2/idpresponse
+```
+  </Fragment>
+  <Fragment slot="terraform">
+Cognito domain có một hậu tố ngẫu nhiên, nên redirect URI chỉ được biết sau khi deploy. Module `user_identity` xuất nó dưới dạng `idp_redirect_uri`. Để xem nó, thêm một output vào root module của bạn, ví dụ `packages/infra/src/main.tf`:
+
+```hcl
+output "idp_redirect_uri" { value = module.user_identity.idp_redirect_uri }
+```
+  </Fragment>
+</Infrastructure>
+
+3. Đăng ký một ứng dụng tại nhà cung cấp danh tính với redirect URI đó, và ghi lại client ID và client secret của nó. Chỉ đăng ký URI `/oauth2/idpresponse` này tại nhà cung cấp danh tính. Các URL của chính website của bạn được đăng ký với Cognito, không phải với nhà cung cấp danh tính.
+4. Lưu trữ client secret trong Secrets Manager. Truyền nó trong một file, không phải dưới dạng đối số dòng lệnh. Một đối số sẽ ở lại trong lịch sử shell của bạn, và những người dùng khác trên cùng máy tính có thể thấy nó trong danh sách tiến trình khi lệnh đang chạy:
+
+   ```bash
+   (
+     umask 077
+     d=$(mktemp -d) || exit
+     trap 'rm -rf "$d"' EXIT
+     trap 'exit 1' HUP INT TERM
+     unset CLIENT_SECRET
+     IFS= read -rs CLIENT_SECRET || exit 1
+     printf '%s' "$CLIENT_SECRET" > "$d/secret" || exit 1
+     unset CLIENT_SECRET
+     aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string "file://$d/secret" --region <region>
+   )
+   ```
+
+   Các lệnh chạy trong một subshell, giữa các dấu ngoặc đơn. `read` đợi bạn dán client secret và nhấn Enter, và không hiển thị nó. Hai lệnh `unset` giữ secret ra khỏi môi trường của lệnh `aws`, ngay cả khi bạn đã export `CLIENT_SECRET` trước đó. `IFS=` và `-r` giữ secret chính xác như bạn dán nó, bao gồm cả khoảng trắng ở hai đầu và dấu gạch chéo ngược. `mktemp -d` tạo một thư mục mới mà chỉ bạn có thể mở (mode 700), và `printf` ghi secret vào đó mà không có ký tự xuống dòng ở cuối. AWS CLI đọc giá trị của `--secret-string` từ file được đặt tên sau `file://` và truyền nó không thay đổi, vì vậy một ký tự xuống dòng ở cuối file sẽ trở thành một phần của secret. Khi subshell kết thúc, các lệnh `trap` xóa thư mục. Chúng cũng làm điều này nếu lệnh `aws` thất bại hoặc bạn nhấn Ctrl-C. Các lệnh hoạt động trong bash và zsh, các shell mặc định trên Linux và macOS. Đối với Windows, xem [Mitigate the risks of using the AWS CLI to store your AWS Secrets Manager secrets](https://docs.aws.amazon.com/secretsmanager/latest/userguide/security_cli-exposure-risks.html).
+
+   Đặt `--region` thành region của stack của bạn. Secret phải tồn tại trong region đó trước lần deploy thêm nhà cung cấp danh tính. Lưu trữ secret dưới dạng chuỗi thuần túy, không phải JSON, vì Cognito nhận toàn bộ giá trị secret làm client secret. Trong bảng điều khiển Secrets Manager, chọn Plaintext, không phải Key/value.
+
+5. Thêm nhà cung cấp danh tính vào danh sách, với tên của secret làm `clientSecretName` (`client_secret_name` trong Terraform), như [Thêm nhà cung cấp danh tính](#add-identity-providers) cho thấy. Sau đó deploy.
+
+## Ánh xạ thuộc tính
+
+User pool được tạo yêu cầu các thuộc tính `email`, `given_name` và `family_name`. Cognito điền chúng từ các claims của nhà cung cấp danh tính ở mỗi lần đăng nhập. Nếu nhà cung cấp danh tính không gửi một trong số chúng, lần đăng nhập đầu tiên của người dùng sẽ thất bại. `UserIdentity` và biến Terraform do đó từ chối một attribute mapping bỏ qua bất kỳ thuộc tính nào trong ba thuộc tính này.
+
+`attributeMapping` (`attribute_mapping` trong Terraform) ánh xạ các thuộc tính user pool đến claims. Mỗi key là một thuộc tính user pool, và mỗi value là tên của claim của nhà cung cấp danh tính, dài 1-128 ký tự. Một ánh xạ bạn cung cấp sẽ thay thế ánh xạ mặc định. Ánh xạ mặc định ánh xạ mỗi thuộc tính bắt buộc đến claim có cùng tên:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts
+attributeMapping: { email: 'email', given_name: 'given_name', family_name: 'family_name' },
+```
+  </Fragment>
+  <Fragment slot="terraform">
+```hcl
+attribute_mapping = { email = "email", given_name = "given_name", family_name = "family_name" }
+```
+  </Fragment>
+</Infrastructure>
+
+- Một key có thể là bất kỳ [thuộc tính chuẩn](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-attributes.html#cognito-user-pools-standard-attributes) nào, chẳng hạn như `name` hoặc `phone_number`, `phone_number_verified`, hoặc một thuộc tính tùy chỉnh như `custom:department` (tối đa 20 chữ cái, chữ số hoặc dấu gạch dưới sau `custom:`). Các key sử dụng tên thuộc tính Cognito trong cả CDK và Terraform. `username` bị từ chối.
+- Cognito coi địa chỉ email được ánh xạ là chưa xác minh. Chỉ ánh xạ `email_verified` từ một nhà cung cấp danh tính tự xác minh địa chỉ email. Nếu không, người dùng có thể đặt địa chỉ của người khác tại nhà cung cấp danh tính và có nó được đánh dấu là đã xác minh trong pool của bạn.
+- Nếu địa chỉ email của người dùng thay đổi tại nhà cung cấp danh tính, Cognito ghi địa chỉ mới vào user pool ở lần đăng nhập tiếp theo của người dùng. `email_verified` vẫn là `false`.
+- Một thuộc tính tùy chỉnh phải đã tồn tại trong user pool, và nó phải có thể thay đổi.
+
+Tài nguyên nhà cung cấp danh tính Terraform, trong `identity/oidc-identity-providers.tf`, cũng đặt hai giá trị mà Cognito thêm vào khi nó trả về nhà cung cấp danh tính: `username = "sub"` trong `attribute_mapping` và `attributes_url_add_attributes = "false"` trong `provider_details`. Vì file đặt chúng, một `terraform plan` thứ hai sau lần deploy đầu tiên không hiển thị thay đổi nào đối với nhà cung cấp danh tính. Nếu một plan thứ hai vẫn hiển thị thay đổi trong `provider_details` với một nhà cung cấp danh tính khác, hãy thêm key đó vào file với giá trị mà plan hiển thị Cognito trả về.
+
+## Ghi chú về nhà cung cấp danh tính
+
+Các cài đặt dưới đây đến từ tài liệu của mỗi nhà cung cấp. Okta đã được kiểm tra trên AWS với cả CDK và Terraform. Các cài đặt Auth0 và Microsoft Entra ID đã được kiểm tra với OpenID discovery document đã xuất bản của mỗi nhà cung cấp, nhưng không được kiểm tra với đăng nhập thực tế.
+
+### Okta
+
+Đã được kiểm tra trên AWS với CDK và Terraform. Tạo một OIDC Web Application trong Okta, với Authorization Code grant và một client secret. Đặt sign-in redirect URI của nó thành redirect URI `/oauth2/idpresponse` từ bước 2 của [Thiết lập nhà cung cấp danh tính của bạn](#set-up-your-identity-provider). Nó không cần sign-out redirect URI. Issuer là domain Okta của bạn, `https://<your-org>.okta.com`, đây là dạng đã được kiểm tra. Một custom authorization server, chẳng hạn như `https://<your-org>.okta.com/oauth2/default`, cũng có một issuer, nhưng dạng đó chưa được kiểm tra. Các scope mặc định, `openid email profile`, trả về `email`, `given_name` và `family_name`, nên ánh xạ mặc định hoạt động. Mỗi người dùng cần có email, first name và last name được đặt trong Okta. Chỉ gán ứng dụng cho những người dùng hoặc nhóm cần quyền truy cập.
+
+### Auth0
+
+Đã được kiểm tra với discovery document của Auth0, chưa được kiểm tra với đăng nhập thực tế. Tạo một Regular Web Application trong Auth0. Issuer là `https://<your-tenant>.auth0.com/`, bao gồm dấu gạch chéo cuối.
+
+:::caution
+Claim `iss` trong token Auth0 kết thúc bằng dấu gạch chéo, vì vậy một issuer không có nó sẽ làm đăng nhập thất bại. Code được tạo ra từ chối một issuer trên `*.auth0.com` không có dấu gạch chéo. Nó không thể nhận ra Auth0 custom domain, vì vậy hãy tự kiểm tra dấu gạch chéo khi bạn sử dụng một domain.
+:::
+
+Auth0 chỉ trả về `given_name` và `family_name` khi connection của người dùng cung cấp chúng. Người dùng của một connection không có chúng không thể đăng nhập cho đến khi bạn ánh xạ các claim khác.
+
+### Microsoft Entra ID
+
+Đã được kiểm tra với discovery document của Microsoft, chưa được kiểm tra với đăng nhập thực tế. Đăng ký một ứng dụng single-tenant trong Entra ID. Issuer là `https://login.microsoftonline.com/<tenant-id>/v2.0`. Code được tạo ra từ chối các issuer multi-tenant (`common`, `organizations` và `consumers`), vì chúng chấp nhận người dùng từ bất kỳ tenant Entra ID nào. Nó cũng từ chối tenant `9188040d-6c67-4c5b-b112-36a304b66dad`, chấp nhận bất kỳ tài khoản Microsoft cá nhân nào.
+
+Issuer không được kết thúc bằng dấu gạch chéo: sử dụng `/v2.0`, không phải `/v2.0/`. Claim `iss` trong token Entra ID không có dấu gạch chéo, vì vậy đăng nhập sẽ thất bại. Code được tạo ra từ chối dạng có dấu gạch chéo.
+
+Thêm `email`, `given_name` và `family_name` làm optional claims vào ID token của ứng dụng. Entra ID chỉ gửi chúng nếu bạn làm vậy. Mỗi người dùng cần có trường Mail được đặt. Nếu không, claim `email` sẽ trống, và lần đăng nhập đầu tiên của người dùng sẽ thất bại, vì user pool yêu cầu `email`. Claim `email` của Entra ID không được xác minh, vì vậy đừng ánh xạ `email_verified` từ Entra ID.
+
+### Cognito user pool
+
+Để kiểm tra với một Cognito user pool khác làm nhà cung cấp danh tính, sử dụng issuer `https://cognito-idp.<region>.amazonaws.com/<user pool id>`. Cung cấp cho app client của nó một client secret, authorization code grant và các scope `openid email profile`.
+
+## Bảo mật
+
+- Xác định người dùng bằng claim `sub` (ID duy nhất của người dùng trong user pool của bạn), không bao giờ bằng `email`. Một federated user là một người dùng mới trong pool của bạn với `sub` riêng của họ, ngay cả khi email của họ khớp với người dùng cục bộ. Code mà plugin tạo ra sử dụng `sub`.
+- Sử dụng issuer single-tenant. Một issuer multi-tenant cho phép người dùng từ bất kỳ tổ chức nào đăng nhập.
+- Xóa các callback URL `http://localhost` khỏi các stage production, như <Link path="guides/react-website-auth">xác thực website</Link> mô tả. Federation không thêm callback URL nào.
+
+## Federation không làm gì
+
+- MFA (xác thực đa yếu tố) được yêu cầu trong user pool của bạn không áp dụng cho federated users. Cognito để xác thực của họ cho nhà cung cấp danh tính, vì vậy hãy thực thi MFA tại nhà cung cấp danh tính.
+- Đăng xuất khỏi website của bạn chỉ kết thúc phiên Cognito. Nó không kết thúc phiên của người dùng tại nhà cung cấp danh tính OIDC, vì vậy lần đăng nhập tiếp theo thông qua nút có thể hoàn thành mà không cần mật khẩu. Trên máy tính dùng chung, người dùng cũng phải đăng xuất tại nhà cung cấp danh tính.
+- Menu người dùng hiển thị tên người dùng Cognito. Đối với federated user, đó là tên nhà cung cấp danh tính, một dấu gạch dưới và `sub` của người dùng tại nhà cung cấp danh tính, ở dạng chữ thường, ví dụ `okta_00u1abcd`.
+- Xóa hoặc vô hiệu hóa người dùng tại nhà cung cấp danh tính chỉ ngăn lần đăng nhập tiếp theo của họ thông qua nó. Cognito gia hạn token bằng refresh token riêng của nó và không hỏi nhà cung cấp danh tính, và website gia hạn token mà người dùng không nhận thấy. Do đó người dùng có thể giữ quyền truy cập cho đến khi refresh token hết hạn, tối đa 30 ngày sau lần đăng nhập cuối cùng của họ. Để ngăn người dùng nhận token mới, cũng đăng xuất họ khỏi mọi phiên và vô hiệu hóa họ trong user pool. Tên người dùng của họ là `<identity provider name in lowercase>_<sub>`:
+
+  ```bash
+  aws cognito-idp admin-user-global-sign-out --user-pool-id <user pool id> --username okta_<sub>
+  aws cognito-idp admin-disable-user --user-pool-id <user pool id> --username okta_<sub>
+  ```
+
+  Điều này đã được kiểm tra trên AWS. Sau `admin-user-global-sign-out` và `admin-disable-user`, nhà cung cấp danh tính vẫn đăng nhập người dùng, nhưng Cognito từ chối họ.
+
+  Các lệnh này không kết thúc quyền truy cập mà người dùng đã có. [`admin-user-global-sign-out`](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminUserGlobalSignOut.html) thu hồi refresh token của người dùng, vì vậy website không thể nhận token mới cho họ, và `admin-disable-user` ngăn lần đăng nhập tiếp theo của họ. ID và access token mà Cognito đã phát hành vẫn hợp lệ cho đến khi chúng hết hạn, theo mặc định là một giờ sau khi chúng được phát hành ([ID and access token validity](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_CreateUserPoolClient.html#CognitoUserPools-CreateUserPoolClient-request-IdTokenValidity)). AWS credentials mà identity pool đã cung cấp cho website cũng vẫn hợp lệ cho đến khi chúng hết hạn, một giờ sau khi chúng được phát hành ([identity pools authentication flow](https://docs.aws.amazon.com/cognito/latest/developerguide/concepts.html#authentication-flow-enhanced)). Cho đến khi chúng hết hạn, người dùng vẫn có thể sử dụng website và authenticated role của identity pool.
+
+  Thời hạn refresh token ngắn hơn trên web client (`refreshTokenValidity` trong CDK, `refresh_token_validity` trong Terraform) rút ngắn thời gian người dùng bị xóa giữ quyền truy cập nếu bạn không chạy các lệnh này. Thời hạn ID và access token ngắn hơn (`idTokenValidity` và `accessTokenValidity` trong CDK, `id_token_validity` và `access_token_validity` trong Terraform) rút ngắn thời gian mà các token đã phát hành vẫn hợp lệ sau khi bạn chạy các lệnh, nhưng luôn còn một khoảng thời gian. Cả hai đều chưa được kiểm tra trên AWS.
+
+## Client secret
+
+Cognito giữ client secret trong cài đặt của nhà cung cấp danh tính. Bất kỳ ai được phép gọi `cognito-idp:DescribeIdentityProvider` trên user pool của bạn đều có thể đọc nó. Đây là cách Cognito hoạt động, bất kể nhà cung cấp IaC nào bạn sử dụng.
+
+<Infrastructure>
+  <Fragment slot="cdk">
+Construct truyền secret cho CloudFormation dưới dạng [dynamic reference](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/dynamic-references-secretsmanager.html), `{{resolve:secretsmanager:<clientSecretName>:SecretString:::}}`. Template được tổng hợp chỉ chứa tham chiếu đó. CloudFormation đọc secret khi nó tạo hoặc cập nhật nhà cung cấp danh tính. Nếu bạn xoay secret, Cognito chỉ nhận giá trị mới khi tài nguyên nhà cung cấp danh tính thay đổi trong một lần deploy sau.
+
+CloudFormation giải quyết tham chiếu bên trong cài đặt của nhà cung cấp danh tính (`ProviderDetails`), vì vậy đăng nhập federated hoạt động với secret được lưu trữ, và template đã deploy vẫn chỉ giữ tham chiếu. Sau khi xoay, một lần deploy không có thay đổi nào khác để lại secret cũ trong Cognito. Cả hai đều đã được kiểm tra trên AWS.
+  </Fragment>
+  <Fragment slot="terraform">
+Module đọc secret với data source `data "aws_secretsmanager_secret_version"`, vì vậy `terraform plan` hiển thị nó là `(sensitive value)`. Terraform state vẫn giữ secret ở dạng văn bản thuần túy, một lần cho data source và một lần cho nhà cung cấp danh tính. Bất kỳ ai có thể đọc state object trong state bucket của bạn đều có thể đọc secret. Hạn chế quyền truy cập đọc vào state bucket cho phù hợp.
+
+File plan đã lưu, ví dụ từ `terraform plan -out`, cũng giữ secret ở dạng văn bản thuần túy. Nếu state bucket của bạn bật versioning, các phiên bản cũ của state giữ secret sau `terraform destroy`. Xóa các phiên bản đó khi bạn xóa stack. Sau khi kiểm tra, hãy xoay client secret tại nhà cung cấp danh tính.
+  </Fragment>
+</Infrastructure>
+
+Để gửi secret đã xoay đến Cognito:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+Thay đổi tài nguyên nhà cung cấp danh tính trong lần deploy sau khi xoay. Một cách là lưu trữ secret đã xoay dưới một tên mới và đặt `clientSecretName` thành tên đó. Tham chiếu trong template sau đó thay đổi, vì vậy CloudFormation cập nhật nhà cung cấp danh tính và đọc secret mới. Xóa secret cũ sau đó. Điều này tuân theo tài liệu CloudFormation cho dynamic references và chưa được kiểm tra trên AWS.
+  </Fragment>
+  <Fragment slot="terraform">
+Chạy `terraform plan` và `terraform apply` sau khi xoay. Data source đọc phiên bản hiện tại của secret ở mỗi plan, vì vậy plan hiển thị một cập nhật tại chỗ của nhà cung cấp danh tính, và `apply` gửi secret mới đến Cognito. Trong nguồn của nhà cung cấp `hashicorp/aws`, một thay đổi đối với `provider_details` cập nhật nhà cung cấp danh tính tại chỗ và không thay thế nó. Điều này chưa được kiểm tra trên AWS.
+  </Fragment>
+</Infrastructure>
+
+## Các app client khác
+
+Một app client là cấu hình Cognito mà một ứng dụng đăng nhập qua. Generator chỉ thêm các nhà cung cấp danh tính vào app client của website, web client. Một app client khác trong cùng user pool chỉ chấp nhận federated users nếu nó cũng liệt kê các nhà cung cấp danh tính. Ví dụ, app client bạn tạo cho <Link path="guides/ts-dcr-proxy">DCR proxy</Link> (cho phép MCP clients, các công cụ AI sử dụng Model Context Protocol, đăng nhập qua Cognito) cần chúng. Nếu không, federated users không thể đăng nhập vào MCP server của bạn.
+
+<Infrastructure>
+  <Fragment slot="cdk">
+Một app client bạn tạo với `identity.userPool.addClient(...)` sau `UserIdentity`, không có `supportedIdentityProviders`, liệt kê mọi nhà cung cấp danh tính của pool và `COGNITO`. Ví dụ DCR proxy làm điều này. Nếu app client của bạn đặt `supportedIdentityProviders`, hãy thêm các nhà cung cấp danh tính của pool vào nó:
+
+```ts
+import { UserPoolClientIdentityProvider } from 'aws-cdk-lib/aws-cognito';
+
+supportedIdentityProviders: [
+  UserPoolClientIdentityProvider.COGNITO,
+  ...identity.userPool.identityProviders.map((p) =>
+    UserPoolClientIdentityProvider.custom(p.providerName),
+  ),
+],
+```
+  </Fragment>
+  <Fragment slot="terraform">
+Thêm `name` của mỗi nhà cung cấp danh tính vào `supported_identity_providers` của app client, và làm cho app client phụ thuộc vào `module.user_identity`, để các nhà cung cấp danh tính tồn tại trước.
+  </Fragment>
+</Infrastructure>
+
+## Token cho agent chat
+
+Target `<agent>-chat` của một <Link path="guides/ts-agent">TypeScript agent</Link> với xác thực Cognito đọc một Cognito access token từ biến môi trường `AGENT_ACCESS_TOKEN`. Một federated user không có mật khẩu Cognito, vì vậy `admin-initiate-auth` không hoạt động cho họ. Thay vào đó, đăng nhập vào website của bạn, mở developer tools của trình duyệt, và sao chép `access_token` từ mục `oidc.user:...` trong session storage.

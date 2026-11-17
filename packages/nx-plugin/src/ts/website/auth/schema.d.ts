@@ -10,4 +10,5 @@ export interface TsWebsiteAuthGeneratorSchema {
   cognitoDomain?: string;
   iac: IacOption;
   preferInstallDependencies?: boolean;
+  federation?: 'none' | 'oidc';
 }
