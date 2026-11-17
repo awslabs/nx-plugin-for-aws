@@ -7,6 +7,9 @@ import { redactOAuthValues } from './redact';
 
 const KEYS = ['code', 'id_token', 'access_token', 'refresh_token'];
 
+/** An authorization code with the shape Cognito issues: UUID length. */
+const CODE = '0b9f1f3a-5c21-4d8e-9a77-3f4b2c1d8e90';
+
 describe('redactOAuthValues', () => {
   it.each(KEYS)('redacts %s in a query string', (key) => {
     expect(
@@ -61,8 +64,89 @@ describe('redactOAuthValues', () => {
   });
 
   it('redacts a Chromium object preview', () => {
-    expect(redactOAuthValues('[browser:log] {code: abc-123, state: s1}')).toBe(
+    expect(redactOAuthValues(`[browser:log] {code: ${CODE}, state: s1}`)).toBe(
       '[browser:log] {code: [REDACTED], state: s1}',
+    );
+  });
+
+  it.each([
+    [`{ code: ${CODE}, state: s1 }`, '{ code: [REDACTED], state: s1 }'],
+    [`{code : ${CODE}}`, '{code : [REDACTED]}'],
+    [`{code:${CODE}}`, '{code:[REDACTED]}'],
+    ['{\n  access_token: at-value\n}', '{\n  access_token: [REDACTED]\n}'],
+    [
+      '{\n  id_token: eyJhbGciOiJub25lIn0.e30.sig,\n  state: s1\n}',
+      '{\n  id_token: [REDACTED],\n  state: s1\n}',
+    ],
+    [
+      '{refresh_token: rt-1 , state: s1}',
+      '{refresh_token: [REDACTED] , state: s1}',
+    ],
+  ])(
+    'redacts an object preview whatever the whitespace: %s',
+    (input, expected) => {
+      expect(redactOAuthValues(input)).toBe(expected);
+    },
+  );
+
+  it.each(['id_token_hint', 'idToken', 'accessToken', 'refreshToken'])(
+    'redacts %s in a query string, JSON and a preview',
+    (key) => {
+      expect(
+        redactOAuthValues(`https://app.example.com/?${key}=v-1&state=s1`),
+      ).toBe(`https://app.example.com/?${key}=[REDACTED]&state=s1`);
+      expect(redactOAuthValues(`{"${key}":"v-1"}`)).toBe(
+        `{"${key}":"[REDACTED]"}`,
+      );
+      expect(redactOAuthValues(`{${key}: v-1, state: s1}`)).toBe(
+        `{${key}: [REDACTED], state: s1}`,
+      );
+    },
+  );
+
+  it('redacts the id_token_hint the website sends on logout', () => {
+    expect(
+      redactOAuthValues(
+        'https://auth.example.com/logout?id_token_hint=eyJhbGciOiJub25lIn0.e30.sig&client_id=c1',
+      ),
+    ).toBe(
+      'https://auth.example.com/logout?id_token_hint=[REDACTED]&client_id=c1',
+    );
+  });
+
+  it('redacts a token in a logged form body', () => {
+    expect(
+      redactOAuthValues('token request body: access_token=at-1&state=s1'),
+    ).toBe('token request body: access_token=[REDACTED]&state=s1');
+  });
+
+  it.each([
+    '{code: ECONNRESET, host: app.example.com}',
+    '{code: 500, status: ok}',
+    '{ code: ETIMEDOUT }',
+    'request failed with error code=E123',
+    'getaddrinfo ENOTFOUND {code: ENOTFOUND, syscall: getaddrinfo}',
+    '{"error_description":"invalid request, code=E123"}',
+  ])('keeps a diagnostic code value that is not token-shaped: %s', (text) => {
+    expect(redactOAuthValues(text)).toBe(text);
+  });
+
+  it('keeps the lines around an unterminated JSON value', () => {
+    const input = 'x {"code":"abc\nUSEFUL LINE\nMORE" y';
+    expect(redactOAuthValues(input)).toContain('USEFUL LINE');
+    expect(redactOAuthValues(input)).toContain('MORE');
+  });
+
+  it('redacts a JSON value on its own line without touching the next line', () => {
+    expect(redactOAuthValues(`{"code":"${CODE}"}\nUSEFUL LINE`)).toBe(
+      '{"code":"[REDACTED]"}\nUSEFUL LINE',
+    );
+  });
+
+  it('redacts a long single-line token value', () => {
+    const token = `eyJ${'a'.repeat(4000)}`;
+    expect(redactOAuthValues(`{"access_token":"${token}"}`)).toBe(
+      '{"access_token":"[REDACTED]"}',
     );
   });
 

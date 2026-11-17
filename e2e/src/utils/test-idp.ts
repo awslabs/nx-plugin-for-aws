@@ -18,6 +18,7 @@ import {
   DescribeUserPoolCommand,
   DescribeUserPoolDomainCommand,
   ListUserPoolsCommand,
+  TagResourceCommand as TagUserPoolCommand,
   UpdateUserPoolClientCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
 import {
@@ -25,6 +26,7 @@ import {
   DeleteSecretCommand,
   ListSecretsCommand,
   SecretsManagerClient,
+  TagResourceCommand as TagSecretCommand,
 } from '@aws-sdk/client-secrets-manager';
 import type { IdpPlaceholderValues } from './idp-placeholders';
 
@@ -47,6 +49,16 @@ const NAME_PREFIX = 'e2e-idp-';
 /** Tag that marks a resource as created by this helper. */
 const TAG_KEY = 'nx-plugin-e2e';
 const TAG_VALUE = 'external-idp';
+
+/**
+ * Tag that holds the time, as an ISO 8601 string, until which `sweepTestIdps`
+ * must keep a resource. `keepTestIdp` writes it when a destroy failed and the
+ * identity provider has to survive for a retry.
+ */
+export const KEEP_UNTIL_TAG = 'keep-until';
+
+/** How long `keepTestIdp` keeps a resource out of the sweep. */
+const DEFAULT_KEEP_FOR_MS = 24 * 60 * 60 * 1000;
 
 /** OAuth scopes the main user pool requests from the identity provider. */
 const OAUTH_SCOPES = ['openid', 'email', 'profile'];
@@ -422,10 +434,88 @@ export const deleteTestIdp = async (idp: TestIdp): Promise<void> => {
   );
 };
 
+/** The outcome of `keepTestIdp`. */
+export interface KeptTestIdp {
+  /** ISO time until which the sweep must keep the resources. */
+  keepUntil: string;
+  /** False when a tag could not be written, so the sweep may reclaim earlier. */
+  tagged: boolean;
+}
+
+/**
+ * Tags the identity provider's user pool and client secret with the time
+ * until which `sweepTestIdps` must keep them. Call it when a stack that reads
+ * the client secret could not be destroyed, so the destroy can be retried
+ * instead of the next run's sweep taking the secret away. Never throws.
+ */
+export const keepTestIdp = async (
+  idp: TestIdp,
+  { keepForMs = DEFAULT_KEEP_FOR_MS, now = Date.now() } = {},
+): Promise<KeptTestIdp> => {
+  const keepUntil = new Date(now + keepForMs).toISOString();
+  let tagged = true;
+  const tagStep = async (label: string, step: () => Promise<unknown>) => {
+    try {
+      await step();
+      console.log(`Tagged ${label} to keep until ${keepUntil}`);
+    } catch (e) {
+      tagged = false;
+      console.warn(`Failed to tag ${label}: ${describeError(e)}`);
+    }
+  };
+
+  await tagStep(`secret ${idp.names.secretName}`, () =>
+    secretsClient(idp.region).send(
+      new TagSecretCommand({
+        SecretId: idp.names.secretName,
+        Tags: [{ Key: KEEP_UNTIL_TAG, Value: keepUntil }],
+      }),
+    ),
+  );
+  const userPoolId = idp.userPoolId;
+  if (userPoolId) {
+    // Tagging a user pool needs its ARN, which only DescribeUserPool returns.
+    await tagStep(`user pool ${userPoolId}`, async () => {
+      const cognito = cognitoClient(idp.region);
+      const { UserPool } = await cognito.send(
+        new DescribeUserPoolCommand({ UserPoolId: userPoolId }),
+      );
+      if (!UserPool?.Arn) {
+        throw new Error('DescribeUserPool returned no user pool ARN');
+      }
+      await cognito.send(
+        new TagUserPoolCommand({
+          ResourceArn: UserPool.Arn,
+          Tags: { [KEEP_UNTIL_TAG]: keepUntil },
+        }),
+      );
+    });
+  }
+  return { keepUntil, tagged };
+};
+
+/** The age cutoff of one sweep, and the time it runs at. */
+interface SweepWindow {
+  /** Resources created at or after this time are left alone. */
+  cutoff: number;
+  /** Now, against which a `keep-until` tag is compared. */
+  now: number;
+}
+
+/**
+ * Whether a `keep-until` tag value protects a resource from this sweep. An
+ * absent or unreadable value protects nothing, so a hand-edited tag cannot
+ * keep a resource for ever.
+ */
+const isKept = (value: string | undefined, now: number): boolean => {
+  const until = value ? Date.parse(value) : Number.NaN;
+  return !Number.isNaN(until) && until > now;
+};
+
 /** Deletes tagged identity provider user pools older than the cutoff. */
 const sweepUserPools = async (
   cognito: CognitoIdentityProviderClient,
-  cutoff: number,
+  { cutoff, now }: SweepWindow,
 ): Promise<void> => {
   let nextToken: string | undefined;
   do {
@@ -448,6 +538,13 @@ const sweepUserPools = async (
         ) {
           continue;
         }
+        const keepUntil = UserPool.UserPoolTags?.[KEEP_UNTIL_TAG];
+        if (isKept(keepUntil, now)) {
+          console.log(
+            `Keeping identity provider user pool ${Id} until ${keepUntil}`,
+          );
+          continue;
+        }
         console.log(`Sweeping left-over identity provider user pool ${Id}`);
         if (UserPool.Domain) {
           await cognito.send(
@@ -468,7 +565,7 @@ const sweepUserPools = async (
 /** Deletes tagged identity provider client secrets older than the cutoff. */
 const sweepSecrets = async (
   secrets: SecretsManagerClient,
-  cutoff: number,
+  { cutoff, now }: SweepWindow,
 ): Promise<void> => {
   let nextToken: string | undefined;
   do {
@@ -496,6 +593,13 @@ const sweepSecrets = async (
       ) {
         continue;
       }
+      const keepUntil = Tags?.find((t) => t.Key === KEEP_UNTIL_TAG)?.Value;
+      if (isKept(keepUntil, now)) {
+        console.log(
+          `Keeping identity provider secret ${Name} until ${keepUntil}`,
+        );
+        continue;
+      }
       console.log(`Sweeping left-over identity provider secret ${Name}`);
       try {
         await secrets.send(
@@ -516,22 +620,23 @@ const sweepSecrets = async (
  * the region, for example when a run was killed before its cleanup. Deletes
  * only resources with the `e2e-idp-` name prefix and the `nx-plugin-e2e` tag
  * that are older than `maxAgeMs`, so a run in progress keeps its resources.
- * Never throws.
+ * A resource whose `keep-until` tag is still in the future is left alone, and
+ * swept by a later run once that time has passed. Never throws.
  */
 export const sweepTestIdps = async (
   region: string,
   { maxAgeMs = DEFAULT_SWEEP_MAX_AGE_MS, now = Date.now() } = {},
 ): Promise<void> => {
-  const cutoff = now - maxAgeMs;
+  const sweepWindow: SweepWindow = { cutoff: now - maxAgeMs, now };
   try {
-    await sweepUserPools(cognitoClient(region), cutoff);
+    await sweepUserPools(cognitoClient(region), sweepWindow);
   } catch (e) {
     console.warn(
       `Failed to sweep identity provider user pools: ${describeError(e)}`,
     );
   }
   try {
-    await sweepSecrets(secretsClient(region), cutoff);
+    await sweepSecrets(secretsClient(region), sweepWindow);
   } catch (e) {
     console.warn(
       `Failed to sweep identity provider secrets: ${describeError(e)}`,

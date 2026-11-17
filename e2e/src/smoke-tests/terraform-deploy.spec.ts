@@ -16,11 +16,14 @@ import { ensureDirSync } from 'fs-extra';
 
 import { runCLI, tmpProjPath } from '../utils';
 import { renderIdpPlaceholders, SAMPLE_IDP } from '../utils/idp-placeholders';
+import { redactOAuthValues } from '../utils/redact';
 import {
   checkFederation,
   createTestIdp,
   deleteTestIdp,
   federationPlanChanges,
+  KEEP_UNTIL_TAG,
+  keepTestIdp,
   newTestIdp,
   registerIdpCallback,
   sweepTestIdps,
@@ -104,13 +107,19 @@ function readTerraformOutputs(projectRoot: string): Record<string, string> {
 
 /**
  * S3 key of the stack's Terraform state, built as the generated
- * `scripts/init.ts` builds it.
+ * `scripts/init.ts` builds it. Falls back to a placeholder for any file that
+ * cannot be read or parsed, so the destroy failure is always logged.
  */
 function terraformStateKey(projectRoot: string, tfEnv: string): string {
   const initTs = join(projectRoot, 'packages/infra/scripts/init.ts');
-  const match = existsSync(initTs)
-    ? /const STATE_KEY_PREFIX = '([^']+)'/.exec(readFileSync(initTs, 'utf-8'))
-    : null;
+  let match: RegExpExecArray | null = null;
+  try {
+    match = /const STATE_KEY_PREFIX = '([^']+)'/.exec(
+      readFileSync(initTs, 'utf-8'),
+    );
+  } catch {
+    match = null;
+  }
   const prefix =
     match?.[1] ?? '<STATE_KEY_PREFIX from packages/infra/scripts/init.ts>';
   return `${prefix}/${tfEnv}/terraform.tfstate`;
@@ -651,15 +660,21 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
           );
           destroyed = true;
         } catch (e) {
+          // The stack reads the identity provider's client secret, so both are
+          // kept for a destroy retry and tagged so no later sweep takes them.
+          const kept = idp ? await keepTestIdp(idp) : undefined;
           console.warn(
             [
-              `terraform destroy failed: ${e}`,
+              `terraform destroy failed: ${redactOAuthValues(String(e))}`,
               `Terraform state key: ${terraformStateKey(opts.cwd, tfEnv)} (TF_ENV=${tfEnv}), bucket <account id>-tf-state-${region}`,
-              ...(idp
+              ...(idp && kept
                 ? [
                     'The test identity provider is kept, because the stack reads its client secret:',
                     `user pool ${idp.names.userPoolName} (${idp.userPoolId ?? 'id unknown'}), secret ${idp.names.secretName}, region ${idp.region}`,
-                    "Retry the destroy with this state key, then delete the identity provider, before a later run's sweepTestIdps deletes it once it is past its age limit.",
+                    kept.tagged
+                      ? `Both are tagged ${KEEP_UNTIL_TAG}=${kept.keepUntil}, so no sweep deletes them before then.`
+                      : `Tagging ${KEEP_UNTIL_TAG}=${kept.keepUntil} failed (see the warning above), so the next run's sweep may delete them within hours. Clean up now.`,
+                    'To clean up by hand: run the destroy again with this state key, then delete the user pool and the secret by the names above.',
                   ]
                 : ['Retry the destroy with this state key.']),
             ].join('\n'),

@@ -8,6 +8,8 @@ import {
   createTestIdp,
   deleteTestIdp,
   federationPlanChanges,
+  KEEP_UNTIL_TAG,
+  keepTestIdp,
   newTestIdp,
   registerIdpCallback,
   sweepTestIdps,
@@ -364,6 +366,66 @@ describe('deleteTestIdp', () => {
   });
 });
 
+describe('keepTestIdp', () => {
+  const now = Date.UTC(2026, 0, 1, 12);
+  const keepUntil = new Date(now + 24 * HOUR).toISOString();
+
+  /** A handle as left by a create that completed. */
+  const createdIdp = (): TestIdp => ({
+    ...newTestIdp('abc', REGION),
+    userPoolId: 'us-west-2_idp',
+    domainCreated: true,
+    clientId: 'idp-client',
+  });
+
+  it('tags the secret and the user pool to keep them for a day', async () => {
+    sdk.handlers.DescribeUserPool = () => ({
+      UserPool: { Arn: 'arn:aws:cognito-idp:us-west-2:111:userpool/idp' },
+    });
+    await expect(keepTestIdp(createdIdp(), { now })).resolves.toEqual({
+      keepUntil,
+      tagged: true,
+    });
+    expect(sdk.calls.filter((c) => c.name === 'TagResource')).toEqual([
+      {
+        name: 'TagResource',
+        input: {
+          SecretId: 'e2e-idp-abc-client-secret',
+          Tags: [{ Key: KEEP_UNTIL_TAG, Value: keepUntil }],
+        },
+      },
+      {
+        name: 'TagResource',
+        input: {
+          ResourceArn: 'arn:aws:cognito-idp:us-west-2:111:userpool/idp',
+          Tags: { [KEEP_UNTIL_TAG]: keepUntil },
+        },
+      },
+    ]);
+  });
+
+  it('reports that it could not tag, and still returns the deadline', async () => {
+    sdk.handlers.TagResource = () => {
+      throw new Error('AccessDenied');
+    };
+    sdk.handlers.DescribeUserPool = () => ({
+      UserPool: { Arn: 'arn:aws:cognito-idp:us-west-2:111:userpool/idp' },
+    });
+    await expect(keepTestIdp(createdIdp(), { now })).resolves.toEqual({
+      keepUntil,
+      tagged: false,
+    });
+    expect(console.warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports that it could not tag a user pool with no ARN', async () => {
+    sdk.handlers.DescribeUserPool = () => ({ UserPool: {} });
+    const result = await keepTestIdp(createdIdp(), { now });
+    expect(result.tagged).toBe(false);
+    expect(sdk.calls.filter((c) => c.name === 'TagResource')).toHaveLength(1);
+  });
+});
+
 describe('sweepTestIdps', () => {
   const now = Date.UTC(2026, 0, 1, 12);
   const old = new Date(now - 5 * HOUR);
@@ -506,6 +568,73 @@ describe('sweepTestIdps', () => {
         .filter((c) => c.name === 'DeleteSecret')
         .map((c) => c.input.SecretId),
     ).toEqual(['arn:old']);
+  });
+
+  it('keeps a pool and secret until keep-until has passed', async () => {
+    const future = new Date(now + 20 * HOUR).toISOString();
+    const past = new Date(now - 1 * HOUR).toISOString();
+    sdk.handlers.ListUserPools = () => ({
+      UserPools: [
+        { Id: 'kept', Name: 'e2e-idp-kept' },
+        { Id: 'expired', Name: 'e2e-idp-expired' },
+      ],
+    });
+    describePools({
+      kept: {
+        CreationDate: old,
+        UserPoolTags: { ...tagged, [KEEP_UNTIL_TAG]: future },
+      },
+      expired: {
+        CreationDate: old,
+        UserPoolTags: { ...tagged, [KEEP_UNTIL_TAG]: past },
+      },
+    });
+    const secretTags = (keepUntil: string) => [
+      { Key: 'nx-plugin-e2e', Value: 'external-idp' },
+      { Key: KEEP_UNTIL_TAG, Value: keepUntil },
+    ];
+    sdk.handlers.ListSecrets = () => ({
+      SecretList: [
+        {
+          ARN: 'arn:kept',
+          Name: 'e2e-idp-kept-client-secret',
+          Tags: secretTags(future),
+          CreatedDate: old,
+        },
+        {
+          ARN: 'arn:expired',
+          Name: 'e2e-idp-expired-client-secret',
+          Tags: secretTags(past),
+          CreatedDate: old,
+        },
+      ],
+    });
+    await sweepTestIdps(REGION, { now });
+
+    expect(
+      sdk.calls
+        .filter((c) => c.name === 'DeleteUserPool')
+        .map((c) => c.input.UserPoolId),
+    ).toEqual(['expired']);
+    expect(
+      sdk.calls
+        .filter((c) => c.name === 'DeleteSecret')
+        .map((c) => c.input.SecretId),
+    ).toEqual(['arn:expired']);
+  });
+
+  it('sweeps a resource whose keep-until tag cannot be read', async () => {
+    sdk.handlers.ListUserPools = () => ({
+      UserPools: [{ Id: 'old', Name: 'e2e-idp-old' }],
+    });
+    describePools({
+      old: {
+        CreationDate: old,
+        UserPoolTags: { ...tagged, [KEEP_UNTIL_TAG]: 'not a date' },
+      },
+    });
+    await sweepTestIdps(REGION, { now });
+    expect(sentNames()).toContain('DeleteUserPool');
   });
 
   it('never throws and still sweeps secrets when listing pools fails', async () => {
