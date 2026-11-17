@@ -14,6 +14,7 @@ import {
 import {
   DescribeServicesCommand,
   type DescribeServicesCommandOutput,
+  DescribeTaskDefinitionCommand,
   DescribeTasksCommand,
   type DescribeTasksCommandOutput,
   ECSClient,
@@ -142,15 +143,31 @@ export function servicePostureProblems(
   return problems;
 }
 
-/** What is wrong with a service's tasks: every container must be `HEALTHY`. */
+/**
+ * What is wrong with a service's tasks: every container must be `HEALTHY`.
+ * When `taskDefinitionContainers` is given, only the containers named in the
+ * task's own task definition count. Containers AWS adds to a task, such as
+ * the GuardDuty runtime monitoring agent, are not in the task definition and
+ * report no health status, so they are left out.
+ */
 export function taskHealthProblems(
   tasks: Pick<DescribeTasksCommandOutput, 'tasks'>,
+  taskDefinitionContainers?: ReadonlyMap<string, ReadonlySet<string>>,
 ): string[] {
   if (!tasks.tasks?.length) {
     return ['no running task'];
   }
   return tasks.tasks.flatMap((task) =>
     (task.containers ?? [])
+      // Keep only containers declared in the task's task definition
+      .filter(
+        (container) =>
+          !taskDefinitionContainers ||
+          (taskDefinitionContainers
+            .get(task.taskDefinitionArn ?? '')
+            ?.has(container.name ?? '') ??
+            false),
+      )
       .filter((container) => container.healthStatus !== 'HEALTHY')
       .map(
         (container) =>
@@ -255,7 +272,7 @@ export async function assertContainerServiceIsPrivate(
   );
 }
 
-/** Waits up to 5 minutes for every container of every running task to be `HEALTHY`. */
+/** Waits up to 5 minutes for every task definition container of every running task to be `HEALTHY`. */
 export async function waitForHealthyTasks(
   service: DeployedContainerService,
   { timeoutMs = 5 * 60_000, intervalMs = 15_000 }: WaitOptions = {},
@@ -273,14 +290,34 @@ export async function waitForHealthyTasks(
       if (!taskArns?.length) {
         return taskHealthProblems({ tasks: [] });
       }
-      return taskHealthProblems(
-        await ecs.send(
-          new DescribeTasksCommand({
-            cluster: service.clusterArn,
-            tasks: taskArns,
-          }),
-        ),
+      const tasks = await ecs.send(
+        new DescribeTasksCommand({
+          cluster: service.clusterArn,
+          tasks: taskArns,
+        }),
       );
+      // Container names each task definition declares, keyed by its ARN
+      const taskDefinitionContainers = new Map<string, Set<string>>();
+      for (const taskDefinitionArn of new Set(
+        (tasks.tasks ?? []).flatMap((task) =>
+          task.taskDefinitionArn ? [task.taskDefinitionArn] : [],
+        ),
+      )) {
+        const { taskDefinition } = await ecs.send(
+          new DescribeTaskDefinitionCommand({
+            taskDefinition: taskDefinitionArn,
+          }),
+        );
+        taskDefinitionContainers.set(
+          taskDefinitionArn,
+          new Set(
+            (taskDefinition?.containerDefinitions ?? []).flatMap((c) =>
+              c.name ? [c.name] : [],
+            ),
+          ),
+        );
+      }
+      return taskHealthProblems(tasks, taskDefinitionContainers);
     },
     { timeoutMs, intervalMs },
   );
