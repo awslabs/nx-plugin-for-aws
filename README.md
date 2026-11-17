@@ -103,7 +103,7 @@ pnpm nx g @aws/nx-plugin:ts#infra
 | `ts#dcr-proxy`         | OAuth DCR proxy construct for Cognito-authenticated MCP servers                                                                          |
 | `ts#agent`             | [Strands Agent](https://strandsagents.com/) (TypeScript)                                                                                 |
 | `ts#agent#guardrails` | Amazon Bedrock Guardrail for a TypeScript Agent (experimental)                                                                          |
-| `ts#container`         | Containerised HTTP service on Amazon ECS (Fargate), behind an API Gateway HTTP API by default (TypeScript) (experimental) |
+| `ts#container`         | Containerised service on Amazon ECS (Fargate), private, with no load balancer or API (TypeScript) (experimental) |
 | `ts#nx-generator`      | Nx generator scaffold                                                                                                                    |
 | `ts#docs`              | Documentation site (Astro + Starlight)                                                                                                   |
 | `smithy#project`       | Smithy model project — a service model, or a shape library shared between Smithy projects                                                |
@@ -115,7 +115,7 @@ pnpm nx g @aws/nx-plugin:ts#infra
 | `py#mcp-server`        | MCP server (Python)                                                                                                                      |
 | `py#agent`             | [Strands Agent](https://strandsagents.com/) (Python)                                                                                     |
 | `py#agent#guardrails`  | Amazon Bedrock Guardrail for a Python Agent (experimental)                                                                               |
-| `py#container`         | Containerised HTTP service on Amazon ECS (Fargate), behind an API Gateway HTTP API by default (Python) (experimental) |
+| `py#container`         | Containerised service on Amazon ECS (Fargate), private, with no load balancer or API (Python) (experimental) |
 | `agentcore-gateway`    | [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) project                                  |
 | `greengrass#component` | [AWS IoT Greengrass](https://docs.aws.amazon.com/greengrass/v2/developerguide/) v2 component for Python or TypeScript (experimental) |
 | `agentcore-harness`    | [AgentCore Harness](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html) agent loop (experimental)                |

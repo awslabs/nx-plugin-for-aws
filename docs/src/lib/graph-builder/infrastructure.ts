@@ -567,8 +567,8 @@ function rdbBlueprints(...types: string[]): Record<string, Blueprint> {
 }
 
 /**
- * The container service blueprint: an ECS service on Fargate behind an internal
- * ALB, fronted by an HTTP API unless the service is private.
+ * The container service blueprint: an ECS service on Fargate in your VPC, with
+ * no load balancer or API.
  */
 function containerServiceBlueprints(
   ...types: string[]
@@ -576,47 +576,11 @@ function containerServiceBlueprints(
   const blueprint: Blueprint = {
     resources: [
       {
-        id: 'apigw-http',
-        label: 'API Gateway',
-        detail: 'HTTP API',
-        icon: 'api-gateway',
-        column: 0,
-        row: 0,
-        when: { infra: 'ecs', ingress: 'http-api' },
-      },
-      {
-        id: 'iam',
-        label: 'IAM',
-        detail: 'SigV4 auth',
-        icon: 'iam',
-        column: 0,
-        row: 1,
-        when: { infra: 'ecs', ingress: 'http-api', auth: 'iam' },
-      },
-      {
-        id: 'cognito',
-        label: 'Cognito',
-        detail: 'Token auth',
-        icon: 'cognito',
-        column: 0,
-        row: 1,
-        when: { infra: 'ecs', ingress: 'http-api', auth: 'cognito' },
-      },
-      {
-        id: 'alb',
-        label: 'ALB',
-        detail: 'Internal',
-        icon: 'elb',
-        column: 1,
-        row: 0,
-        when: { infra: 'ecs' },
-      },
-      {
         id: 'ecs',
         label: 'ECS',
         detail: 'Fargate service',
         icon: 'ecs',
-        column: 2,
+        column: 0,
         row: 0,
         when: { infra: 'ecs' },
       },
@@ -625,7 +589,7 @@ function containerServiceBlueprints(
         label: 'ECR',
         detail: 'Container image',
         icon: 'ecr',
-        column: 2,
+        column: 0,
         row: 1,
         when: { infra: 'ecs' },
       },
@@ -638,12 +602,8 @@ function containerServiceBlueprints(
         when: { infra: 'none' },
       },
     ],
-    path: ['apigw-http', 'alb', 'ecs', 'local'],
-    links: [
-      { from: 'iam', to: 'apigw-http' },
-      { from: 'cognito', to: 'apigw-http' },
-      { from: 'ecr', to: 'ecs' },
-    ],
+    path: ['ecs', 'local'],
+    links: [{ from: 'ecr', to: 'ecs' }],
     caller: { label: 'Client' },
   };
   return Object.fromEntries(types.map((type) => [type, blueprint]));

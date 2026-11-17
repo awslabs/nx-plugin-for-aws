@@ -136,33 +136,29 @@ describe('infrastructure view', () => {
     );
   });
 
-  // The container guides' option filters switch between these variants, so the
-  // diagram follows the same infra, ingress and auth values.
-  it('should draw a container service behind an HTTP API', () => {
-    expect(labelsOf(single('ts#container'))).toEqual([
-      'Client',
-      'API Gateway (HTTP API)',
-      'IAM (SigV4 auth)',
-      'ALB (Internal)',
-      'ECS (Fargate service)',
-      'ECR (Container image)',
-    ]);
-  });
+  // The container guides' option filters switch on infra, so the diagram
+  // follows the same values.
+  it.each(['ts#container', 'py#container'])(
+    'should draw %s as a private ECS service with no load balancer or API',
+    (type) => {
+      expect(labelsOf(single(type))).toEqual([
+        'Client',
+        'ECS (Fargate service)',
+        'ECR (Container image)',
+      ]);
+    },
+  );
 
-  it('should draw Cognito in front of the HTTP API when it authenticates with tokens', () => {
-    const labels = labelsOf(single('ts#container', { auth: 'cognito' }));
-    expect(labels).toContain('Cognito (Token auth)');
-    expect(labels).not.toContain('IAM (SigV4 auth)');
-  });
-
-  it('should draw only the internal load balancer for a private service', () => {
-    expect(labelsOf(single('ts#container', { ingress: 'private' }))).toEqual([
-      'Client',
-      'ALB (Internal)',
-      'ECS (Fargate service)',
-      'ECR (Container image)',
-    ]);
-  });
+  it.each([{}, { iac: 'cdk' }, { iac: 'terraform' }])(
+    'should never draw a load balancer or API Gateway for a container service (%o)',
+    (options) => {
+      const icons = buildInfrastructureLayout(single('ts#container', options))
+        .boxes.flatMap((box) => box.resources)
+        .map((resource) => resource.icon);
+      expect(icons).not.toContain('elb');
+      expect(icons).not.toContain('api-gateway');
+    },
+  );
 
   it('should draw a container service as a local process when it deploys no infrastructure', () => {
     const resources = buildInfrastructureLayout(
