@@ -11,25 +11,28 @@ const KEYS = ['code', 'id_token', 'access_token', 'refresh_token'];
 const CODE = '0b9f1f3a-5c21-4d8e-9a77-3f4b2c1d8e90';
 
 /**
- * The value a key is given in the shared cases. A token key is redacted
- * whatever its value looks like; `code` is only redacted when it is
- * token-shaped, so it gets a real code.
+ * The value a key is given in the shared cases. A credential key is redacted
+ * whatever its value looks like; a `code` value is kept when it is one of the
+ * diagnostic shapes, so it gets a real code.
  */
 const valueFor = (key: string) => (key === 'code' ? CODE : 'v-1');
 
-/** A token-shaped value of exactly `length` characters. */
+/** An opaque value of exactly `length` characters. */
 const longValue = (length: number) =>
   `${CODE}${'a'.repeat(length - CODE.length)}`;
 
 /**
- * Values of `code` a maintainer needs when triaging a failed run: too short
- * to be a code, or letters and underscores only.
+ * Values of `code` a maintainer needs when triaging a failed run: a short
+ * number, a short all-caps code, an underscored all-caps code, or a class
+ * name.
  */
 const SURVIVING_CODES = [
   'ECONNRESET',
   'ETIMEDOUT',
   'ENOTFOUND',
+  'EPROTONOSUPPORT',
   '500',
+  '123456',
   'E123',
   'ResourceNotFoundException',
   'UnrecognizedClientException',
@@ -38,11 +41,19 @@ const SURVIVING_CODES = [
   'ERR_INVALID_ARG_TYPE',
 ];
 
-/** Values of `code` that are token-shaped and must never reach a log. */
+/**
+ * Values of `code` that are long enough to be a real authorization code and
+ * must never reach a log: a UUID, a JWT, a lowercase opaque value, an
+ * all-caps hex or base32 value, a long number, and a long underscored value.
+ */
 const REDACTED_CODES = [
   CODE,
   'eyJhbGciOiJub25lIn0.e30.sig',
   'a1b2c3d4e5f6g7h8i9j0k1l2',
+  'A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8A9B0',
+  'MFRGGZDFMZTWQ2LKNNWG23TP',
+  '123456789012345678901234',
+  'ERR_A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6',
 ];
 
 describe('redactOAuthValues', () => {
@@ -210,7 +221,7 @@ describe('redactOAuthValues', () => {
   );
 
   it.each(REDACTED_CODES)(
-    'redacts the token-shaped code value %s in JSON, a preview and prose',
+    'redacts the opaque code value %s in JSON, a preview and prose',
     (value) => {
       expect(redactOAuthValues(`{"code":"${value}"}`)).toBe(
         '{"code":"[REDACTED]"}',
@@ -234,7 +245,7 @@ describe('redactOAuthValues', () => {
     '{"error_description":"invalid request, code=E123"}',
     `error_code=E1&my_code=${CODE}`,
   ])(
-    'keeps a code value that is not token-shaped or not a code: %s',
+    'keeps a code value that is a diagnostic, or not a code at all: %s',
     (text) => {
       expect(redactOAuthValues(text)).toBe(text);
     },
@@ -276,7 +287,7 @@ describe('redactOAuthValues', () => {
   it.each([
     'state=s1&client_id=c1',
     'error_code=E1',
-    'codeVerifier=v1&code_challenge=cc1',
+    'code_challenge=cc1&code_challenge_method=S256',
     'Enter the code sent to your email. Error code: 500',
     'https://app.example.com/path?foo=bar#section',
     '{"state":"s1","client_id":"c1"}',
@@ -379,5 +390,162 @@ describe('redactOAuthValues', () => {
     `{"accessToken":"${CODE},x"}`,
   ])('redacts a token value whatever its shape: %s', (input) => {
     expect(redactOAuthValues(input)).not.toContain(CODE);
+  });
+
+  // A quoted value runs to its matching quote, so a delimiter inside the
+  // quotes cannot end the redaction early and leave the rest of the
+  // credential in the log.
+
+  it.each([
+    ['access_token="abc def"', 'access_token="[REDACTED]"'],
+    ["access_token='abc def'", "access_token='[REDACTED]'"],
+    ['access_token="abc,def"', 'access_token="[REDACTED]"'],
+    ['access_token="abc}def"', 'access_token="[REDACTED]"'],
+    ['access_token="abc&def"', 'access_token="[REDACTED]"'],
+    ['access_token="abc#def"', 'access_token="[REDACTED]"'],
+    ['access_token="abc;def"', 'access_token="[REDACTED]"'],
+    ['access_token="abc)def"', 'access_token="[REDACTED]"'],
+    ['access_token="abc<def>"', 'access_token="[REDACTED]"'],
+    ['access_token="abc\'def"', 'access_token="[REDACTED]"'],
+    ["access_token='abc\"def'", "access_token='[REDACTED]'"],
+    [`code="${CODE} ${CODE}"`, 'code="[REDACTED]"'],
+    [
+      'token request body: client_secret="s1 s2"&grant_type=x',
+      'token request body: client_secret="[REDACTED]"&grant_type=x',
+    ],
+  ])(
+    'redacts a quoted parameter value holding a delimiter: %s',
+    (input, expected) => {
+      const output = redactOAuthValues(input);
+      expect(output).toBe(expected);
+      expect(output).not.toContain('def');
+    },
+  );
+
+  it.each([
+    ["{ accessToken: 'abc def' }", "{ accessToken: '[REDACTED]' }"],
+    ["{ accessToken: 'abc,def' }", "{ accessToken: '[REDACTED]' }"],
+    ["{ accessToken: 'abc}def' }", "{ accessToken: '[REDACTED]' }"],
+    ['{ accessToken: "abc,def" }', '{ accessToken: "[REDACTED]" }'],
+    ['{ accessToken: "abc}def" }', '{ accessToken: "[REDACTED]" }'],
+    ['{accessToken:"abc def"}', '{accessToken:"[REDACTED]"}'],
+    [
+      "{ accessToken: 'abc def', state: 's1' }",
+      "{ accessToken: '[REDACTED]', state: 's1' }",
+    ],
+    [`{ code: '${CODE} x' }`, "{ code: '[REDACTED]' }"],
+  ])(
+    'redacts a quoted preview value holding a delimiter: %s',
+    (input, expected) => {
+      const output = redactOAuthValues(input);
+      expect(output).toBe(expected);
+      expect(output).not.toContain('def');
+    },
+  );
+
+  it.each([
+    ['access_token="abc def', 'access_token="[REDACTED]'],
+    ["access_token='abc def", "access_token='[REDACTED]"],
+    ['access_token="abc def\nNEXT', 'access_token="[REDACTED]\nNEXT'],
+    ['access_token="abc def\r\nNEXT', 'access_token="[REDACTED]\r\nNEXT'],
+    ["{ accessToken: 'abc def", "{ accessToken: '[REDACTED]"],
+    ["{ accessToken: 'abc def\nNEXT", "{ accessToken: '[REDACTED]\nNEXT"],
+  ])(
+    'redacts a quoted value with no closing quote to the line end: %s',
+    (input, expected) => {
+      const output = redactOAuthValues(input);
+      expect(output).toBe(expected);
+      expect(output).not.toContain('def');
+    },
+  );
+
+  // The diagnostic shapes are bounded short of the length a credential
+  // occupies. Each bound is pinned on both sides.
+
+  it.each([
+    ['1', true],
+    ['500', true],
+    ['123456', true],
+    ['1234567', false],
+    ['123456789012345678901234', false],
+    ['1'.repeat(16), false],
+    ['E', true],
+    ['EPROTONOSUPPORT', true],
+    ['A'.repeat(16), true],
+    ['A'.repeat(17), false],
+    ['MFRGGZDFMZTWQ2LKNNWG23TP', false],
+    ['A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8A9B0', false],
+    ['ERR_TLS_CERT_ALTNAME_INVALID', true],
+    [`A_${'1'.repeat(30)}`, true],
+    [`A_${'1'.repeat(31)}`, false],
+    ['ERR_A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6', false],
+    ['ResourceNotFoundException', true],
+    [`${'A'.repeat(60)}Error`, true],
+    ['accessdenied', false],
+    ['AccessDenied', false],
+  ])('keeps the code value %s as a diagnostic: %s', (value, kept) => {
+    for (const [input, redacted] of [
+      [`{"code":"${value}"}`, '{"code":"[REDACTED]"}'],
+      [`{code: ${value}}`, '{code: [REDACTED]}'],
+      [`{ code: '${value}' }`, "{ code: '[REDACTED]' }"],
+      [`failed with code=${value} now`, 'failed with code=[REDACTED] now'],
+    ]) {
+      expect(redactOAuthValues(input)).toBe(kept ? input : redacted);
+    }
+  });
+
+  // The client secret and the PKCE verifier are credentials in the same
+  // token request as the code, and a bearer credential has no key at all.
+
+  it.each(['client_secret', 'code_verifier', 'clientSecret', 'codeVerifier'])(
+    'redacts %s in a query string, JSON and a preview',
+    (key) => {
+      expect(
+        redactOAuthValues(`token request: ${key}=s3cret&grant_type=x`),
+      ).toBe(`token request: ${key}=[REDACTED]&grant_type=x`);
+      expect(redactOAuthValues(`{"${key}":"s3cret"}`)).toBe(
+        `{"${key}":"[REDACTED]"}`,
+      );
+      expect(redactOAuthValues(`{${key}: s3cret, state: s1}`)).toBe(
+        `{${key}: [REDACTED], state: s1}`,
+      );
+    },
+  );
+
+  it.each([
+    [
+      'Authorization: Bearer eyJhbGciOiJub25lIn0.e30.sig',
+      'Authorization: Bearer [REDACTED]',
+    ],
+    ['authorization: bearer abc.def-123_x', 'authorization: bearer [REDACTED]'],
+    [
+      '{"Authorization":"Bearer at-1"}',
+      '{"Authorization":"Bearer [REDACTED]"}',
+    ],
+    [
+      'curl -H "Authorization: Bearer at-1" https://api.example.com/',
+      'curl -H "Authorization: Bearer [REDACTED]" https://api.example.com/',
+    ],
+    ['Bearer at-1 was rejected', 'Bearer [REDACTED] was rejected'],
+    ['Bearer\tat-1', 'Bearer\t[REDACTED]'],
+  ])('redacts a bearer credential: %s', (input, expected) => {
+    expect(redactOAuthValues(input)).toBe(expected);
+  });
+
+  it.each([
+    'token_type=Bearer',
+    'the scheme is Bearer',
+    'DebearerX at-1',
+    'Bearer',
+  ])('leaves a bearer scheme with no credential after it: %s', (text) => {
+    expect(redactOAuthValues(text)).toBe(text);
+  });
+
+  it('replaces the word after Bearer whatever it is', () => {
+    // The cost of failing closed: a sentence that names the scheme loses its
+    // next word.
+    expect(redactOAuthValues('Bearer token is required')).toBe(
+      'Bearer [REDACTED] is required',
+    );
   });
 });

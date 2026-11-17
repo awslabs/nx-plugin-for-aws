@@ -509,13 +509,22 @@ describe('describeKeptTestIdp', () => {
   const lines = (kept: Omit<KeptTestIdp, 'keepUntil'>) =>
     describeKeptTestIdp(idp(), { keepUntil, ...kept }).join('\n');
 
+  const SECRET = 'secret e2e-idp-abc-client-secret';
+  const POOL = 'user pool e2e-idp-abc (us-west-2_idp)';
+  const KEPT_HEADER =
+    'The test identity provider is kept, because the stack reads its client secret:';
+  const SECRET_GONE_HEADER =
+    'The test identity provider is partly kept. The client secret the stack reads is already deleted:';
+  const BLOCKED =
+    'A destroy retry cannot run while the client secret is missing, because the stack reads it.';
+
   it('names both tagged resources and says no sweep takes them', () => {
     expect(lines({ secret: 'tagged', userPool: 'tagged' })).toBe(
       [
-        'The test identity provider is kept, because the stack reads its client secret:',
+        KEPT_HEADER,
         'region us-west-2',
-        `Tagged keep-until=${keepUntil}, so no sweep deletes them before then: secret e2e-idp-abc-client-secret, user pool e2e-idp-abc (us-west-2_idp).`,
-        'To clean up by hand: run the destroy again with this state key, then delete the resources named above.',
+        `Tagged keep-until=${keepUntil}, so no sweep deletes them before then: ${SECRET}, ${POOL}.`,
+        `To clean up by hand: run the destroy again with this state key, then delete ${SECRET}, ${POOL}.`,
       ].join('\n'),
     );
   });
@@ -523,10 +532,10 @@ describe('describeKeptTestIdp', () => {
   it('does not claim a missing resource is tagged', () => {
     const text = lines({ secret: 'missing', userPool: 'tagged' });
     expect(text).toContain(
-      `Tagged keep-until=${keepUntil}, so no sweep deletes it before then: user pool e2e-idp-abc (us-west-2_idp).`,
+      `Tagged keep-until=${keepUntil}, so no sweep deletes it before then: ${POOL}.`,
     );
     expect(text).toContain(
-      'Already deleted, so nothing is left to clean up: secret e2e-idp-abc-client-secret.',
+      `Already deleted, so nothing is left to clean up: ${SECRET}.`,
     );
     expect(text).not.toContain('Both are tagged');
   });
@@ -534,21 +543,12 @@ describe('describeKeptTestIdp', () => {
   it('tells the operator to clean up only what tagging failed on', () => {
     const text = lines({ secret: 'failed', userPool: 'missing' });
     expect(text).toContain(
-      `Tagging keep-until=${keepUntil} failed (see the warning above), so the next run's sweep may delete it within hours. Clean up now: secret e2e-idp-abc-client-secret.`,
+      `Tagging keep-until=${keepUntil} failed (see the warning above), so the next run's sweep may delete it within hours. Clean up now: ${SECRET}.`,
     );
     expect(text).toContain(
-      'Already deleted, so nothing is left to clean up: user pool e2e-idp-abc (us-west-2_idp).',
+      `Already deleted, so nothing is left to clean up: ${POOL}.`,
     );
     expect(text).not.toContain(`Tagged keep-until=${keepUntil}`);
-  });
-
-  it('asks for nothing when both resources are already gone', () => {
-    expect(lines({ secret: 'missing', userPool: 'missing' })).toBe(
-      [
-        'The test identity provider is already deleted, so there is nothing to keep.',
-        'Retry the destroy with this state key.',
-      ].join('\n'),
-    );
   });
 
   it('says the pool id is unknown when the handle has none', () => {
@@ -560,6 +560,93 @@ describe('describeKeptTestIdp', () => {
     expect(
       describeKeptTestIdp({ ...idp(), userPoolId: undefined }, kept).join('\n'),
     ).toContain('user pool e2e-idp-abc (id unknown)');
+  });
+
+  // The header and the closing instruction turn on whether the client secret
+  // is still there, because a destroy reads it through a data source.
+
+  it('says the secret is gone and how to unblock the retry', () => {
+    expect(lines({ secret: 'missing', userPool: 'tagged' })).toBe(
+      [
+        SECRET_GONE_HEADER,
+        'region us-west-2',
+        `Tagged keep-until=${keepUntil}, so no sweep deletes it before then: ${POOL}.`,
+        `Already deleted, so nothing is left to clean up: ${SECRET}.`,
+        BLOCKED,
+        `To clean up by hand: re-create ${SECRET} with any value, run the destroy again with this state key, then delete that secret, ${POOL}.`,
+      ].join('\n'),
+    );
+  });
+
+  it('asks only for the secret when both resources are already gone', () => {
+    expect(lines({ secret: 'missing', userPool: 'missing' })).toBe(
+      [
+        'The test identity provider is already deleted, so there is nothing to keep.',
+        BLOCKED,
+        `To clean up by hand: re-create ${SECRET} with any value, run the destroy again with this state key, then delete that secret.`,
+      ].join('\n'),
+    );
+  });
+
+  it('keeps the ordinary retry while the secret is still there', () => {
+    for (const secret of ['tagged', 'failed'] as const) {
+      for (const userPool of ['tagged', 'failed', 'missing'] as const) {
+        const text = lines({ secret, userPool });
+        expect(text).toContain(KEPT_HEADER);
+        expect(text).not.toContain(BLOCKED);
+        expect(text).toContain(
+          'To clean up by hand: run the destroy again with this state key, then delete ',
+        );
+      }
+    }
+  });
+
+  it('names the plural when tagging failed on both resources', () => {
+    expect(lines({ secret: 'failed', userPool: 'failed' })).toBe(
+      [
+        KEPT_HEADER,
+        'region us-west-2',
+        `Tagging keep-until=${keepUntil} failed (see the warning above), so the next run's sweep may delete them within hours. Clean up now: ${SECRET}, ${POOL}.`,
+        `To clean up by hand: run the destroy again with this state key, then delete ${SECRET}, ${POOL}.`,
+      ].join('\n'),
+    );
+  });
+
+  it('reports a mixed outcome one resource at a time', () => {
+    expect(lines({ secret: 'failed', userPool: 'tagged' })).toBe(
+      [
+        KEPT_HEADER,
+        'region us-west-2',
+        `Tagged keep-until=${keepUntil}, so no sweep deletes it before then: ${POOL}.`,
+        `Tagging keep-until=${keepUntil} failed (see the warning above), so the next run's sweep may delete it within hours. Clean up now: ${SECRET}.`,
+        `To clean up by hand: run the destroy again with this state key, then delete ${POOL}, ${SECRET}.`,
+      ].join('\n'),
+    );
+  });
+
+  it('leaves a resource that is already gone out of the closing line', () => {
+    expect(lines({ secret: 'tagged', userPool: 'missing' })).toBe(
+      [
+        KEPT_HEADER,
+        'region us-west-2',
+        `Tagged keep-until=${keepUntil}, so no sweep deletes it before then: ${SECRET}.`,
+        `Already deleted, so nothing is left to clean up: ${POOL}.`,
+        `To clean up by hand: run the destroy again with this state key, then delete ${SECRET}.`,
+      ].join('\n'),
+    );
+  });
+
+  it('asks only for the pool when the secret is gone and tagging it failed', () => {
+    expect(lines({ secret: 'missing', userPool: 'failed' })).toBe(
+      [
+        SECRET_GONE_HEADER,
+        'region us-west-2',
+        `Tagging keep-until=${keepUntil} failed (see the warning above), so the next run's sweep may delete it within hours. Clean up now: ${POOL}.`,
+        `Already deleted, so nothing is left to clean up: ${SECRET}.`,
+        BLOCKED,
+        `To clean up by hand: re-create ${SECRET} with any value, run the destroy again with this state key, then delete that secret, ${POOL}.`,
+      ].join('\n'),
+    );
   });
 });
 

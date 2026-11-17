@@ -530,8 +530,8 @@ export const keepTestIdp = async (
  * The lines a failed teardown prints about a kept identity provider: which
  * resources now carry the `keep-until` tag, which are already gone, and what
  * an operator has to do by hand. A resource the tag step found absent is
- * named as absent, so the warning never asks for a resource that does not
- * exist to be deleted.
+ * named as absent and left out of the final instruction, so the warning
+ * never asks for a resource that does not exist to be deleted.
  */
 export const describeKeptTestIdp = (
   idp: TestIdp,
@@ -550,14 +550,38 @@ export const describeKeptTestIdp = (
   const missing = named('missing');
   const them = (names: string[]) => (names.length > 1 ? 'them' : 'it');
 
+  // The stack reads the client secret through a Secrets Manager data source,
+  // which Terraform resolves on a destroy as well, so a destroy retry cannot
+  // run at all while the secret is gone. Putting a secret of that name back
+  // is what unblocks it.
+  const secretGone = kept.secret === 'missing';
+  const blocked = secretGone
+    ? [
+        'A destroy retry cannot run while the client secret is missing, because the stack reads it.',
+      ]
+    : [];
+  // Only the resources that are still there are named: the ones reported as
+  // already deleted have nothing left to remove. A re-created secret is
+  // named too, because the retry needs it and leaves it behind.
+  const toDelete = secretGone
+    ? ['that secret', ...tagged, ...failed]
+    : [...tagged, ...failed];
+  const recreate = secretGone
+    ? `re-create ${labels.secret} with any value, `
+    : '';
+  const cleanUp = `To clean up by hand: ${recreate}run the destroy again with this state key, then delete ${toDelete.join(', ')}.`;
+
   if (tagged.length + failed.length === 0) {
     return [
       'The test identity provider is already deleted, so there is nothing to keep.',
-      'Retry the destroy with this state key.',
+      ...blocked,
+      cleanUp,
     ];
   }
   return [
-    'The test identity provider is kept, because the stack reads its client secret:',
+    secretGone
+      ? 'The test identity provider is partly kept. The client secret the stack reads is already deleted:'
+      : 'The test identity provider is kept, because the stack reads its client secret:',
     `region ${idp.region}`,
     ...(tagged.length > 0
       ? [
@@ -574,7 +598,8 @@ export const describeKeptTestIdp = (
           `Already deleted, so nothing is left to clean up: ${missing.join(', ')}.`,
         ]
       : []),
-    'To clean up by hand: run the destroy again with this state key, then delete the resources named above.',
+    ...blocked,
+    cleanUp,
   ];
 };
 

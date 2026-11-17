@@ -16,6 +16,7 @@ import { FsTree, flushChanges } from 'nx/src/generators/tree';
 import { type Browser, chromium, type Page } from 'playwright';
 import { formatFilesInSubtree } from '../../../packages/nx-plugin/src/utils/format';
 import { redactOAuthValues } from '../utils/redact';
+import { describeSignInFailure } from '../utils/sign-in-failure';
 import { IDP_PROVIDER_NAME, type TestIdp } from '../utils/test-idp';
 
 /**
@@ -177,6 +178,11 @@ const integrationTestUrl = (baseUrl: string): string =>
 /**
  * Prints the page's console messages and errors to the test log, with OAuth
  * codes and tokens redacted.
+ *
+ * Only attach this once any sign-in is complete. While a sign-in flow runs,
+ * the browser console carries the authorization code and the tokens, and the
+ * redaction here covers the keys and forms `redactOAuthValues` lists rather
+ * than every shape a console message can take.
  */
 const logBrowserMessages = (page: Page): void => {
   page.on('console', (m) => {
@@ -191,14 +197,55 @@ const logBrowserMessages = (page: Page): void => {
 };
 
 /**
- * Fill and submit the sign-in form of a Cognito managed login page. Prints
- * the page HTML, with OAuth codes and tokens redacted, when the form cannot
- * be filled.
+ * Records the HTTP status of the page's most recent main-frame document
+ * response, so a failure during sign-in can report the status of the page it
+ * was looking at. Only the number is kept: no URL, header or body is stored
+ * or logged.
+ */
+const trackDocumentStatus = (page: Page): (() => number | undefined) => {
+  let status: number | undefined;
+  page.on('response', (response) => {
+    if (
+      response.frame() === page.mainFrame() &&
+      response.request().resourceType() === 'document'
+    ) {
+      status = response.status();
+    }
+  });
+  return () => status;
+};
+
+/**
+ * The line a failed sign-in step prints: the step, the origin and path of the
+ * page's URL, its HTTP status and its title. The sign-in flow carries the
+ * authorization code and the tokens in the URL query and fragment and in the
+ * page markup, so none of those are read.
+ */
+const logSignInFailure = async (
+  page: Page,
+  step: string,
+  documentStatus: () => number | undefined,
+): Promise<void> => {
+  console.log(
+    describeSignInFailure({
+      step,
+      url: page.url(),
+      status: documentStatus(),
+      title: await page.title().catch(() => undefined),
+    }),
+  );
+};
+
+/**
+ * Fill and submit the sign-in form of a Cognito managed login page. On
+ * failure prints the safe sign-in failure line; the page is a login page, so
+ * its markup and console output are never dumped.
  */
 const fillCognitoLoginForm = async (
   page: Page,
   username: string,
   password: string,
+  documentStatus: () => number | undefined,
 ): Promise<void> => {
   // Cognito Managed Login is a React app that mounts the form a moment
   // after navigation and can briefly re-render it; wait for the network to
@@ -233,8 +280,7 @@ const fillCognitoLoginForm = async (
     await passwordInput.fill(password);
     await submit.click();
   } catch (e) {
-    console.log('[login] login form not fillable. Page HTML follows:');
-    console.log(redactOAuthValues(await page.content()).slice(0, 6000));
+    await logSignInFailure(page, 'login form not fillable', documentStatus);
     throw e;
   }
 };
@@ -302,7 +348,12 @@ export const runFederatedSignInTest = async (
   try {
     const context = await browser.newContext();
     const page: Page = await context.newPage();
-    logBrowserMessages(page);
+    // The browser's console output is not forwarded to the test log at all
+    // during this test: every step of it is part of the sign-in flow, whose
+    // console messages carry the authorization code and the tokens. Nothing
+    // is buffered to be replayed later either. A failed step prints the safe
+    // description built by `describeSignInFailure` instead.
+    const documentStatus = trackDocumentStatus(page);
 
     const target = integrationTestUrl(baseUrl);
     await page.goto(target, {
@@ -319,8 +370,11 @@ export const runFederatedSignInTest = async (
       await idpButton.waitFor({ state: 'visible', timeout: 60_000 });
       await idpButton.click();
     } catch (e) {
-      console.log('[login] no E2eIdp sign-in button. Page HTML follows:');
-      console.log(redactOAuthValues(await page.content()).slice(0, 6000));
+      await logSignInFailure(
+        page,
+        'no E2eIdp sign-in button on the managed login page',
+        documentStatus,
+      );
       throw e;
     }
 
@@ -328,7 +382,12 @@ export const runFederatedSignInTest = async (
     await page.waitForURL((url) => url.hostname === idpHost, {
       timeout: 120_000,
     });
-    await fillCognitoLoginForm(page, idp.username, idp.password);
+    await fillCognitoLoginForm(
+      page,
+      idp.username,
+      idp.password,
+      documentStatus,
+    );
     await waitForSignedIn(page, target);
     await page
       .getByTestId('run-integration-test')
@@ -367,7 +426,15 @@ export const runWebsiteIntegrationTest = async (options: {
 
   const browser: Browser = await chromium.launch();
   const page: Page = await browser.newPage();
-  logBrowserMessages(page);
+  const documentStatus = trackDocumentStatus(page);
+  // With a login, console output is forwarded only once sign-in is complete,
+  // because the hosted-UI redirect and the code-for-token exchange put the
+  // authorization code and the tokens on the console. Without one, no
+  // credential passes through the browser, so the output is forwarded from
+  // the start.
+  if (!login) {
+    logBrowserMessages(page);
+  }
 
   try {
     const target = integrationTestUrl(baseUrl);
@@ -381,8 +448,14 @@ export const runWebsiteIntegrationTest = async (options: {
       // managed login UI. Complete the login form, then wait to land back on
       // the app and for the post-login OAuth code exchange to settle.
       await page.waitForURL(/amazoncognito\.com/, { timeout: 120_000 });
-      await fillCognitoLoginForm(page, login.username, login.password);
+      await fillCognitoLoginForm(
+        page,
+        login.username,
+        login.password,
+        documentStatus,
+      );
       await waitForSignedIn(page, target);
+      logBrowserMessages(page);
     }
 
     await page.getByTestId('run-integration-test').click({ timeout: 120_000 });
