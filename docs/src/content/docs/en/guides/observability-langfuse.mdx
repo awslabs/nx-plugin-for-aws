@@ -95,7 +95,21 @@ Builds, OpenAPI generation, and generated tests do not fetch Langfuse keys. The 
 
 ### Build, deploy, and check a trace
 
-Run your workspace's `build` and infrastructure `deploy` targets as described in the <Link path="guides/py-agent">Python agent guide</Link>. The generator changes deployment files; it does not deploy them.
+Build your workspace as described in the <Link path="guides/py-agent">Python agent guide</Link>. The generator changes deployment files; it does not deploy them.
+
+:::caution[Use rollback-enabled deployment for configuration changes]
+Enabling Langfuse on an existing stack, changing its host or secret ARN, or reverting the integration replaces an immutable AppConfig configuration version. The generated `deploy-sandbox` target uses express mode with rollback disabled by default, which rejects resource replacements and can leave the stack in `UPDATE_FAILED`.
+
+Use standard deployment with rollback enabled for these changes. Replace `my_infra` with your infrastructure project name:
+
+```sh
+pnpm nx run my_infra:deploy-sandbox --no-express --rollback
+```
+
+For other stages, use the `deploy` target with an explicit stage or stack selector and rollback enabled, as described in the <Link path="guides/typescript-infrastructure">infrastructure guide</Link>.
+
+If an earlier deployment has already left the stack in `UPDATE_FAILED`, recover it before switching deployment modes. CloudFormation can require follow-up operations to use the same express configuration until the stack reaches a complete state. Follow AWS's [failed-stack recovery guidance](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/stack-failure-options.html); changing the deployment flag alone does not recover a failed stack.
+:::
 
 Invoke the local or deployed agent with a prompt that calls a tool. Open its trace detail view in the Langfuse UI and verify the invocation root, agent/model/tool children, and their input/output content. Select the model (generation) observation to check its token usage. Open the trace's session to confirm the AgentCore session ID, then repeat a short request in that session to check flushing and grouping.
 
@@ -111,7 +125,7 @@ The Langfuse entrypoint creates one provider before importing the agent. FastAPI
 
 The dependency set uses Langfuse 4.18.0 and ADOT 0.22.0. The vended OpenTelemetry pins match ADOT's requirements, including API/SDK/HTTP exporter 1.45.1, and are held to preserve that compatibility. ADOT and Langfuse remain eligible for the repository's regular dependency updates; check their compatibility and adjust the OpenTelemetry pins when upgrading. Starlette follows FastAPI's dependency requirements.
 
-Repeating the generator with the same inputs does not duplicate wiring or overwrite your runtime edits. Changing the host or secret updates both the local entrypoint and CDK configuration; restart local development and rebuild/redeploy to apply the change in both environments. If you edit either configuration or customize the local startup commands, the generator asks you to reconcile them before changing options. This prevents an option change from silently replacing custom wiring.
+Repeating the generator with the same inputs does not duplicate wiring or overwrite your runtime edits. It still honors your dependency-installation preference, so you can rerun it to retry a failed or deferred installation. Changing the host or secret updates both the local entrypoint and CDK configuration; restart local development, rebuild, and use the [rollback-enabled deployment command](#build-deploy-and-check-a-trace) to apply the change in both environments. If you edit either configuration or customize the local startup commands, the generator asks you to reconcile them before changing options. This prevents an option change from silently replacing custom wiring.
 
 An earlier experimental setup without `langfuse_dev.py` must be reverted and regenerated with the updated generator. Preserve and reapply any customizations separately.
 
@@ -123,7 +137,9 @@ Revert the dedicated commit containing the Langfuse generator's changes:
 git revert <langfuse-setup-commit>
 ```
 
-Review the revert for conflicts with subsequent agent changes, reinstall workspace dependencies, then rebuild and redeploy the agent's CDK stack. Reverting the complete setup restores the stock ADOT entrypoint and local startup commands, and removes the Langfuse wiring, files, dependency additions, runtime settings, and secret-read grant. Restart any running local `dev` process. Invoke the deployed agent with a new session and verify new application traces in CloudWatch.
+Review the revert for conflicts with subsequent agent changes. Other generators may have added usage-metric tags to the same array in `packages/common/constructs/src/core/app.ts`; preserve those tags when resolving the conflict. Remove the Langfuse tag (`g79`) only if no other agent still uses Langfuse, and preserve shared dependencies needed by remaining integrations.
+
+Reinstall workspace dependencies, rebuild, then redeploy using the [rollback-enabled deployment command](#build-deploy-and-check-a-trace). Removing the AppConfig entry also requires a resource replacement; do not use the default express command for this step. Reverting the complete setup restores the stock ADOT entrypoint and local startup commands, and removes the Langfuse wiring, files, dependency additions, runtime settings, and secret-read grant. Restart any running local `dev` process. Invoke the deployed agent with a new session and verify new application traces in CloudWatch.
 
 The generator has no rollback flag. Keep unrelated changes out of the setup commit so reverting it does not remove them.
 
