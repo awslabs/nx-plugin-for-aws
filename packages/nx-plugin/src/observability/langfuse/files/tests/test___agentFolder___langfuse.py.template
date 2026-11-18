@@ -19,11 +19,141 @@ from <%- agentModule %> import langfuse_telemetry as telemetry
 
 
 @pytest.mark.parametrize("config_source", ["appconfig", "local"])
-def test_langfuse_invocation_lifecycle(config_source):
-    subprocess.run([sys.executable, __file__, config_source], check=True)
+@pytest.mark.parametrize("registration", ["wrapper", "add_middleware"])
+def test_langfuse_invocation_lifecycle(config_source, registration):
+    subprocess.run([sys.executable, __file__, "lifecycle", config_source, registration], check=True)
 
 
-def check_invocation_lifecycle(monkeypatch, config_source):
+@pytest.mark.parametrize("config_source", ["appconfig", "local"])
+@pytest.mark.parametrize("failure", [
+    "AccessDeniedException", "ResourceNotFoundException", "ExpiredTokenException",
+    "no_credentials", "malformed_json", "missing_key", "empty_key", "invalid_key_type",
+    "invalid_aws_code", "invalid_host",
+])
+def test_langfuse_credential_failure(config_source, failure):
+    subprocess.run([sys.executable, __file__, "credential_failure", config_source, failure], check=True)
+
+
+def test_langfuse_middleware_initialization_guards():
+    subprocess.run([sys.executable, __file__, "guards"], check=True)
+
+
+def check_credential_failure(monkeypatch, config_source, failure):
+    credentials = {"LANGFUSE_PUBLIC_KEY": uuid4().hex, "LANGFUSE_SECRET_KEY": uuid4().hex}
+    secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:trace-test-abcdef"
+    entry = {"host": "https://cloud.langfuse.com", "secretArn": secret_arn}
+    reads = []
+
+    class SecretClient:
+        def get_secret_value(self, *, SecretId):
+            reads.append(SecretId)
+            if failure.endswith("Exception") or failure == "invalid_aws_code":
+                code = credentials["LANGFUSE_SECRET_KEY"] + "\n" if failure == "invalid_aws_code" else failure
+                raise ClientError({"Error": {"Code": code, "Message": credentials["LANGFUSE_SECRET_KEY"]}}, "GetSecretValue")
+            if failure == "no_credentials":
+                raise NoCredentialsError()
+            if failure == "malformed_json":
+                return {"SecretString": credentials["LANGFUSE_SECRET_KEY"] + " not json"}
+            secret: dict[str, str | int] = dict(credentials)
+            if failure == "missing_key":
+                del secret["LANGFUSE_SECRET_KEY"]
+            elif failure == "empty_key":
+                secret["LANGFUSE_SECRET_KEY"] = ""
+            elif failure == "invalid_key_type":
+                secret["LANGFUSE_PUBLIC_KEY"] = 123
+            return {"SecretString": json.dumps(secret)}
+
+    def runtime_config():
+        assert config_source == "appconfig"
+        return {"langfuse": {"<%- agentNameClassName %>": entry}}
+
+    def unexpected_exporter(**kwargs):
+        raise AssertionError("Credential failure must not construct an exporter.")
+
+    if failure == "invalid_host":
+        entry["host"] = f"https://user:{credentials['LANGFUSE_SECRET_KEY']}@example.com"
+    monkeypatch.setattr(telemetry, "get_agentcore_runtime_config", runtime_config)
+    monkeypatch.setattr(telemetry.boto3, "client", lambda *args, **kwargs: SecretClient())
+    monkeypatch.setattr(telemetry, "OTLPSpanExporter", unexpected_exporter)
+    diagnostics = StringIO()
+    handler = logging.StreamHandler(diagnostics)
+    telemetry.logger.addHandler(handler)
+    try:
+        if config_source == "appconfig":
+            with pytest.raises(RuntimeError, match="Could not load Langfuse credentials") as error:
+                telemetry.initialize()
+            assert all(value not in str(error.value) for value in credentials.values())
+            assert telemetry.langfuse_fastapi_options() == {}
+        else:
+            telemetry.initialize(local_config=entry)
+            app = FastAPI(**telemetry.langfuse_fastapi_options())
+            app.add_middleware(telemetry.LangfuseMiddleware)
+
+            @app.post("/invocations")
+            async def invoke(request: Request):
+                return {"prompt": (await request.json())["prompt"]}
+
+            async def run():
+                scope = {
+                    "type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"},
+                    "method": "POST", "scheme": "http", "path": "/invocations", "raw_path": b"/invocations",
+                    "root_path": "", "query_string": b"", "server": ("test", 80), "client": ("test", 1234),
+                    "headers": [(b"content-type", b"application/json")],
+                }
+                for _ in range(2):
+                    sent = []
+
+                    async def receive():
+                        return {"type": "http.request", "body": b'{"prompt":"hello"}', "more_body": False}
+
+                    async def send(message, sent=sent):
+                        sent.append(message)
+
+                    await app(scope, receive, send)
+                    assert sent[0]["status"] == 200
+                    assert json.loads(sent[-1]["body"]) == {"prompt": "hello"}
+
+            asyncio.run(run())
+            assert diagnostics.getvalue().count("Langfuse export disabled") == 1
+            assert "restart dev/serve" in diagnostics.getvalue()
+    finally:
+        telemetry.logger.removeHandler(handler)
+    assert all(value not in diagnostics.getvalue() for value in credentials.values())
+    if failure.endswith("Exception"):
+        assert failure in diagnostics.getvalue()
+    elif failure == "invalid_aws_code":
+        assert "AWS error code: unavailable" in diagnostics.getvalue()
+    assert reads == ([] if failure == "invalid_host" else [secret_arn])
+    assert telemetry._client is None
+    assert telemetry._provider is None
+    assert isinstance(trace.get_tracer_provider(), trace.ProxyTracerProvider)
+
+
+def check_middleware_guards():
+    received = []
+
+    async def app(scope, receive, send):
+        received.append(scope)
+
+    async def receive():
+        return {"type": "http.request", "body": b""}
+
+    async def send(message):
+        raise AssertionError("The guard must not send a response.")
+
+    async def run():
+        middleware = telemetry.LangfuseMiddleware(app)
+        for scope in ({"type": "lifespan"}, {"type": "http", "path": "/ping"}):
+            await middleware(scope, receive, send)
+            assert received[-1] is scope
+        with pytest.raises(RuntimeError, match="Initialize Langfuse"):
+            await middleware({"type": "http", "path": "/invocations"}, receive, send)
+        assert len(received) == 2
+
+    asyncio.run(run())
+
+
+def check_invocation_lifecycle(monkeypatch, config_source, registration):
     exported = InMemorySpanExporter()
     credentials = {
         "LANGFUSE_PUBLIC_KEY": uuid4().hex,
@@ -62,36 +192,10 @@ def check_invocation_lifecycle(monkeypatch, config_source):
         return exported
 
     monkeypatch.setattr(telemetry, "OTLPSpanExporter", make_exporter)
-    diagnostics = StringIO()
-    handler = logging.StreamHandler(diagnostics)
-    telemetry.logger.addHandler(handler)
-    try:
-        failures: list[Exception] = [
-            ClientError({"Error": {"Code": code, "Message": credentials["LANGFUSE_SECRET_KEY"]}}, "GetSecretValue")
-            for code in ("AccessDeniedException", "ResourceNotFoundException")
-        ]
-        failures.append(NoCredentialsError())
-        failures.append(json.JSONDecodeError(credentials["LANGFUSE_SECRET_KEY"], credentials["LANGFUSE_PUBLIC_KEY"], 0))
-        for failure in failures:
-            with pytest.MonkeyPatch.context() as failed_start:
-                def unavailable(*args, failure=failure, **kwargs):
-                    raise failure
-
-                failed_start.setattr(telemetry.boto3, "client", unavailable)
-                with pytest.raises(RuntimeError, match="Could not load Langfuse credentials") as error:
-                    initialize()
-                assert credentials["LANGFUSE_SECRET_KEY"] not in str(error.value)
-                assert isinstance(trace.get_tracer_provider(), trace.ProxyTracerProvider)
-    finally:
-        telemetry.logger.removeHandler(handler)
-    diagnostic_text = diagnostics.getvalue()
-    assert all(value not in diagnostic_text for value in credentials.values())
-    assert all(value in diagnostic_text for value in ("ClientError", "AccessDeniedException", "ResourceNotFoundException", "NoCredentialsError", "JSONDecodeError"))
     assert telemetry.langfuse_fastapi_options() == {}
     if config_source == "local":
         for host in ("http://localhost:3000", "https://user:password@example.com", "https://example.com?token=value"):
-            with pytest.raises(RuntimeError, match="Could not load Langfuse credentials"):
-                telemetry.initialize(local_config={**entry, "host": host})
+            telemetry.initialize(local_config={**entry, "host": host})
             assert isinstance(trace.get_tracer_provider(), trace.ProxyTracerProvider)
         assert not secret_reads
     initialize()
@@ -138,7 +242,11 @@ def check_invocation_lifecycle(monkeypatch, config_source):
                     yield b'{"content":"5"}\n'
         return StreamingResponse(stream(), media_type="application/jsonl")
 
-    middleware = telemetry.LangfuseMiddleware(app)
+    if registration == "add_middleware":
+        app.add_middleware(telemetry.LangfuseMiddleware)
+        middleware = app
+    else:
+        middleware = telemetry.LangfuseMiddleware(app)
     sessions = [str(uuid4()), str(uuid4())]
 
     async def run():
@@ -246,4 +354,9 @@ def check_invocation_lifecycle(monkeypatch, config_source):
 
 if __name__ == "__main__":
     with pytest.MonkeyPatch.context() as patch:
-        check_invocation_lifecycle(patch, sys.argv[1])
+        if sys.argv[1] == "lifecycle":
+            check_invocation_lifecycle(patch, sys.argv[2], sys.argv[3])
+        elif sys.argv[1] == "credential_failure":
+            check_credential_failure(patch, sys.argv[2], sys.argv[3])
+        else:
+            check_middleware_guards()
