@@ -22,13 +22,13 @@ For deployed agents, enabling Langfuse disables ADOT and changes the zip entrypo
 
 | Signal or feature | Effect with Langfuse enabled |
 | --- | --- |
-| Agent/model/tool application spans | Exported to Langfuse. The zip proof found none of its invocation trace IDs in `aws/spans` or the runtime's application spans stream. |
-| Runtime service metrics | Still available in CloudWatch. Invocations, Latency, UserErrors, and SystemErrors were verified in the zip proof. |
-| Agent stdout/stderr | Still delivered to the runtime's CloudWatch log group. Uvicorn logs and application output were verified. Prompts or tool results printed by your app can therefore remain in AWS logs too. |
-| ADOT structured telemetry logs | Absent while ADOT was disabled in the proof. They returned after restoring ADOT. Ordinary logs are separate from this telemetry. |
-| Separately delivered AgentCore service spans | Not redirected by this application exporter. Their continued delivery was **not verified** in the proof; it did not configure service-span delivery or exercise Memory, Gateway, Identity, or built-in tools. |
+| Agent/model/tool application spans | Exported to Langfuse. These spans are no longer delivered to `aws/spans` or the runtime's application spans stream. |
+| Runtime service metrics | Invocations, Latency, UserErrors, and SystemErrors remain available in CloudWatch. |
+| Agent stdout/stderr | Uvicorn logs and application output still go to the runtime's CloudWatch log group. Prompts or tool results printed by your app can therefore remain in AWS logs too. |
+| ADOT structured telemetry logs | Disabled with ADOT. Ordinary application logs continue independently. Restoring ADOT restores its structured telemetry logs. |
+| Separately delivered AgentCore service spans | Not redirected by this application exporter. Check the separate delivery configuration for Memory, Gateway, Identity, and built-in tools; this integration does not configure or guarantee their delivery. |
 | AgentCore Evaluations | CloudWatch-backed online/batch evaluation and `CloudWatchAgentSpanCollector` lose new application spans for this agent. The on-demand Evaluate API can accept caller-supplied spans, but this generator supplies no replacement collector. |
-| Plugin tests, dashboards, and evaluation harness | Generated application tests do not require CloudWatch traces. No generated trace-querying dashboards or alarms were found in the inspected scope. Roadmap #3's evaluation PR collected response text and tool hooks in-process when reviewed; it was still open, so compatibility with its eventual implementation is unverified. Your own trace-based alarms, queries, or evaluation jobs must be reviewed. |
+| Application tests, dashboards, and evaluation jobs | Generated application tests do not require CloudWatch traces. Any dashboards, alarms, or evaluation jobs that read application spans from CloudWatch lose those new spans. Check the trace source used by each integration before enabling Langfuse. |
 
 See AWS's [supported evaluation telemetry](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/supported-frameworks-telemetry.html) and [observability configuration](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html) for service delivery and evaluation requirements.
 
@@ -54,6 +54,8 @@ Use the project name recorded in `project.json`. If it contains several agents, 
 
 ### Prepare a secret and endpoint
 
+We recommend [self-hosting Langfuse on AWS](https://langfuse.com/self-hosting) when choosing where to keep your trace data. Use an existing, secured HTTPS installation; this generator does not provision one. Langfuse Cloud is also supported when you explicitly select its endpoint.
+
 Create a Secrets Manager secret in the agent's AWS account and region. Its JSON must contain the string fields `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` with your Langfuse project's keys. Use the Secrets Manager console or an approved secret-management process; do not put keys in generator flags, source files, shell history, or runtime environment variables.
 
 Use the AWS managed Secrets Manager encryption key for this first version. A secret encrypted with a customer-managed KMS key needs an additional, explicitly scoped decrypt grant that this generator does not create.
@@ -71,7 +73,7 @@ Here `LANGFUSE_SECRET_ARN` contains only the ARN, not a key. CDK grants `secrets
 
 The CDK helper writes the host and secret ARN to AppConfig at `agentcore.langfuse.<AgentClass>`, preserving entries for other agents. Deployed startup reads this entry through `get_agentcore_runtime_config()`, using the agent's existing AppConfig read grant. The generated runtime sets `DISABLE_ADOT_OBSERVABILITY=true` so AgentCore's managed ADOT pipeline leaves tracing to the application; host and secret ARN are not runtime environment variables.
 
-Replace `https://langfuse.example.com` with your existing endpoint. To use Langfuse Cloud, explicitly pass its regional base URL, such as `https://cloud.langfuse.com` for EU or `https://us.cloud.langfuse.com` for US. Path prefixes are supported. Provide the base URL, without `/api/public/otel`; credentials, query parameters, and fragments in the URL are rejected. Repeat runs retain the previous host and secret unless you supply replacements.
+Replace `https://langfuse.example.com` with your existing endpoint. To use Langfuse Cloud, explicitly pass its regional base URL, such as `https://cloud.langfuse.com` for EU or `https://us.cloud.langfuse.com` for US. Path prefixes are supported. Provide the base URL, without `/api/public/otel`; credentials, query parameters, and fragments in the URL are rejected. Repeat runs retain the previous host and secret unless you supply replacements; leaving either input blank keeps its saved value.
 
 The exporter uses OTLP/HTTP with `x-langfuse-ingestion-version: 4`. Self-hosted installations must support that ingestion contract. Consult Langfuse's [OpenTelemetry integration](https://langfuse.com/integrations/native/opentelemetry) and [v4 migration guide](https://langfuse.com/integrations/native/opentelemetry/migration-to-v4) when choosing an endpoint.
 
@@ -83,7 +85,9 @@ Use your normal AWS development credentials, such as an authenticated AWS profil
 pnpm nx run my_agent:dev
 ```
 
-The agent's `dev` and `serve` targets run `langfuse_dev.py` through Uvicorn with automatic reload. It stores only the host and secret ARN, reads the keys from Secrets Manager, and initializes tracing before importing the agent. **No deployed AppConfig application is needed to start local tracing.** The assigned local port is preserved. Missing credentials or secret access stop startup with an error; keys are never read from a local `.env` file or Langfuse environment variables.
+The agent's `dev` and `serve` targets run `langfuse_dev.py` through Uvicorn with automatic reload. It stores only the host and secret ARN, reads the keys from Secrets Manager, and initializes tracing before importing the agent. **No deployed AppConfig application is needed to start local tracing.** The assigned local port is preserved. Keys are never read from a local `.env` file or Langfuse environment variables.
+
+**Local development can run without Langfuse secret access.** If its configuration or credentials cannot be loaded, startup logs a warning and the local agent continues without Langfuse export. Requests do not retry the secret lookup. Fix your AWS credentials, secret-read permission, or configuration, then restart `dev`/`serve` to enable tracing. Your agent still needs its normal model and tool permissions. Deployed agents continue to fail startup when their Langfuse credentials cannot be loaded.
 
 Invoke the local agent using its generated chat client or HTTP endpoint. Both local and deployed invocations use the same Langfuse destination and session mapping. The agent's local HTTP server keeps its normal behavior; the HTTPS requirement applies to the Langfuse destination. A laptop-only Langfuse endpoint such as `http://localhost:3000` is not supported.
 
