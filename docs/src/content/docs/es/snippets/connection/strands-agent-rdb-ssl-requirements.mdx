@@ -1,35 +1,10 @@
 ---
 title: Requisitos de SSL al Conectarse sin RDS Proxy
 ---
-import Infrastructure from '@components/infrastructure.astro';
 
-El generador de conexión actualiza el Dockerfile para instalar el paquete de CA de Amazon RDS en `/usr/local/share/ca-certificates/rds-bundle.crt`. Establece `NODE_EXTRA_CA_CERTS` en esa ruta para que Node.js confíe en el certificado al conectarse sin RDS Proxy:
+Cuando el agente se conecta al clúster de Aurora sin RDS Proxy, Node.js debe confiar en la autoridad de certificación (CA) de Amazon RDS. Node.js no lee el almacén de confianza del sistema operativo. Solo carga certificados CA adicionales desde el archivo al que apunta la variable de entorno `NODE_EXTRA_CA_CERTS`.
 
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-new MyAgent(this, 'MyAgent', {
-  ...
-  environmentVariables: {
-    NODE_EXTRA_CA_CERTS: '/usr/local/share/ca-certificates/rds-bundle.crt',
-  },
-});
-```
-
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_agent" {
-  ...
-  env = {
-    NODE_EXTRA_CA_CERTS = "/usr/local/share/ca-certificates/rds-bundle.crt"
-  }
-}
-```
-
-</Fragment>
-</Infrastructure>
+- Cuando el `infra` del agente es `agentcore-ecr`, el generador de conexión actualiza el Dockerfile. Descarga el paquete de CA de Amazon RDS en `/usr/local/share/ca-certificates/rds-bundle.crt` y establece `NODE_EXTRA_CA_CERTS` en esa ruta, por lo que no hay nada que configurar. Para un Dockerfile generado por una versión anterior del plugin, `nx migrate` agrega la línea `NODE_EXTRA_CA_CERTS`.
+- Cuando el `infra` del agente es `agentcore` (el predeterminado), el agente se despliega como un paquete de código que no incluye el paquete de CA de RDS. Mantén RDS Proxy habilitado (el predeterminado), o usa `agentcore-ecr`.
 
 Para más detalles, consulta la [documentación de SSL/TLS de Amazon RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html). Al usar RDS Proxy, no necesitas configurar `NODE_EXTRA_CA_CERTS`.
