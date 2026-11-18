@@ -216,6 +216,9 @@ export const tsContainerGenerator = async (
         cwd: '{projectRoot}',
         env: {
           PORT: `${port}`,
+          // The clients a connection vends read this to use the local
+          // database a connection's dev dependency starts.
+          LOCAL_DEV: 'true',
         },
       },
     },

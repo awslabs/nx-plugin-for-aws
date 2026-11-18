@@ -202,7 +202,9 @@ export const pyContainerGenerator = async (
     options: {
       commands: [`uv run python -m ${moduleName}.${nameSnakeCase}.main`],
       cwd: '{projectRoot}',
-      env: { PORT: `${port}` },
+      // The clients a connection vends read LOCAL_DEV to use the local
+      // database a connection's dev dependency starts.
+      env: { PORT: `${port}`, LOCAL_DEV: 'true' },
     },
   };
 

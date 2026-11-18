@@ -199,13 +199,24 @@ describe('ts#container generator', () => {
       options: {
         commands: ['tsx --watch ./src/service/index.ts'],
         cwd: '{projectRoot}',
-        env: { PORT: `${component.port}` },
+        env: { PORT: `${component.port}`, LOCAL_DEV: 'true' },
       },
     });
     expect(targets.dev).toEqual({
       continuous: true,
       dependsOn: ['service-serve'],
     });
+  });
+
+  // The clients the connection generators vend branch on LOCAL_DEV, so
+  // without it the served service resolves against AWS instead of the local
+  // database the serve target starts.
+  it('should set LOCAL_DEV in the serve target', async () => {
+    await run();
+
+    expect(readProject(tree).targets['service-serve'].options.env).toEqual(
+      expect.objectContaining({ LOCAL_DEV: 'true' }),
+    );
   });
 
   it('should name everything after a named service', async () => {

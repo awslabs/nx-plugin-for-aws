@@ -194,7 +194,7 @@ describe('py#container generator', () => {
       options: {
         commands: ['uv run python -m proj_my_proj.service.main'],
         cwd: '{projectRoot}',
-        env: { PORT: '8081' },
+        env: { PORT: '8081', LOCAL_DEV: 'true' },
       },
     });
 
@@ -221,6 +221,17 @@ describe('py#container generator', () => {
     expect(targets['service-trivy'].cache).toBe(false);
     expect(targets['service-trivy'].dependsOn).toEqual(['service-docker']);
     expect(targets.trivy.dependsOn).toContain('service-trivy');
+  });
+
+  // The clients the connection generators vend branch on LOCAL_DEV, so
+  // without it the served service resolves against AWS instead of the local
+  // database the serve target starts.
+  it('should set LOCAL_DEV in the serve target', async () => {
+    await pyContainerGenerator(tree, { project: PROJECT, iac: 'cdk' });
+
+    expect(readProject(tree).targets['service-serve'].options.env).toEqual(
+      expect.objectContaining({ LOCAL_DEV: 'true' }),
+    );
   });
 
   it('should use the service name for a named service', async () => {
