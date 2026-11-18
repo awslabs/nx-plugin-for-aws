@@ -26,7 +26,12 @@ import {
   OperatingSystemFamily,
   Secret,
 } from 'aws-cdk-lib/aws-ecs';
-import { IRole, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
+import {
+  Effect,
+  IRole,
+  PolicyStatement,
+  ServicePrincipal,
+} from 'aws-cdk-lib/aws-iam';
 import { Key } from 'aws-cdk-lib/aws-kms';
 import { ILogGroup, LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
@@ -202,12 +207,52 @@ export class EcsService extends Construct implements IConnectable {
     const logRetention = props.logRetention ?? RetentionDays.ONE_YEAR;
 
     const logsKey = new Key(this, 'LogsKey', { enableKeyRotation: true });
-    logsKey.grantEncryptDecrypt(
-      new ServicePrincipal(`logs.${Stack.of(this).region}.amazonaws.com`),
+    // The key policy names the log groups the key encrypts, so both names are
+    // resolved here: a policy that referenced a log group would make the key
+    // and the log group depend on each other.
+    const resourceName = Names.uniqueResourceName(this, {
+      maxLength: 255,
+      separator: '-',
+      allowedSpecialCharacters: '-_',
+    });
+    const logGroupName = `/aws/ecs/${resourceName}`;
+    const insightsLogGroupName = `/aws/ecs/containerinsights/${resourceName}/performance`;
+    const stack = Stack.of(this);
+    const logGroupArn = (name: string) =>
+      `arn:${stack.partition}:logs:${stack.region}:${stack.account}:log-group:${name}`;
+    logsKey.addToResourcePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        principals: [
+          new ServicePrincipal(`logs.${stack.region}.amazonaws.com`),
+        ],
+        actions: [
+          'kms:Encrypt',
+          'kms:Decrypt',
+          'kms:ReEncrypt*',
+          'kms:GenerateDataKey*',
+          'kms:DescribeKey',
+        ],
+        resources: ['*'],
+        // CloudWatch Logs passes the log group's ARN as its encryption
+        // context, so the key is usable for these two log groups only.
+        conditions: {
+          ArnLike: {
+            'kms:EncryptionContext:aws:logs:arn': [
+              logGroupArn(logGroupName),
+              logGroupArn(insightsLogGroupName),
+            ],
+          },
+        },
+      }),
     );
 
     this.cluster =
-      props.cluster ?? this.createCluster(vpc, logsKey, logRetention);
+      props.cluster ??
+      this.createCluster(vpc, logsKey, logRetention, {
+        clusterName: resourceName,
+        insightsLogGroupName,
+      });
 
     this.taskDefinition = new FargateTaskDefinition(this, 'TaskDefinition', {
       cpu: props.cpu ?? 256,
@@ -221,8 +266,13 @@ export class EcsService extends Construct implements IConnectable {
     props.grantTaskRole?.(this.taskRole);
 
     const logGroup = new LogGroup(this, 'Logs', {
+      logGroupName,
       encryptionKey: logsKey,
       retention: logRetention,
+      // Named, so it must go with the stack: a redeploy would otherwise fail
+      // on the log group that is already there. The Terraform module also
+      // deletes it.
+      removalPolicy: RemovalPolicy.DESTROY,
     });
     this.logGroup = logGroup;
 
@@ -291,16 +341,10 @@ export class EcsService extends Construct implements IConnectable {
     vpc: IVpc,
     logsKey: Key,
     logRetention: RetentionDays,
+    names: { clusterName: string; insightsLogGroupName: string },
   ): Cluster {
-    // The log group name contains the cluster name, so the cluster name must
-    // be known at synth time.
-    const clusterName = Names.uniqueResourceName(this, {
-      maxLength: 255,
-      separator: '-',
-      allowedSpecialCharacters: '-_',
-    });
     const insightsLogGroup = new LogGroup(this, 'ContainerInsightsLogs', {
-      logGroupName: `/aws/ecs/containerinsights/${clusterName}/performance`,
+      logGroupName: names.insightsLogGroupName,
       retention: logRetention,
       encryptionKey: logsKey,
       // ECS creates this log group itself if it is missing, so retaining it
@@ -309,7 +353,7 @@ export class EcsService extends Construct implements IConnectable {
     });
     const cluster = new Cluster(this, 'Cluster', {
       vpc,
-      clusterName,
+      clusterName: names.clusterName,
       containerInsightsV2: ContainerInsights.ENABLED,
     });
     // The log group must exist before ECS starts writing performance events.

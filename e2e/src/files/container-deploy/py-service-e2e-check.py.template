@@ -23,27 +23,35 @@ def _log(check: str, token: str, ok: bool, **fields: object) -> None:
     print("E2E_CHECK " + json.dumps({"check": check, "token": token, "ok": ok, **fields}), flush=True)
 
 
-# AWS signing params (which also cover RDS IAM auth tokens) and passwords.
-_SECRETS = (
-    (re.compile(r"(X-Amz-(?:Security-Token|Signature|Credential|Date|SignedHeaders)=)[^&\s\"']*", re.I), r"\1***"),
-    (re.compile(r"(://[^:/@\s]+:)[^@\s]*@"), r"\1***@"),
-    (re.compile(r"(password=)[^&\s;\"']*", re.I), r"\1***"),
-)
+# A diagnostic code is a short upper-case name or a small number: PostgreSQL
+# '28P01', an errno name like 'ECONNREFUSED', an HTTP status. Any other value is
+# left out of the log.
+_DIAGNOSTIC_CODE = re.compile(r"^[0-9A-Z][0-9A-Z_]{0,31}$")
 
 
-def _redact(error: BaseException) -> str:
-    """The error message without its traceback or secrets, cut to one short log line."""
-    text = str(error) or type(error).__name__
-    for pattern, replacement in _SECRETS:
-        text = pattern.sub(replacement, text)
-    return text[:300]
+def _describe(error: BaseException) -> str:
+    """The failure's exception class and diagnostic code, never its message.
+
+    The message of an asyncpg, SQLAlchemy or botocore error can carry an RDS IAM
+    auth token or another credential, and these lines go to a public CI log.
+    """
+    name = type(error).__name__
+    code = getattr(error, "sqlstate", None) or getattr(error, "code", None)
+    return f"{name} {code}" if isinstance(code, str) and _DIAGNOSTIC_CODE.match(code) else name
+
+
+class ReadBackMismatch(RuntimeError):
+    """The item or row read back does not match what the check wrote.
+
+    Raised with no message, so the values read back are not logged.
+    """
 
 
 def _put_and_get_item(token: str) -> None:
     ExampleItem.create(id=token, name=token, category="container-deploy")
     name = ExampleItem.get_by_id(token).name
     if name != token:
-        raise RuntimeError(f"read back {name!r}")
+        raise ReadBackMismatch
 
 
 async def _check_item(token: str) -> None:
@@ -61,7 +69,7 @@ async def _check_row(token: str) -> None:
     async with session_context() as session:
         fetched = await session.get(ExampleRow, row_id)
     if fetched is None or fetched.name != token:
-        raise RuntimeError(f"read back {fetched!r}")
+        raise ReadBackMismatch
 
 
 async def _run_check(check: str, token: str, run: Callable[[str], Awaitable[None]]) -> None:
@@ -75,12 +83,12 @@ async def _run_check(check: str, token: str, run: Callable[[str], Awaitable[None
             _log(check, token, True, final=True)
             return
         except Exception as error:
-            message = _redact(error)
+            failure = _describe(error)
             if time.monotonic() + interval > deadline:
-                _log(check, token, False, final=True, attempt=attempt, detail=message, error=message)
+                _log(check, token, False, final=True, attempt=attempt, detail=failure, error=failure)
                 return
             # A non-final line, so the test can show the latest error if it times out.
-            _log(check, token, False, final=False, attempt=attempt, error=message)
+            _log(check, token, False, final=False, attempt=attempt, error=failure)
         attempt += 1
         await asyncio.sleep(interval)
 

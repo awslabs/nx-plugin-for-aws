@@ -215,7 +215,7 @@ export const pyContainerGenerator = async (
     targets: sortObjectKeys(project.targets),
   });
 
-  if (infra === 'ecs') {
+  if (infra === 'ecs' && iac) {
     await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
     await addContainerServiceInfra(tree, {
       nameClassName,
@@ -242,6 +242,7 @@ export const pyContainerGenerator = async (
     projectRoot: project.root,
   });
 
+  const recorded = recordedMetadata(tree, project.name, targetPrefix);
   addComponentGeneratorMetadata(
     tree,
     project.name,
@@ -250,14 +251,21 @@ export const pyContainerGenerator = async (
     targetPrefix,
     metadata,
   );
-  // Converges the values a re-run with different options resolved.
-  updateComponentGeneratorMetadata(
-    tree,
-    project.name,
-    PY_CONTAINER_GENERATOR_INFO,
-    targetPrefix,
-    metadata,
-  );
+  if (recorded?.infra === 'none' && infra === 'ecs') {
+    // Escalating from infra=none: record what the infrastructure was built
+    // with. Any other re-run keeps what was recorded, because the vended
+    // constructs stay on disk and the connection generators require infra=ecs.
+    updateComponentGeneratorMetadata(
+      tree,
+      project.name,
+      PY_CONTAINER_GENERATOR_INFO,
+      targetPrefix,
+      {
+        infra: metadata.infra,
+        iac: metadata.iac,
+      },
+    );
+  }
 
   await addGeneratorMetricsIfApplicable(tree, [PY_CONTAINER_GENERATOR_INFO]);
 
@@ -267,5 +275,26 @@ export const pyContainerGenerator = async (
       languages: ['typescript', 'python'],
     });
 };
+
+/** The metadata a previous run recorded for this component, if any. */
+const recordedMetadata = (
+  tree: Tree,
+  projectName: string,
+  componentName: string,
+): ContainerMetadata | undefined =>
+  (
+    readProjectConfigurationUnqualified(tree, projectName).metadata as
+      | {
+          components?: (ContainerMetadata & {
+            generator: string;
+            name?: string;
+          })[];
+        }
+      | undefined
+  )?.components?.find(
+    (c) =>
+      c.generator === PY_CONTAINER_GENERATOR_INFO.id &&
+      c.name === componentName,
+  );
 
 export default pyContainerGenerator;

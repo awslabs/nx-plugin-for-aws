@@ -1538,7 +1538,7 @@ describe('connection generator', () => {
       expect(result.targetComponent?.name).toBe('tgt-comp');
     });
 
-    it('should fall back to all candidates when specified component has no matching candidates', async () => {
+    it('should still resolve the project-level connection when the named component takes part in none', async () => {
       // Source is react with a non-participating component
       // Specifying the non-participating component should still resolve via project-level
       setupReactProject('frontend', [

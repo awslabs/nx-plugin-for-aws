@@ -10,17 +10,32 @@ const seconds = (name: string, fallback: number) =>
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// The error message without its stack or secrets (AWS signing params, which
-// also cover RDS IAM auth tokens, and passwords), cut to one short log line.
-const redact = (error: unknown) =>
-  (error instanceof Error ? error.message || error.name : String(error))
-    .replace(
-      /(X-Amz-(?:Security-Token|Signature|Credential|Date|SignedHeaders)=)[^&\s"']*/gi,
-      '$1***',
-    )
-    .replace(/(:\/\/[^:/@\s]+:)[^@\s]*@/g, '$1***@')
-    .replace(/(password=)[^&\s;"']*/gi, '$1***')
-    .slice(0, 300);
+// A diagnostic code is a short upper-case name or a small number: Node
+// 'ECONNREFUSED', Prisma 'P1001', PostgreSQL '28P01'. Any other value is left
+// out of the log.
+const DIAGNOSTIC_CODE = /^[0-9A-Z][0-9A-Z_]{0,31}$/;
+
+// A failure is logged as its class and diagnostic code, never as its message.
+// The message of a Prisma, pg or AWS SDK error can carry an RDS IAM auth token
+// or another credential, and these lines go to a public CI log.
+export const describeError = (error: unknown): string => {
+  if (!(error instanceof Error)) {
+    return typeof error;
+  }
+  const { code } = error as { code?: unknown };
+  return typeof code === 'string' && DIAGNOSTIC_CODE.test(code)
+    ? `${error.name} ${code}`
+    : error.name;
+};
+
+// A failure a check raises itself, classified by name so its message, which
+// can hold row data, is never logged.
+class CheckError extends Error {
+  constructor(classification: string) {
+    super(classification);
+    this.name = classification;
+  }
+}
 
 const log = (line: Record<string, unknown>) =>
   console.log(`E2E_CHECK ${JSON.stringify(line)}`);
@@ -30,7 +45,7 @@ const putAndGetItem = async (token: string) => {
   await entity.put({ id: token }).go();
   const { data } = await entity.get({ id: token }).go();
   if (data?.id !== token) {
-    throw new Error(`read back ${JSON.stringify(data)}`);
+    throw new CheckError('ReadBackMismatch');
   }
 };
 
@@ -44,7 +59,7 @@ const waitForDatabaseConfig = async () => {
     forceFetch: true,
   });
   if (!config?.PostgresDb) {
-    throw new Error('runtime config has no database.PostgresDb yet');
+    throw new CheckError('DatabaseConfigMissing');
   }
 };
 
@@ -61,7 +76,7 @@ const insertAndSelectRow = async (token: string) => {
   });
   const row = await prisma.exampleTable.findUniqueOrThrow({ where: { id } });
   if (row.column1 !== token) {
-    throw new Error(`read back ${JSON.stringify(row)}`);
+    throw new CheckError('ReadBackMismatch');
   }
 };
 
@@ -79,7 +94,7 @@ const runCheck = async (
       log({ check, token, ok: true, final: true });
       return;
     } catch (error) {
-      const message = redact(error);
+      const failure = describeError(error);
       if (Date.now() + interval > deadline) {
         log({
           check,
@@ -87,13 +102,13 @@ const runCheck = async (
           ok: false,
           final: true,
           attempt,
-          detail: message,
-          error: message,
+          detail: failure,
+          error: failure,
         });
         return;
       }
       // A non-final line, so the test can show the latest error if it times out.
-      log({ check, token, ok: false, final: false, attempt, error: message });
+      log({ check, token, ok: false, final: false, attempt, error: failure });
       await sleep(interval);
     }
   }

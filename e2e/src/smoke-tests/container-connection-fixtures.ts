@@ -95,12 +95,17 @@ export const addContainerStartupChecks = async (
   edit(`${tsServiceDir}/index.ts`, [
     [
       `import { createServer } from './server${js}';`,
-      `import { runE2eChecks } from './e2e-check${js}';
+      `import { describeError, runE2eChecks } from './e2e-check${js}';
 import { createServer } from './server${js}';`,
     ],
     [
       /^( {2}console\.log\(`Listening on .*`\);)$/m,
-      '$1\n  void runE2eChecks();',
+      `$1
+  // Logged, never rethrown: an unhandled rejection would exit the process and
+  // the deployment would roll back as if the service itself had failed.
+  void runE2eChecks().catch((error) => {
+    console.error('E2E checks failed to start:', describeError(error));
+  });`,
     ],
   ]);
 

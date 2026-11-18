@@ -322,6 +322,22 @@ describe('py#container generator', () => {
     expect(components(tree)[0]).not.toHaveProperty('auth');
   });
 
+  // The constructs a first run vended stay on disk, and the connection
+  // generators refuse a service whose recorded infra is not ecs.
+  it('should keep infra=ecs when re-run with infra=none', async () => {
+    await pyContainerGenerator(tree, { project: PROJECT, iac: 'cdk' });
+
+    await pyContainerGenerator(tree, {
+      project: PROJECT,
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    expect(components(tree)).toEqual([
+      expect.objectContaining({ infra: 'ecs', iac: 'cdk' }),
+    ]);
+  });
+
   describe('dispatcher options', () => {
     const expected = {
       nameClassName: 'MyProjService',

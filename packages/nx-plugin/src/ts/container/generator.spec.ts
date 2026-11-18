@@ -359,6 +359,18 @@ describe('ts#container generator', () => {
     );
   });
 
+  // The constructs a first run vended stay on disk, and the connection
+  // generators refuse a service whose recorded infra is not ecs.
+  it('should keep infra=ecs when re-run with infra=none', async () => {
+    await run({ infra: 'ecs' });
+
+    await run({ infra: 'none' });
+
+    expect(componentsOf(tree)).toEqual([
+      expect.objectContaining({ infra: 'ecs', iac: 'cdk' }),
+    ]);
+  });
+
   it('should change nothing when re-run with the same options', async () => {
     await run();
     const before = allFiles(tree);

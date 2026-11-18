@@ -480,6 +480,27 @@ describe('EcsService synth', () => {
       expect(cluster.DependsOn).toContain(logGroupId);
     });
 
+    // Parity with the Terraform key policy, which scopes the same grant to
+    // the two log group ARNs.
+    it('should let CloudWatch Logs use the key for its own log groups only', () => {
+      const logGroupNames = out
+        .ofType('AWS::Logs::LogGroup')
+        .map(([, logGroup]) => String(logGroup.Properties.LogGroupName));
+      expect(logGroupNames).toHaveLength(2);
+
+      const [[, key]] = out.ofType('AWS::KMS::Key');
+      const conditioned = key.Properties.KeyPolicy.Statement.filter(
+        (statement: { Condition?: unknown }) => statement.Condition,
+      );
+      expect(conditioned).toHaveLength(1);
+      const context = JSON.stringify(
+        conditioned[0].Condition.ArnLike['kms:EncryptionContext:aws:logs:arn'],
+      );
+      for (const logGroupName of logGroupNames) {
+        expect(context).toContain(`log-group:${logGroupName}`);
+      }
+    });
+
     it('should create no load balancer, API or inbound rule', () => {
       expect(
         Object.values(out.resources)
