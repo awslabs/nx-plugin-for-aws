@@ -1,0 +1,362 @@
+import asyncio
+import json
+import logging
+import subprocess
+import sys
+from hashlib import sha256
+from io import StringIO
+from uuid import UUID, uuid4
+
+import pytest
+from botocore.exceptions import ClientError, NoCredentialsError
+from fastapi import FastAPI, Request
+from fastapi.responses import StreamingResponse
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+from <%- agentModule %> import langfuse_telemetry as telemetry
+
+
+@pytest.mark.parametrize("config_source", ["appconfig", "local"])
+@pytest.mark.parametrize("registration", ["wrapper", "add_middleware"])
+def test_langfuse_invocation_lifecycle(config_source, registration):
+    subprocess.run([sys.executable, __file__, "lifecycle", config_source, registration], check=True)
+
+
+@pytest.mark.parametrize("config_source", ["appconfig", "local"])
+@pytest.mark.parametrize("failure", [
+    "AccessDeniedException", "ResourceNotFoundException", "ExpiredTokenException",
+    "no_credentials", "malformed_json", "missing_key", "empty_key", "invalid_key_type",
+    "invalid_aws_code", "invalid_host",
+])
+def test_langfuse_credential_failure(config_source, failure):
+    subprocess.run([sys.executable, __file__, "credential_failure", config_source, failure], check=True)
+
+
+def test_langfuse_middleware_initialization_guards():
+    subprocess.run([sys.executable, __file__, "guards"], check=True)
+
+
+def check_credential_failure(monkeypatch, config_source, failure):
+    credentials = {"LANGFUSE_PUBLIC_KEY": uuid4().hex, "LANGFUSE_SECRET_KEY": uuid4().hex}
+    secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:trace-test-abcdef"
+    entry = {"host": "https://cloud.langfuse.com", "secretArn": secret_arn}
+    reads = []
+
+    class SecretClient:
+        def get_secret_value(self, *, SecretId):
+            reads.append(SecretId)
+            if failure.endswith("Exception") or failure == "invalid_aws_code":
+                code = credentials["LANGFUSE_SECRET_KEY"] + "\n" if failure == "invalid_aws_code" else failure
+                raise ClientError({"Error": {"Code": code, "Message": credentials["LANGFUSE_SECRET_KEY"]}}, "GetSecretValue")
+            if failure == "no_credentials":
+                raise NoCredentialsError()
+            if failure == "malformed_json":
+                return {"SecretString": credentials["LANGFUSE_SECRET_KEY"] + " not json"}
+            secret: dict[str, str | int] = dict(credentials)
+            if failure == "missing_key":
+                del secret["LANGFUSE_SECRET_KEY"]
+            elif failure == "empty_key":
+                secret["LANGFUSE_SECRET_KEY"] = ""
+            elif failure == "invalid_key_type":
+                secret["LANGFUSE_PUBLIC_KEY"] = 123
+            return {"SecretString": json.dumps(secret)}
+
+    def runtime_config():
+        assert config_source == "appconfig"
+        return {"langfuse": {"<%- agentNameClassName %>": entry}}
+
+    def unexpected_exporter(**kwargs):
+        raise AssertionError("Credential failure must not construct an exporter.")
+
+    if failure == "invalid_host":
+        entry["host"] = f"https://user:{credentials['LANGFUSE_SECRET_KEY']}@example.com"
+    monkeypatch.setattr(telemetry, "get_agentcore_runtime_config", runtime_config)
+    monkeypatch.setattr(telemetry.boto3, "client", lambda *args, **kwargs: SecretClient())
+    monkeypatch.setattr(telemetry, "OTLPSpanExporter", unexpected_exporter)
+    diagnostics = StringIO()
+    handler = logging.StreamHandler(diagnostics)
+    telemetry.logger.addHandler(handler)
+    try:
+        if config_source == "appconfig":
+            with pytest.raises(RuntimeError, match="Could not load Langfuse credentials") as error:
+                telemetry.initialize()
+            assert all(value not in str(error.value) for value in credentials.values())
+            assert telemetry.langfuse_fastapi_options() == {}
+        else:
+            telemetry.initialize(local_config=entry)
+            app = FastAPI(**telemetry.langfuse_fastapi_options())
+            app.add_middleware(telemetry.LangfuseMiddleware)
+
+            @app.post("/invocations")
+            async def invoke(request: Request):
+                return {"prompt": (await request.json())["prompt"]}
+
+            async def run():
+                scope = {
+                    "type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"},
+                    "method": "POST", "scheme": "http", "path": "/invocations", "raw_path": b"/invocations",
+                    "root_path": "", "query_string": b"", "server": ("test", 80), "client": ("test", 1234),
+                    "headers": [(b"content-type", b"application/json")],
+                }
+                for _ in range(2):
+                    sent = []
+
+                    async def receive():
+                        return {"type": "http.request", "body": b'{"prompt":"hello"}', "more_body": False}
+
+                    async def send(message, sent=sent):
+                        sent.append(message)
+
+                    await app(scope, receive, send)
+                    assert sent[0]["status"] == 200
+                    assert json.loads(sent[-1]["body"]) == {"prompt": "hello"}
+
+            asyncio.run(run())
+            assert diagnostics.getvalue().count("Langfuse export disabled") == 1
+            assert "restart dev/serve" in diagnostics.getvalue()
+    finally:
+        telemetry.logger.removeHandler(handler)
+    assert all(value not in diagnostics.getvalue() for value in credentials.values())
+    if failure.endswith("Exception"):
+        assert failure in diagnostics.getvalue()
+    elif failure == "invalid_aws_code":
+        assert "AWS error code: unavailable" in diagnostics.getvalue()
+    assert reads == ([] if failure == "invalid_host" else [secret_arn])
+    assert telemetry._client is None
+    assert telemetry._provider is None
+    assert isinstance(trace.get_tracer_provider(), trace.ProxyTracerProvider)
+
+
+def check_middleware_guards():
+    received = []
+
+    async def app(scope, receive, send):
+        received.append(scope)
+
+    async def receive():
+        return {"type": "http.request", "body": b""}
+
+    async def send(message):
+        raise AssertionError("The guard must not send a response.")
+
+    async def run():
+        middleware = telemetry.LangfuseMiddleware(app)
+        for scope in ({"type": "lifespan"}, {"type": "http", "path": "/ping"}):
+            await middleware(scope, receive, send)
+            assert received[-1] is scope
+        with pytest.raises(RuntimeError, match="Initialize Langfuse"):
+            await middleware({"type": "http", "path": "/invocations"}, receive, send)
+        assert len(received) == 2
+
+    asyncio.run(run())
+
+
+def check_invocation_lifecycle(monkeypatch, config_source, registration):
+    exported = InMemorySpanExporter()
+    credentials = {
+        "LANGFUSE_PUBLIC_KEY": uuid4().hex,
+        "LANGFUSE_SECRET_KEY": uuid4().hex,
+    }
+    secret_reads = []
+
+    class SecretClient:
+        def get_secret_value(self, *, SecretId):
+            secret_reads.append(SecretId)
+            return {"SecretString": json.dumps(credentials)}
+
+    secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:trace-test-abcdef"
+    entry = {"host": "https://cloud.langfuse.com", "secretArn": secret_arn}
+
+    def runtime_config():
+        assert config_source == "appconfig", "Local tracing must not depend on a deployed AppConfig application."
+        return {"langfuse": {
+            "<%- agentNameClassName %>": entry,
+            "AnotherAgent": {"host": "https://other.example.com", "secretArn": "another-agent"},
+        }}
+
+    def initialize():
+        telemetry.initialize(local_config=entry if config_source == "local" else None)
+
+    monkeypatch.setattr(
+        telemetry,
+        "get_agentcore_runtime_config",
+        runtime_config,
+    )
+    monkeypatch.setattr(telemetry.boto3, "client", lambda *args, **kwargs: SecretClient())
+    exporter_options = {}
+
+    def make_exporter(**kwargs):
+        exporter_options.update(kwargs)
+        return exported
+
+    monkeypatch.setattr(telemetry, "OTLPSpanExporter", make_exporter)
+    assert telemetry.langfuse_fastapi_options() == {}
+    if config_source == "local":
+        for host in ("http://localhost:3000", "https://user:password@example.com", "https://example.com?token=value"):
+            telemetry.initialize(local_config={**entry, "host": host})
+            assert isinstance(trace.get_tracer_provider(), trace.ProxyTracerProvider)
+        assert not secret_reads
+    initialize()
+    provider = trace.get_tracer_provider()
+    assert isinstance(provider, TracerProvider)
+    initialize()
+    assert trace.get_tracer_provider() is provider
+    assert secret_reads == [secret_arn]
+    assert exporter_options["endpoint"] == "https://cloud.langfuse.com/api/public/otel/v1/traces"
+    assert exporter_options["headers"]["x-langfuse-ingestion-version"] == "4"
+    assert logging.getLogger("opentelemetry.exporter.otlp.proto.http.trace_exporter").isEnabledFor(logging.WARNING)
+    assert logging.getLogger("langfuse").isEnabledFor(logging.WARNING)
+    with pytest.MonkeyPatch.context() as duplicate:
+        duplicate.setattr(telemetry, "_client", None)
+        with pytest.raises(RuntimeError, match="plain entrypoint"):
+            initialize()
+    app = FastAPI(**telemetry.langfuse_fastapi_options())
+    native = trace.get_tracer("strands.telemetry.tracer")
+
+    @app.post("/invocations")
+    async def invoke(request: Request):
+        payload = await request.json()
+        async def stream():
+            with native.start_as_current_span("invoke_agent", attributes={"gen_ai.operation.name": "invoke_agent"}):
+                with native.start_as_current_span(
+                    "chat",
+                    attributes={
+                        "gen_ai.operation.name": "chat",
+                        "gen_ai.input.messages": payload["prompt"],
+                        "gen_ai.output.messages": "call add_numbers",
+                        "gen_ai.usage.input_tokens": 4,
+                        "gen_ai.usage.output_tokens": 1,
+                    },
+                ):
+                    pass
+                with native.start_as_current_span(
+                    "add_numbers",
+                    attributes={
+                        "gen_ai.operation.name": "execute_tool",
+                        "gen_ai.tool.call.arguments": '{"a":2,"b":3}',
+                        "gen_ai.tool.call.result": "5",
+                    },
+                ):
+                    yield b'{"content":"5"}\n'
+        return StreamingResponse(stream(), media_type="application/jsonl")
+
+    if registration == "add_middleware":
+        app.add_middleware(telemetry.LangfuseMiddleware)
+        middleware = app
+    else:
+        middleware = telemetry.LangfuseMiddleware(app)
+    sessions = [str(uuid4()), str(uuid4())]
+
+    async def run():
+        for index in range(3):
+            before = len(exported.get_finished_spans())
+            trace_id = uuid4().hex
+            parent_id = uuid4().hex[:16]
+            session = sessions[0 if index < 2 else 1]
+            trace_header = (
+                (b"x-amzn-trace-id", f"Root=1-{trace_id[:8]}-{trace_id[8:]};Parent={parent_id};Sampled=1".encode())
+                if index != 1
+                else (b"traceparent", f"00-{trace_id}-{parent_id}-01".encode())
+            )
+            scope = {
+                "type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"},
+                "method": "POST", "scheme": "http", "path": "/invocations", "raw_path": b"/invocations",
+                "root_path": "", "query_string": b"", "server": ("test", 80), "client": ("test", 1234),
+                "headers": [(b"x-amzn-bedrock-agentcore-runtime-session-id", session.encode()), trace_header],
+            }
+            sent = []
+
+            async def receive():
+                return {"type": "http.request", "body": b'{"prompt":"Add 2 and 3"}', "more_body": False}
+
+            async def send(message, before=before, sent=sent):
+                if message["type"] == "http.response.body" and not message.get("more_body", False):
+                    assert len(exported.get_finished_spans()) == before + 4
+                sent.append(message)
+
+            await middleware(scope, receive, send)
+            spans = exported.get_finished_spans()[before:]
+            assert len(spans) == 4
+            root = next(span for span in spans if span.name == "Agent invocation")
+            assert root.context.trace_id == int(trace_id, 16)
+            assert root.parent is not None
+            assert root.parent.span_id == int(parent_id, 16)
+            assert root.attributes is not None
+            root_input = root.attributes["langfuse.observation.input"]
+            assert isinstance(root_input, str)
+            assert json.loads(root_input)["prompt"] == "Add 2 and 3"
+            assert root.attributes["langfuse.observation.output"] == "5"
+            ids = {span.context.span_id for span in spans}
+            assert len(ids) == 4
+            assert all(span.parent is not None and span.parent.span_id in ids for span in spans if span is not root)
+            assert all(span.attributes is not None and span.attributes.get("session.id") == session for span in spans)
+            model = next(span for span in spans if span.name == "chat")
+            assert model.attributes is not None
+            assert model.attributes["langfuse.observation.type"] == "generation"
+            assert model.attributes["langfuse.observation.input"] == "Add 2 and 3"
+            assert model.attributes["gen_ai.usage.input_tokens"] == 4
+            assert sent[-1]["type"] == "http.response.body"
+        assert trace.get_tracer_provider() is provider
+
+        messages = []
+
+        async def collect(message):
+            messages.append(message)
+
+        grouped_sessions = []
+        for session in ("x" * 200, "x" * 201, "x" * 256, "y" * 201, "x" * 201):
+            before = len(exported.get_finished_spans())
+            messages.clear()
+            headers = [(b"x-amzn-bedrock-agentcore-runtime-session-id", session.encode())]
+            await middleware({**scope, "headers": headers}, receive, collect)
+            assert messages[0]["status"] == 200
+            spans = exported.get_finished_spans()[before:]
+            assert len(spans) == 4
+            root = next(span for span in spans if span.name == "Agent invocation")
+            assert root.attributes is not None
+            session_id = root.attributes["session.id"]
+            grouped_sessions.append(session_id)
+            assert all(span.attributes is not None and span.attributes.get("session.id") == session_id for span in spans)
+        assert grouped_sessions[0] == "x" * 200
+        assert grouped_sessions[1] == grouped_sessions[4] == sha256(b"x" * 201).hexdigest()
+        assert grouped_sessions[2] == sha256(b"x" * 256).hexdigest()
+        assert len(set(grouped_sessions[:4])) == 4
+
+        for headers in ([(b"x-amzn-bedrock-agentcore-runtime-session-id", b"too-short")], []):
+            before = len(exported.get_finished_spans())
+            messages.clear()
+            await middleware({**scope, "headers": headers}, receive, collect)
+            assert messages[0]["status"] == 200
+            spans = exported.get_finished_spans()[before:]
+            assert len(spans) == 4
+            root = next(span for span in spans if span.name == "Agent invocation")
+            assert root.attributes is not None
+            session_id = root.attributes.get("session.id")
+            assert isinstance(session_id, str)
+            assert str(UUID(session_id)) == session_id
+            assert all(span.attributes is not None and span.attributes.get("session.id") == session_id for span in spans)
+
+        before = len(exported.get_finished_spans())
+        async def cancelled_app(scope, receive, send):
+            await receive()
+            raise asyncio.CancelledError()
+
+        with pytest.raises(asyncio.CancelledError):
+            await telemetry.LangfuseMiddleware(cancelled_app)(scope, receive, collect)
+        assert len(exported.get_finished_spans()) == before + 1
+        assert trace.get_tracer_provider() is provider
+
+    asyncio.run(run())
+    provider.shutdown()
+
+
+if __name__ == "__main__":
+    with pytest.MonkeyPatch.context() as patch:
+        if sys.argv[1] == "lifecycle":
+            check_invocation_lifecycle(patch, sys.argv[2], sys.argv[3])
+        elif sys.argv[1] == "credential_failure":
+            check_credential_failure(patch, sys.argv[2], sys.argv[3])
+        else:
+            check_middleware_guards()
