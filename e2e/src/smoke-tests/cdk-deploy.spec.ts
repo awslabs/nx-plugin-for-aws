@@ -9,6 +9,7 @@ import { CloudFormation, StackStatus } from '@aws-sdk/client-cloudformation';
 import { ensureDirSync } from 'fs-extra';
 import { runCLI, tmpProjPath } from '../utils';
 import { renderIdpPlaceholders } from '../utils/idp-placeholders';
+import { redactOAuthValues } from '../utils/redact';
 import {
   checkFederation,
   createTestIdp,
@@ -110,11 +111,15 @@ async function deleteLeftoverStacks(cdkStageName: string): Promise<void> {
         await cfn
           .deleteStack({ StackName: stack.StackName })
           .catch((e) =>
-            console.warn(`Failed to delete stack ${stack.StackName}: ${e}`),
+            console.warn(
+              `Failed to delete stack ${stack.StackName}: ${redactOAuthValues(String(e))}`,
+            ),
           );
       }
     } catch (e) {
-      console.warn(`Failed to list stacks in ${region}: ${e}`);
+      console.warn(
+        `Failed to list stacks in ${region}: ${redactOAuthValues(String(e))}`,
+      );
     }
   }
 }
@@ -554,7 +559,11 @@ describe('smoke test - cdk-deploy', () => {
           opts,
         );
       } catch (e) {
-        console.warn(`cdk destroy failed (will still clean up): ${e}`);
+        console.warn(
+          `cdk destroy failed (will still clean up): ${redactOAuthValues(
+            String(e),
+          )}`,
+        );
       }
       // cdk destroy skips cross-region stacks (e.g. WAF in us-east-1) when
       // the main stack is in ROLLBACK_COMPLETE. Clean up any leftovers.
@@ -642,7 +651,11 @@ describe('smoke test - cdk-deploy-rdb', () => {
           opts,
         );
       } catch (e) {
-        console.warn(`cdk destroy failed (will still clean up): ${e}`);
+        console.warn(
+          `cdk destroy failed (will still clean up): ${redactOAuthValues(
+            String(e),
+          )}`,
+        );
       }
       await deleteLeftoverStacks(cdkStageName);
     }

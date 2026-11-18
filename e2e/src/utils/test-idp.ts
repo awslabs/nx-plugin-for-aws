@@ -18,6 +18,7 @@ import {
   DescribeUserPoolCommand,
   DescribeUserPoolDomainCommand,
   ListUserPoolsCommand,
+  TagResourceCommand as TagUserPoolCommand,
   UpdateUserPoolClientCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
 import {
@@ -25,6 +26,7 @@ import {
   DeleteSecretCommand,
   ListSecretsCommand,
   SecretsManagerClient,
+  TagResourceCommand as TagSecretCommand,
 } from '@aws-sdk/client-secrets-manager';
 import type { IdpPlaceholderValues } from './idp-placeholders';
 
@@ -47,6 +49,22 @@ const NAME_PREFIX = 'e2e-idp-';
 /** Tag that marks a resource as created by this helper. */
 const TAG_KEY = 'nx-plugin-e2e';
 const TAG_VALUE = 'external-idp';
+
+/**
+ * Tag that holds the time, as an ISO 8601 string, until which `sweepTestIdps`
+ * must keep a resource. `keepTestIdp` writes it when a destroy failed and the
+ * identity provider has to survive for a retry.
+ */
+export const KEEP_UNTIL_TAG = 'keep-until';
+
+/** How long `keepTestIdp` keeps a resource out of the sweep. */
+const DEFAULT_KEEP_FOR_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The longest a `keep-until` tag is honoured, with room for a retry that
+ * writes a fresh deadline before the previous one expires.
+ */
+const MAX_KEEP_FOR_MS = 2 * DEFAULT_KEEP_FOR_MS;
 
 /** OAuth scopes the main user pool requests from the identity provider. */
 const OAUTH_SCOPES = ['openid', 'email', 'profile'];
@@ -422,10 +440,194 @@ export const deleteTestIdp = async (idp: TestIdp): Promise<void> => {
   );
 };
 
+/** What writing one resource's `keep-until` tag achieved. */
+export type KeepOutcome = 'tagged' | 'failed' | 'missing';
+
+/** The outcome of `keepTestIdp`, one entry per resource. */
+export interface KeptTestIdp {
+  /** ISO time until which the sweep must keep the resources. */
+  keepUntil: string;
+  /** Whether the client secret carries the tag, or is already gone. */
+  secret: KeepOutcome;
+  /** The same for the user pool. `missing` when there is no pool to tag. */
+  userPool: KeepOutcome;
+}
+
+/**
+ * Tags the identity provider's user pool and client secret with the time
+ * until which `sweepTestIdps` must keep them. Call it when a stack that reads
+ * the client secret could not be destroyed, so the destroy can be retried
+ * instead of the next run's sweep taking the secret away. Never throws.
+ */
+export const keepTestIdp = async (
+  idp: TestIdp,
+  { keepForMs = DEFAULT_KEEP_FOR_MS, now = Date.now() } = {},
+): Promise<KeptTestIdp> => {
+  // The sweep ignores a deadline further out than MAX_KEEP_FOR_MS, so a
+  // longer request is clamped here rather than written as a tag nothing
+  // honours while the teardown log claims the resources are held.
+  const keepUntil = new Date(
+    now + Math.min(keepForMs, MAX_KEEP_FOR_MS),
+  ).toISOString();
+  const tagStep = async (
+    label: string,
+    step: () => Promise<unknown>,
+  ): Promise<KeepOutcome> => {
+    try {
+      await step();
+      console.log(`Tagged ${label} to keep until ${keepUntil}`);
+      return 'tagged';
+    } catch (e) {
+      if (isNotFound(e)) {
+        // There is nothing left to keep, and nothing for an operator to
+        // clean up either, so this is not a tagging failure.
+        console.log(`${label} is already deleted, so there is nothing to keep`);
+        return 'missing';
+      }
+      console.warn(`Failed to tag ${label}: ${describeError(e)}`);
+      return 'failed';
+    }
+  };
+
+  const secret = await tagStep(`secret ${idp.names.secretName}`, () =>
+    secretsClient(idp.region).send(
+      // TagResource appends to the secret's existing tags, so the run and
+      // created-at tags the sweep filters on are kept.
+      new TagSecretCommand({
+        SecretId: idp.names.secretName,
+        Tags: [{ Key: KEEP_UNTIL_TAG, Value: keepUntil }],
+      }),
+    ),
+  );
+  const userPoolId = idp.userPoolId;
+  // A handle with no pool id comes from a create that failed before the pool
+  // existed, so there is nothing to tag and nothing to clean up.
+  const userPool: KeepOutcome = userPoolId
+    ? // Tagging a user pool needs its ARN, which only DescribeUserPool returns.
+      await tagStep(`user pool ${userPoolId}`, async () => {
+        const cognito = cognitoClient(idp.region);
+        const { UserPool } = await cognito.send(
+          new DescribeUserPoolCommand({ UserPoolId: userPoolId }),
+        );
+        if (!UserPool?.Arn) {
+          throw new Error('DescribeUserPool returned no user pool ARN');
+        }
+        await cognito.send(
+          // TagResource only adds or overwrites the keys it is given, unlike
+          // UpdateUserPool's UserPoolTags, which replaces the whole set, so
+          // the run and created-at tags the sweep filters on are kept.
+          new TagUserPoolCommand({
+            ResourceArn: UserPool.Arn,
+            Tags: { [KEEP_UNTIL_TAG]: keepUntil },
+          }),
+        );
+      })
+    : 'missing';
+  return { keepUntil, secret, userPool };
+};
+
+/**
+ * The lines a failed teardown prints about a kept identity provider: which
+ * resources now carry the `keep-until` tag, which are already gone, and what
+ * an operator has to do by hand. A resource the tag step found absent is
+ * named as absent and left out of the final instruction, so the warning
+ * never asks for a resource that does not exist to be deleted.
+ */
+export const describeKeptTestIdp = (
+  idp: TestIdp,
+  kept: KeptTestIdp,
+): string[] => {
+  const labels: Record<keyof Omit<KeptTestIdp, 'keepUntil'>, string> = {
+    secret: `secret ${idp.names.secretName}`,
+    userPool: `user pool ${idp.names.userPoolName} (${idp.userPoolId ?? 'id unknown'})`,
+  };
+  const named = (outcome: KeepOutcome): string[] =>
+    (['secret', 'userPool'] as const)
+      .filter((resource) => kept[resource] === outcome)
+      .map((resource) => labels[resource]);
+  const tagged = named('tagged');
+  const failed = named('failed');
+  const missing = named('missing');
+  const them = (names: string[]) => (names.length > 1 ? 'them' : 'it');
+
+  // The stack reads the client secret through a Secrets Manager data source,
+  // which Terraform resolves on a destroy as well, so a destroy retry cannot
+  // run at all while the secret is gone. Putting a secret of that name back
+  // is what unblocks it.
+  const secretGone = kept.secret === 'missing';
+  const blocked = secretGone
+    ? [
+        'A destroy retry cannot run while the client secret is missing, because the stack reads it.',
+      ]
+    : [];
+  // Only the resources that are still there are named: the ones reported as
+  // already deleted have nothing left to remove. A re-created secret is
+  // named too, because the retry needs it and leaves it behind.
+  const toDelete = secretGone
+    ? ['that secret', ...tagged, ...failed]
+    : [...tagged, ...failed];
+  const recreate = secretGone
+    ? `re-create ${labels.secret} with any value, `
+    : '';
+  const cleanUp = `To clean up by hand: ${recreate}run the destroy again with this state key, then delete ${toDelete.join(', ')}.`;
+
+  if (tagged.length + failed.length === 0) {
+    return [
+      'The test identity provider is already deleted, so there is nothing to keep.',
+      ...blocked,
+      cleanUp,
+    ];
+  }
+  return [
+    secretGone
+      ? 'The test identity provider is partly kept. The client secret the stack reads is already deleted:'
+      : 'The test identity provider is kept, because the stack reads its client secret:',
+    `region ${idp.region}`,
+    ...(tagged.length > 0
+      ? [
+          `Tagged ${KEEP_UNTIL_TAG}=${kept.keepUntil}, so no sweep deletes ${them(tagged)} before then: ${tagged.join(', ')}.`,
+        ]
+      : []),
+    ...(failed.length > 0
+      ? [
+          `Tagging ${KEEP_UNTIL_TAG}=${kept.keepUntil} failed (see the warning above), so the next run's sweep may delete ${them(failed)} within hours. Clean up now: ${failed.join(', ')}.`,
+        ]
+      : []),
+    ...(missing.length > 0
+      ? [
+          `Already deleted, so nothing is left to clean up: ${missing.join(', ')}.`,
+        ]
+      : []),
+    ...blocked,
+    cleanUp,
+  ];
+};
+
+/** The age cutoff of one sweep, and the time it runs at. */
+interface SweepWindow {
+  /** Resources created at or after this time are left alone. */
+  cutoff: number;
+  /** Now, against which a `keep-until` tag is compared. */
+  now: number;
+}
+
+/**
+ * Whether a `keep-until` tag value protects a resource from this sweep. An
+ * absent or unreadable value protects nothing, and so does one more than
+ * `MAX_KEEP_FOR_MS` ahead of now: `keepTestIdp` never writes a deadline that
+ * far out, and `Date.parse` accepts more than ISO 8601 (it reads `2099` as
+ * 2099-01-01), so a hand-edited or mistyped tag cannot hold a user pool and
+ * its secret out of the sweep for years.
+ */
+const isKept = (value: string | undefined, now: number): boolean => {
+  const until = value ? Date.parse(value) : Number.NaN;
+  return !Number.isNaN(until) && until > now && until - now <= MAX_KEEP_FOR_MS;
+};
+
 /** Deletes tagged identity provider user pools older than the cutoff. */
 const sweepUserPools = async (
   cognito: CognitoIdentityProviderClient,
-  cutoff: number,
+  { cutoff, now }: SweepWindow,
 ): Promise<void> => {
   let nextToken: string | undefined;
   do {
@@ -448,6 +650,13 @@ const sweepUserPools = async (
         ) {
           continue;
         }
+        const keepUntil = UserPool.UserPoolTags?.[KEEP_UNTIL_TAG];
+        if (isKept(keepUntil, now)) {
+          console.log(
+            `Keeping identity provider user pool ${Id} until ${keepUntil}`,
+          );
+          continue;
+        }
         console.log(`Sweeping left-over identity provider user pool ${Id}`);
         if (UserPool.Domain) {
           await cognito.send(
@@ -468,7 +677,7 @@ const sweepUserPools = async (
 /** Deletes tagged identity provider client secrets older than the cutoff. */
 const sweepSecrets = async (
   secrets: SecretsManagerClient,
-  cutoff: number,
+  { cutoff, now }: SweepWindow,
 ): Promise<void> => {
   let nextToken: string | undefined;
   do {
@@ -496,6 +705,13 @@ const sweepSecrets = async (
       ) {
         continue;
       }
+      const keepUntil = Tags?.find((t) => t.Key === KEEP_UNTIL_TAG)?.Value;
+      if (isKept(keepUntil, now)) {
+        console.log(
+          `Keeping identity provider secret ${Name} until ${keepUntil}`,
+        );
+        continue;
+      }
       console.log(`Sweeping left-over identity provider secret ${Name}`);
       try {
         await secrets.send(
@@ -516,22 +732,23 @@ const sweepSecrets = async (
  * the region, for example when a run was killed before its cleanup. Deletes
  * only resources with the `e2e-idp-` name prefix and the `nx-plugin-e2e` tag
  * that are older than `maxAgeMs`, so a run in progress keeps its resources.
- * Never throws.
+ * A resource whose `keep-until` tag is still in the future is left alone, and
+ * swept by a later run once that time has passed. Never throws.
  */
 export const sweepTestIdps = async (
   region: string,
   { maxAgeMs = DEFAULT_SWEEP_MAX_AGE_MS, now = Date.now() } = {},
 ): Promise<void> => {
-  const cutoff = now - maxAgeMs;
+  const sweepWindow: SweepWindow = { cutoff: now - maxAgeMs, now };
   try {
-    await sweepUserPools(cognitoClient(region), cutoff);
+    await sweepUserPools(cognitoClient(region), sweepWindow);
   } catch (e) {
     console.warn(
       `Failed to sweep identity provider user pools: ${describeError(e)}`,
     );
   }
   try {
-    await sweepSecrets(secretsClient(region), cutoff);
+    await sweepSecrets(secretsClient(region), sweepWindow);
   } catch (e) {
     console.warn(
       `Failed to sweep identity provider secrets: ${describeError(e)}`,

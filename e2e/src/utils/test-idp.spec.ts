@@ -7,7 +7,11 @@ import {
   checkFederation,
   createTestIdp,
   deleteTestIdp,
+  describeKeptTestIdp,
   federationPlanChanges,
+  KEEP_UNTIL_TAG,
+  type KeptTestIdp,
+  keepTestIdp,
   newTestIdp,
   registerIdpCallback,
   sweepTestIdps,
@@ -364,6 +368,288 @@ describe('deleteTestIdp', () => {
   });
 });
 
+describe('keepTestIdp', () => {
+  const now = Date.UTC(2026, 0, 1, 12);
+  const keepUntil = new Date(now + 24 * HOUR).toISOString();
+
+  /** A handle as left by a create that completed. */
+  const createdIdp = (): TestIdp => ({
+    ...newTestIdp('abc', REGION),
+    userPoolId: 'us-west-2_idp',
+    domainCreated: true,
+    clientId: 'idp-client',
+  });
+
+  it('tags the secret and the user pool to keep them for a day', async () => {
+    sdk.handlers.DescribeUserPool = () => ({
+      UserPool: { Arn: 'arn:aws:cognito-idp:us-west-2:111:userpool/idp' },
+    });
+    await expect(keepTestIdp(createdIdp(), { now })).resolves.toEqual({
+      keepUntil,
+      secret: 'tagged',
+      userPool: 'tagged',
+    });
+    expect(sdk.calls.filter((c) => c.name === 'TagResource')).toEqual([
+      {
+        name: 'TagResource',
+        input: {
+          SecretId: 'e2e-idp-abc-client-secret',
+          Tags: [{ Key: KEEP_UNTIL_TAG, Value: keepUntil }],
+        },
+      },
+      {
+        name: 'TagResource',
+        input: {
+          ResourceArn: 'arn:aws:cognito-idp:us-west-2:111:userpool/idp',
+          Tags: { [KEEP_UNTIL_TAG]: keepUntil },
+        },
+      },
+    ]);
+  });
+
+  it('clamps a keep-for longer than the sweep honours', async () => {
+    sdk.handlers.DescribeUserPool = () => ({
+      UserPool: { Arn: 'arn:aws:cognito-idp:us-west-2:111:userpool/idp' },
+    });
+    const result = await keepTestIdp(createdIdp(), {
+      now,
+      keepForMs: 7 * 24 * HOUR,
+    });
+    expect(result.keepUntil).toBe(new Date(now + 48 * HOUR).toISOString());
+  });
+
+  it('keeps a keep-for inside the bound as asked', async () => {
+    sdk.handlers.DescribeUserPool = () => ({
+      UserPool: { Arn: 'arn:aws:cognito-idp:us-west-2:111:userpool/idp' },
+    });
+    const result = await keepTestIdp(createdIdp(), {
+      now,
+      keepForMs: 2 * HOUR,
+    });
+    expect(result.keepUntil).toBe(new Date(now + 2 * HOUR).toISOString());
+  });
+
+  it('reports that it could not tag, and still returns the deadline', async () => {
+    sdk.handlers.TagResource = () => {
+      throw new Error('AccessDenied');
+    };
+    sdk.handlers.DescribeUserPool = () => ({
+      UserPool: { Arn: 'arn:aws:cognito-idp:us-west-2:111:userpool/idp' },
+    });
+    await expect(keepTestIdp(createdIdp(), { now })).resolves.toEqual({
+      keepUntil,
+      secret: 'failed',
+      userPool: 'failed',
+    });
+    expect(console.warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports that it could not tag a user pool with no ARN', async () => {
+    sdk.handlers.DescribeUserPool = () => ({ UserPool: {} });
+    const result = await keepTestIdp(createdIdp(), { now });
+    expect(result.userPool).toBe('failed');
+    expect(sdk.calls.filter((c) => c.name === 'TagResource')).toHaveLength(1);
+  });
+
+  it('reports a secret that no longer exists as missing, not tagged', async () => {
+    sdk.handlers.TagResource = (input) => {
+      if (input.SecretId) {
+        throw notFound();
+      }
+      return {};
+    };
+    sdk.handlers.DescribeUserPool = () => ({
+      UserPool: { Arn: 'arn:aws:cognito-idp:us-west-2:111:userpool/idp' },
+    });
+    await expect(keepTestIdp(createdIdp(), { now })).resolves.toEqual({
+      keepUntil,
+      secret: 'missing',
+      userPool: 'tagged',
+    });
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it('reports both resources as missing when both are gone', async () => {
+    sdk.handlers.TagResource = () => {
+      throw notFound();
+    };
+    sdk.handlers.DescribeUserPool = () => ({
+      UserPool: { Arn: 'arn:aws:cognito-idp:us-west-2:111:userpool/idp' },
+    });
+    await expect(keepTestIdp(createdIdp(), { now })).resolves.toEqual({
+      keepUntil,
+      secret: 'missing',
+      userPool: 'missing',
+    });
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it('reports a user pool that was never created as missing', async () => {
+    const idp = { ...createdIdp(), userPoolId: undefined };
+    await expect(keepTestIdp(idp, { now })).resolves.toEqual({
+      keepUntil,
+      secret: 'tagged',
+      userPool: 'missing',
+    });
+    expect(sdk.calls.filter((c) => c.name === 'DescribeUserPool')).toEqual([]);
+  });
+});
+
+describe('describeKeptTestIdp', () => {
+  const now = Date.UTC(2026, 0, 1, 12);
+  const keepUntil = new Date(now + 24 * HOUR).toISOString();
+
+  const idp = (): TestIdp => ({
+    ...newTestIdp('abc', REGION),
+    userPoolId: 'us-west-2_idp',
+    domainCreated: true,
+    clientId: 'idp-client',
+  });
+
+  const lines = (kept: Omit<KeptTestIdp, 'keepUntil'>) =>
+    describeKeptTestIdp(idp(), { keepUntil, ...kept }).join('\n');
+
+  const SECRET = 'secret e2e-idp-abc-client-secret';
+  const POOL = 'user pool e2e-idp-abc (us-west-2_idp)';
+  const KEPT_HEADER =
+    'The test identity provider is kept, because the stack reads its client secret:';
+  const SECRET_GONE_HEADER =
+    'The test identity provider is partly kept. The client secret the stack reads is already deleted:';
+  const BLOCKED =
+    'A destroy retry cannot run while the client secret is missing, because the stack reads it.';
+
+  it('names both tagged resources and says no sweep takes them', () => {
+    expect(lines({ secret: 'tagged', userPool: 'tagged' })).toBe(
+      [
+        KEPT_HEADER,
+        'region us-west-2',
+        `Tagged keep-until=${keepUntil}, so no sweep deletes them before then: ${SECRET}, ${POOL}.`,
+        `To clean up by hand: run the destroy again with this state key, then delete ${SECRET}, ${POOL}.`,
+      ].join('\n'),
+    );
+  });
+
+  it('does not claim a missing resource is tagged', () => {
+    const text = lines({ secret: 'missing', userPool: 'tagged' });
+    expect(text).toContain(
+      `Tagged keep-until=${keepUntil}, so no sweep deletes it before then: ${POOL}.`,
+    );
+    expect(text).toContain(
+      `Already deleted, so nothing is left to clean up: ${SECRET}.`,
+    );
+    expect(text).not.toContain('Both are tagged');
+  });
+
+  it('tells the operator to clean up only what tagging failed on', () => {
+    const text = lines({ secret: 'failed', userPool: 'missing' });
+    expect(text).toContain(
+      `Tagging keep-until=${keepUntil} failed (see the warning above), so the next run's sweep may delete it within hours. Clean up now: ${SECRET}.`,
+    );
+    expect(text).toContain(
+      `Already deleted, so nothing is left to clean up: ${POOL}.`,
+    );
+    expect(text).not.toContain(`Tagged keep-until=${keepUntil}`);
+  });
+
+  it('says the pool id is unknown when the handle has none', () => {
+    const kept: KeptTestIdp = {
+      keepUntil,
+      secret: 'tagged',
+      userPool: 'failed',
+    };
+    expect(
+      describeKeptTestIdp({ ...idp(), userPoolId: undefined }, kept).join('\n'),
+    ).toContain('user pool e2e-idp-abc (id unknown)');
+  });
+
+  // The header and the closing instruction turn on whether the client secret
+  // is still there, because a destroy reads it through a data source.
+
+  it('says the secret is gone and how to unblock the retry', () => {
+    expect(lines({ secret: 'missing', userPool: 'tagged' })).toBe(
+      [
+        SECRET_GONE_HEADER,
+        'region us-west-2',
+        `Tagged keep-until=${keepUntil}, so no sweep deletes it before then: ${POOL}.`,
+        `Already deleted, so nothing is left to clean up: ${SECRET}.`,
+        BLOCKED,
+        `To clean up by hand: re-create ${SECRET} with any value, run the destroy again with this state key, then delete that secret, ${POOL}.`,
+      ].join('\n'),
+    );
+  });
+
+  it('asks only for the secret when both resources are already gone', () => {
+    expect(lines({ secret: 'missing', userPool: 'missing' })).toBe(
+      [
+        'The test identity provider is already deleted, so there is nothing to keep.',
+        BLOCKED,
+        `To clean up by hand: re-create ${SECRET} with any value, run the destroy again with this state key, then delete that secret.`,
+      ].join('\n'),
+    );
+  });
+
+  it('keeps the ordinary retry while the secret is still there', () => {
+    for (const secret of ['tagged', 'failed'] as const) {
+      for (const userPool of ['tagged', 'failed', 'missing'] as const) {
+        const text = lines({ secret, userPool });
+        expect(text).toContain(KEPT_HEADER);
+        expect(text).not.toContain(BLOCKED);
+        expect(text).toContain(
+          'To clean up by hand: run the destroy again with this state key, then delete ',
+        );
+      }
+    }
+  });
+
+  it('names the plural when tagging failed on both resources', () => {
+    expect(lines({ secret: 'failed', userPool: 'failed' })).toBe(
+      [
+        KEPT_HEADER,
+        'region us-west-2',
+        `Tagging keep-until=${keepUntil} failed (see the warning above), so the next run's sweep may delete them within hours. Clean up now: ${SECRET}, ${POOL}.`,
+        `To clean up by hand: run the destroy again with this state key, then delete ${SECRET}, ${POOL}.`,
+      ].join('\n'),
+    );
+  });
+
+  it('reports a mixed outcome one resource at a time', () => {
+    expect(lines({ secret: 'failed', userPool: 'tagged' })).toBe(
+      [
+        KEPT_HEADER,
+        'region us-west-2',
+        `Tagged keep-until=${keepUntil}, so no sweep deletes it before then: ${POOL}.`,
+        `Tagging keep-until=${keepUntil} failed (see the warning above), so the next run's sweep may delete it within hours. Clean up now: ${SECRET}.`,
+        `To clean up by hand: run the destroy again with this state key, then delete ${POOL}, ${SECRET}.`,
+      ].join('\n'),
+    );
+  });
+
+  it('leaves a resource that is already gone out of the closing line', () => {
+    expect(lines({ secret: 'tagged', userPool: 'missing' })).toBe(
+      [
+        KEPT_HEADER,
+        'region us-west-2',
+        `Tagged keep-until=${keepUntil}, so no sweep deletes it before then: ${SECRET}.`,
+        `Already deleted, so nothing is left to clean up: ${POOL}.`,
+        `To clean up by hand: run the destroy again with this state key, then delete ${SECRET}.`,
+      ].join('\n'),
+    );
+  });
+
+  it('asks only for the pool when the secret is gone and tagging it failed', () => {
+    expect(lines({ secret: 'missing', userPool: 'failed' })).toBe(
+      [
+        SECRET_GONE_HEADER,
+        'region us-west-2',
+        `Tagging keep-until=${keepUntil} failed (see the warning above), so the next run's sweep may delete it within hours. Clean up now: ${POOL}.`,
+        `Already deleted, so nothing is left to clean up: ${SECRET}.`,
+        BLOCKED,
+        `To clean up by hand: re-create ${SECRET} with any value, run the destroy again with this state key, then delete that secret, ${POOL}.`,
+      ].join('\n'),
+    );
+  });
+});
+
 describe('sweepTestIdps', () => {
   const now = Date.UTC(2026, 0, 1, 12);
   const old = new Date(now - 5 * HOUR);
@@ -507,6 +793,136 @@ describe('sweepTestIdps', () => {
         .map((c) => c.input.SecretId),
     ).toEqual(['arn:old']);
   });
+
+  it('keeps a pool and secret until keep-until has passed', async () => {
+    const future = new Date(now + 20 * HOUR).toISOString();
+    const past = new Date(now - 1 * HOUR).toISOString();
+    sdk.handlers.ListUserPools = () => ({
+      UserPools: [
+        { Id: 'kept', Name: 'e2e-idp-kept' },
+        { Id: 'expired', Name: 'e2e-idp-expired' },
+      ],
+    });
+    describePools({
+      kept: {
+        CreationDate: old,
+        UserPoolTags: { ...tagged, [KEEP_UNTIL_TAG]: future },
+      },
+      expired: {
+        CreationDate: old,
+        UserPoolTags: { ...tagged, [KEEP_UNTIL_TAG]: past },
+      },
+    });
+    const secretTags = (keepUntil: string) => [
+      { Key: 'nx-plugin-e2e', Value: 'external-idp' },
+      { Key: KEEP_UNTIL_TAG, Value: keepUntil },
+    ];
+    sdk.handlers.ListSecrets = () => ({
+      SecretList: [
+        {
+          ARN: 'arn:kept',
+          Name: 'e2e-idp-kept-client-secret',
+          Tags: secretTags(future),
+          CreatedDate: old,
+        },
+        {
+          ARN: 'arn:expired',
+          Name: 'e2e-idp-expired-client-secret',
+          Tags: secretTags(past),
+          CreatedDate: old,
+        },
+      ],
+    });
+    await sweepTestIdps(REGION, { now });
+
+    expect(
+      sdk.calls
+        .filter((c) => c.name === 'DeleteUserPool')
+        .map((c) => c.input.UserPoolId),
+    ).toEqual(['expired']);
+    expect(
+      sdk.calls
+        .filter((c) => c.name === 'DeleteSecret')
+        .map((c) => c.input.SecretId),
+    ).toEqual(['arn:expired']);
+  });
+
+  it('sweeps a resource whose keep-until tag cannot be read', async () => {
+    sdk.handlers.ListUserPools = () => ({
+      UserPools: [{ Id: 'old', Name: 'e2e-idp-old' }],
+    });
+    describePools({
+      old: {
+        CreationDate: old,
+        UserPoolTags: { ...tagged, [KEEP_UNTIL_TAG]: 'not a date' },
+      },
+    });
+    await sweepTestIdps(REGION, { now });
+    expect(sentNames()).toContain('DeleteUserPool');
+  });
+
+  it('sweeps a resource whose keep-until tag is further ahead than the sweep honours', async () => {
+    sdk.handlers.ListUserPools = () => ({
+      UserPools: [{ Id: 'far', Name: 'e2e-idp-far' }],
+    });
+    describePools({
+      far: {
+        CreationDate: old,
+        UserPoolTags: { ...tagged, [KEEP_UNTIL_TAG]: '2099' },
+      },
+    });
+    sdk.handlers.ListSecrets = () => ({
+      SecretList: [
+        {
+          ARN: 'arn:far',
+          Name: 'e2e-idp-far-client-secret',
+          Tags: [
+            { Key: 'nx-plugin-e2e', Value: 'external-idp' },
+            { Key: KEEP_UNTIL_TAG, Value: '2099' },
+          ],
+          CreatedDate: old,
+        },
+      ],
+    });
+    await sweepTestIdps(REGION, { now });
+    expect(
+      sdk.calls
+        .filter((c) => c.name === 'DeleteUserPool')
+        .map((c) => c.input.UserPoolId),
+    ).toEqual(['far']);
+    expect(
+      sdk.calls
+        .filter((c) => c.name === 'DeleteSecret')
+        .map((c) => c.input.SecretId),
+    ).toEqual(['arn:far']);
+  });
+
+  it.each([
+    [47, 'keeps', []],
+    [49, 'sweeps', ['bound']],
+  ] as const)(
+    'honours the 48-hour ceiling: %i hours ahead %s the resource',
+    async (hours, _verb, deleted) => {
+      sdk.handlers.ListUserPools = () => ({
+        UserPools: [{ Id: 'bound', Name: 'e2e-idp-bound' }],
+      });
+      describePools({
+        bound: {
+          CreationDate: old,
+          UserPoolTags: {
+            ...tagged,
+            [KEEP_UNTIL_TAG]: new Date(now + hours * HOUR).toISOString(),
+          },
+        },
+      });
+      await sweepTestIdps(REGION, { now });
+      expect(
+        sdk.calls
+          .filter((c) => c.name === 'DeleteUserPool')
+          .map((c) => c.input.UserPoolId),
+      ).toEqual(deleted);
+    },
+  );
 
   it('never throws and still sweeps secrets when listing pools fails', async () => {
     sdk.handlers.ListUserPools = () => {

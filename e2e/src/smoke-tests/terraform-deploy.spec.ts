@@ -16,11 +16,14 @@ import { ensureDirSync } from 'fs-extra';
 
 import { runCLI, tmpProjPath } from '../utils';
 import { renderIdpPlaceholders, SAMPLE_IDP } from '../utils/idp-placeholders';
+import { redactOAuthValues } from '../utils/redact';
 import {
   checkFederation,
   createTestIdp,
   deleteTestIdp,
+  describeKeptTestIdp,
   federationPlanChanges,
+  keepTestIdp,
   newTestIdp,
   registerIdpCallback,
   sweepTestIdps,
@@ -100,6 +103,26 @@ function readTerraformOutputs(projectRoot: string): Record<string, string> {
   return Object.fromEntries(
     Object.entries(parsed).map(([k, v]) => [k, String(v.value)]),
   );
+}
+
+/**
+ * S3 key of the stack's Terraform state, built as the generated
+ * `scripts/init.ts` builds it. Falls back to a placeholder for any file that
+ * cannot be read or parsed, so the destroy failure is always logged.
+ */
+function terraformStateKey(projectRoot: string, tfEnv: string): string {
+  const initTs = join(projectRoot, 'packages/infra/scripts/init.ts');
+  let match: RegExpExecArray | null = null;
+  try {
+    match = /const STATE_KEY_PREFIX = '([^']+)'/.exec(
+      readFileSync(initTs, 'utf-8'),
+    );
+  } catch {
+    match = null;
+  }
+  const prefix =
+    match?.[1] ?? '<STATE_KEY_PREFIX from packages/infra/scripts/init.ts>';
+  return `${prefix}/${tfEnv}/terraform.tfstate`;
 }
 
 /**
@@ -193,6 +216,7 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
       // Per-run suffix used in the Terraform state key so concurrent runs
       // don't share state.
       const testRunId = Math.random().toString(36).substring(2, 10);
+      const tfEnv = `${config.variant}-${testRunId}`;
 
       // Create the external identity provider before main.tf, which needs its
       // values. A failed create cleans up here, because the teardown below
@@ -231,7 +255,7 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
       );
       infraProjectJson.targets.init.configurations.dev.env = {
         ...(infraProjectJson.targets.init.configurations.dev.env ?? {}),
-        TF_ENV: `${config.variant}-${testRunId}`,
+        TF_ENV: tfEnv,
       };
       writeFileSync(
         infraProjectJsonPath,
@@ -628,16 +652,30 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
           }
         }
       } finally {
+        let destroyed = false;
         try {
           await runCLI(
             `destroy infra --output-style=stream -- -auto-approve`,
             opts,
           );
+          destroyed = true;
         } catch (e) {
-          console.warn(`terraform destroy failed (will still clean up): ${e}`);
+          // The stack reads the identity provider's client secret, so both are
+          // kept for a destroy retry and tagged so no later sweep takes them.
+          const kept = idp ? await keepTestIdp(idp) : undefined;
+          console.warn(
+            [
+              `terraform destroy failed: ${redactOAuthValues(String(e))}`,
+              `Terraform state key: ${terraformStateKey(opts.cwd, tfEnv)} (TF_ENV=${tfEnv}), bucket <account id>-tf-state-${region}`,
+              ...(idp && kept
+                ? describeKeptTestIdp(idp, kept)
+                : ['Retry the destroy with this state key.']),
+            ].join('\n'),
+          );
         }
-        // Destroy reads the client secret, so the identity provider goes last.
-        if (idp) {
+        // Destroy reads the client secret, so the identity provider is deleted
+        // only once the stack is gone.
+        if (idp && destroyed) {
           await deleteTestIdp(idp);
         }
       }
