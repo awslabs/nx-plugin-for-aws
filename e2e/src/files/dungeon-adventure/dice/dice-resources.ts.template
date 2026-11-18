@@ -1,0 +1,57 @@
+import {
+  Dice,
+  GreengrassArtifactBucket,
+  GreengrassDeployment,
+} from '@dungeon-adventure/common-constructs';
+import { ArnFormat, CfnOutput, CfnParameter, Stack } from 'aws-cdk-lib';
+import { Grant, type IGrantable, Role } from 'aws-cdk-lib/aws-iam';
+import { Construct } from 'constructs';
+
+export class DiceResources extends Construct {
+  readonly environmentVariables: Record<string, string>;
+  readonly deployment: GreengrassDeployment;
+  private readonly shadowArn: string;
+
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+    const stack = Stack.of(this);
+    const thing = new CfnParameter(stack, 'DiceThingName', {
+      type: 'String',
+      allowedPattern: '[a-zA-Z0-9:_-]+',
+    });
+    const endpoint = new CfnParameter(stack, 'DiceEndpoint', { type: 'String' });
+    const tokenExchangeRole = new CfnParameter(stack, 'TokenExchangeRoleArn', { type: 'String' });
+    const group = new CfnParameter(stack, 'ThingGroupArn', { type: 'String' });
+
+    this.environmentVariables = {
+      DICE_THING_NAME: thing.valueAsString,
+      DICE_IOT_ENDPOINT: endpoint.valueAsString,
+      DICE_AWS_REGION: stack.region,
+    };
+    this.shadowArn = stack.formatArn({
+      service: 'iot',
+      resource: 'thing',
+      resourceName: `${thing.valueAsString}/dungeon-dice`,
+      arnFormat: ArnFormat.SLASH_RESOURCE_NAME,
+    });
+    const artifacts = new GreengrassArtifactBucket(this, 'Artifacts');
+    artifacts.grantReadTo(
+      Role.fromRoleArn(this, 'TokenExchangeRole', tokenExchangeRole.valueAsString),
+      'com.example.DungeonDice/*',
+    );
+    const component = new Dice(this, 'Component', { bucket: artifacts });
+    this.deployment = new GreengrassDeployment(this, 'Fleet', { targetArn: group.valueAsString });
+    this.deployment.addComponent(component);
+    new CfnOutput(stack, 'DiceArtifactBucket', { value: artifacts.bucket.bucketName });
+    new CfnOutput(stack, 'DiceComponentArn', { value: component.cfnComponentVersion.attrArn });
+    new CfnOutput(stack, 'DiceDeploymentId', { value: this.deployment.deployment.attrDeploymentId });
+  }
+
+  grantShadowAccess(grantee: IGrantable): Grant {
+    return Grant.addToPrincipal({
+      grantee,
+      actions: ['iot:GetThingShadow', 'iot:UpdateThingShadow'],
+      resourceArns: [this.shadowArn],
+    });
+  }
+}

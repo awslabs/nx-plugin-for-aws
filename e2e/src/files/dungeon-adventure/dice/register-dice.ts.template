@@ -1,0 +1,58 @@
+import {
+  GetThingShadowCommand,
+  IoTDataPlaneClient,
+  UpdateThingShadowCommand,
+} from '@aws-sdk/client-iot-data-plane';
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
+import { createDiceRoller, diceSides, type DiceShadow } from './roll-dice.js';
+
+export function registerDiceTool(server: McpServer) {
+  server.registerTool('roll-dice', {
+    description: 'Ask the physical or simulated Greengrass dice device for a roll. Use its returned value; never invent a result when this tool fails.',
+    inputSchema: {
+      sides: z.number().int().refine((value) => diceSides.some((sides) => value === sides), {
+        message: 'Choose 4, 6, 8, 10, 12 or 20 sides.',
+      }),
+    },
+  }, async ({ sides }) => {
+    const thingName = process.env.DICE_THING_NAME;
+    const endpoint = process.env.DICE_IOT_ENDPOINT;
+    const region = process.env.DICE_AWS_REGION;
+    if (!thingName || !endpoint || !region) {
+      return {
+        isError: true,
+        content: [{ type: 'text' as const, text: 'The dice tool is not configured. Set DICE_THING_NAME, DICE_IOT_ENDPOINT and DICE_AWS_REGION before requesting a roll. Tell the player that no roll is available. Do not invent a result.' }],
+      };
+    }
+    try {
+      const client = new IoTDataPlaneClient({
+        region,
+        endpoint: `https://${endpoint}`,
+        maxAttempts: 2,
+      });
+      const input = { thingName, shadowName: 'dungeon-dice' };
+      const roll = createDiceRoller({
+        async read(signal) {
+          const response = await client.send(new GetThingShadowCommand(input), { abortSignal: signal });
+          if (!response.payload) throw new Error('The dice shadow returned an empty response.');
+          return JSON.parse(new TextDecoder().decode(response.payload)) as DiceShadow;
+        },
+        async update(update, signal) {
+          await client.send(new UpdateThingShadowCommand({
+            ...input,
+            payload: new TextEncoder().encode(JSON.stringify(update)),
+          }), { abortSignal: signal });
+        },
+      });
+      const result = await roll(sides);
+      return { content: [{ type: 'text' as const, text: JSON.stringify({ ...result, device: thingName }) }] };
+    } catch (error) {
+      console.error('Greengrass dice request failed:', error);
+      return {
+        isError: true,
+        content: [{ type: 'text' as const, text: 'The dice device is busy or unavailable, or its result was invalid. Tell the player that no roll is available and ask them to retry. Do not invent a result.' }],
+      };
+    }
+  });
+}

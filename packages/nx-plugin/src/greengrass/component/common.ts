@@ -195,7 +195,7 @@ export const normalizeComponent = async (
           | 'terraform');
   if (iac === 'cdk' && componentName.length > MAX_CDK_COMPONENT_NAME_LENGTH) {
     throw new Error(
-      `ComponentName "${componentName}" is ${componentName.length} characters long, exceeding the ${MAX_CDK_COMPONENT_NAME_LENGTH}-character limit for CDK Greengrass component artifacts. Shorten --componentName to ${MAX_CDK_COMPONENT_NAME_LENGTH} characters or fewer.`,
+      `ComponentName "${componentName}" is ${componentName.length} characters long, exceeding the ${MAX_CDK_COMPONENT_NAME_LENGTH}-character limit for CDK Greengrass component artifacts. Use a shorter --name or set --componentName to ${MAX_CDK_COMPONENT_NAME_LENGTH} characters or fewer.`,
     );
   }
   if (iac === 'terraform' && componentVersion.startsWith('NEXT_')) {

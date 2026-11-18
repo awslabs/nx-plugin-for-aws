@@ -1,0 +1,103 @@
+import { randomUUID } from 'node:crypto';
+import { setTimeout } from 'node:timers/promises';
+
+export const diceSides = [4, 6, 8, 10, 12, 20] as const;
+
+export interface DiceRequest {
+  requestId: string;
+  sides: number;
+  expiresAt: number;
+}
+
+export interface DiceResult {
+  requestId: string;
+  sides: number;
+  value: number;
+  rolledAt: number;
+}
+
+export interface DiceShadow {
+  version: number;
+  state?: {
+    desired?: { command?: DiceRequest | null };
+    reported?: { result?: DiceResult | null };
+  };
+}
+
+export interface ShadowUpdate {
+  version: number;
+  state: {
+    desired: { command: DiceRequest | null };
+    reported?: { command: null };
+  };
+}
+
+export interface DiceTransport {
+  read(signal: AbortSignal): Promise<DiceShadow>;
+  update(update: ShadowUpdate, signal: AbortSignal): Promise<void>;
+}
+
+export function createDiceRoller(
+  transport: DiceTransport,
+  clock = Date.now,
+  pause = (signal: AbortSignal) => setTimeout(500, undefined, { signal }),
+) {
+  return async (sides: number): Promise<DiceResult> => {
+    if (!diceSides.some((allowed) => sides === allowed)) {
+      throw new Error('Choose d4, d6, d8, d10, d12 or d20.');
+    }
+    const signal = AbortSignal.timeout(12_000);
+    const deadline = clock() + 12_000;
+    const current = await transport.read(signal);
+    if (!Number.isInteger(current.version)) {
+      throw new Error('The dice shadow has no version. Initialize it before playing.');
+    }
+    const active = current.state?.desired?.command;
+    if (active && active.expiresAt * 1000 > clock()) {
+      throw new Error('The shared dice device is busy. Wait before trying again.');
+    }
+    const request: DiceRequest = {
+      requestId: randomUUID(),
+      sides,
+      expiresAt: Math.ceil(deadline / 1000) + 5,
+    };
+    // The version makes simultaneous callers compete for a single request slot.
+    await transport.update({
+      version: current.version,
+      state: { desired: { command: request } },
+    }, signal);
+
+    while (clock() < deadline) {
+      const shadow = await transport.read(signal);
+      const result = shadow.state?.reported?.result;
+      if (result?.requestId === request.requestId) {
+        if (
+          result.sides !== sides ||
+          !Number.isInteger(result.value) ||
+          result.value < 1 ||
+          result.value > sides ||
+          !Number.isInteger(result.rolledAt)
+        ) {
+          throw new Error('The device returned an invalid dice result.');
+        }
+        // Release only this request. A late update must not clear a newer one.
+        if (shadow.state?.desired?.command?.requestId === request.requestId) {
+          try {
+            await transport.update({
+              version: shadow.version,
+              state: { desired: { command: null }, reported: { command: null } },
+            }, signal);
+          } catch (error) {
+            console.warn('Dice result received; request slot will expire:', error);
+          }
+        }
+        return result;
+      }
+      if (shadow.state?.desired?.command?.requestId !== request.requestId) {
+        throw new Error('The dice request was replaced. No roll result is available.');
+      }
+      await pause(signal);
+    }
+    throw new Error('The dice device did not respond in time. No roll was fabricated.');
+  };
+}

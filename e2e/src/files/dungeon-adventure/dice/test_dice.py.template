@@ -1,0 +1,80 @@
+import importlib.util
+import os
+import tempfile
+import unittest
+import uuid
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+from unittest.mock import patch
+
+MODULE_PATH = Path(os.environ.get(
+    "DICE_MODULE_PATH",
+    Path(__file__).parents[2] / "greengrass" / "dice" / "main.py",
+))
+loader = SourceFileLoader("dungeon_dice", str(MODULE_PATH))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+assert spec is not None
+dice_module = importlib.util.module_from_spec(spec)
+loader.exec_module(dice_module)
+
+
+class TestDice(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.path = Path(self.directory.name) / "dice-result.json"
+        self.dice = dice_module.Dice(self.path)
+        self.command = {"requestId": str(uuid.uuid4()), "sides": 20, "expiresAt": 120}
+
+    def test_roll_uses_device_randomness_and_valid_range(self):
+        with patch.object(dice_module.secrets, "randbelow", return_value=16) as random:
+            result = self.dice.roll(self.command, 1, 100)
+        self.assertEqual(result["value"], 17)
+        self.assertEqual(result["requestId"], self.command["requestId"])
+        random.assert_called_once_with(20)
+
+    def test_duplicate_and_restart_reuse_the_persisted_result(self):
+        first = self.dice.roll(self.command, 1, 100)
+        with patch.object(dice_module.secrets, "randbelow", side_effect=AssertionError("rerolled")):
+            self.assertEqual(self.dice.roll(self.command, 1, 101), first)
+            self.assertEqual(dice_module.Dice(self.path).roll(self.command, 2, 102), first)
+
+    def test_expired_or_invalid_requests_do_not_roll(self):
+        for command in (
+            {**self.command, "expiresAt": 100},
+            {**self.command, "sides": 7},
+            {**self.command, "sides": True},
+            {**self.command, "requestId": "invalid"},
+            {},
+        ):
+            with self.subTest(command=command):
+                self.assertIsNone(self.dice.roll(command, 1, 100))
+        self.assertFalse(self.path.exists())
+
+    def test_stale_delivery_cannot_roll_after_a_newer_request(self):
+        self.dice.roll(self.command, 5, 100)
+        stale = {**self.command, "requestId": str(uuid.uuid4())}
+        self.assertIsNone(self.dice.roll(stale, 4, 100))
+
+    def test_stale_shadow_version_logs_after_shadow_reset(self):
+        self.dice.roll(self.command, 5, 100)
+        reset_shadow_command = {**self.command, "requestId": str(uuid.uuid4())}
+        with self.assertLogs(dice_module.logger, level="WARNING") as warning:
+            self.assertIsNone(self.dice.roll(reset_shadow_command, 1, 100))
+        self.assertIn("Ignoring stale shadow version 1", warning.output[0])
+
+    def test_request_id_cannot_be_reused_with_different_sides(self):
+        self.dice.roll(self.command, 1, 100)
+        self.assertIsNone(self.dice.roll({**self.command, "sides": 6}, 2, 100))
+
+    def test_failed_persistence_does_not_publish_a_result(self):
+        with (
+            patch.object(dice_module.os, "replace", side_effect=OSError("disk full")),
+            self.assertRaises(OSError),
+        ):
+            self.dice.roll(self.command, 1, 100)
+        self.assertIsNone(self.dice.last)
+
+
+if __name__ == "__main__":
+    unittest.main()
