@@ -47,7 +47,41 @@ const oldConnectedDockerfile = (port: number) =>
     `${OLD_RDS_CA_RUN}\n\nEXPOSE ${port}`,
   );
 
-type Component = { generator: string; name: string; path: string };
+/** A multi-stage Dockerfile whose last stage carries the old CA step. */
+const multiStageOldConnected = `FROM public.ecr.aws/docker/library/node:lts-slim AS builder
+
+WORKDIR /build
+
+COPY . /build
+
+RUN npm run build
+
+FROM public.ecr.aws/docker/library/node:lts-slim
+
+WORKDIR /app
+
+COPY --from=builder /build/index.js /app
+
+${OLD_RDS_CA_RUN}
+
+EXPOSE 8080
+
+CMD [ "node", "index.js" ]
+`;
+
+/** A CA step the user changed to download the bundle under another name. */
+const renamedBundleDockerfile = vendedDockerfile(8080).replace(
+  'EXPOSE 8080',
+  [
+    'RUN curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \\',
+    '    -o /usr/local/share/ca-certificates/rds.crt && \\',
+    '    update-ca-certificates',
+    '',
+    'EXPOSE 8080',
+  ].join('\n'),
+);
+
+type Component = { generator: string; name: string; path?: string };
 
 const seedProject = (tree: Tree, name: string, components: Component[]) => {
   addProjectConfiguration(tree, name, {
@@ -74,6 +108,12 @@ const agent = (name: string): Component => ({
 });
 const mcpServer = (name: string): Component => ({
   generator: 'ts#mcp-server',
+  name,
+  path: `src/${name}`,
+});
+// The id ts#agent recorded before it was renamed in v0.117.0.
+const strandsAgent = (name: string): Component => ({
+  generator: 'ts#strands-agent',
   name,
   path: `src/${name}`,
 });
@@ -228,6 +268,139 @@ EXPOSE 8080
     expect(result.nextSteps).toHaveLength(1);
     expect(result.nextSteps![0]).toContain(dockerfile);
     expect(result.nextSteps![0]).toContain(ENV_LINE);
+  });
+
+  it('converges on the generator (legacy ts#strands-agent id)', async () => {
+    const dockerfile = 'packages/svc/src/my-agent/Dockerfile';
+    seedProject(tree, 'svc', [strandsAgent('my-agent')]);
+    tree.write(dockerfile, oldConnectedDockerfile(8080));
+
+    await migration(tree);
+
+    const fresh = createTreeUsingTsSolutionSetup();
+    seedProject(fresh, 'svc', [agent('my-agent')]);
+    seedRdbProject(fresh);
+    fresh.write(dockerfile, vendedDockerfile(8080));
+    await tsRdbAgentConnectionGenerator(fresh, {
+      sourceProject: 'svc',
+      targetProject: 'db',
+      sourceComponent: { generator: 'ts#agent', name: 'my-agent' },
+    });
+
+    expect(tree.read(dockerfile, 'utf-8')).toBe(
+      fresh.read(dockerfile, 'utf-8'),
+    );
+  });
+
+  it('keeps CRLF line endings', async () => {
+    const dockerfile = 'packages/svc/src/my-agent/Dockerfile';
+    seedProject(tree, 'svc', [agent('my-agent')]);
+    tree.write(dockerfile, oldConnectedDockerfile(8080).replace(/\n/g, '\r\n'));
+
+    await migration(tree);
+
+    const content = tree.read(dockerfile, 'utf-8')!;
+    expect(count(content, ENV_LINE)).toBe(1);
+    expect(count(content, '\n')).toBe(count(content, '\r\n'));
+  });
+
+  it('adds the ENV beside the step in the last stage of a multi-stage Dockerfile', async () => {
+    const dockerfile = 'packages/svc/src/my-agent/Dockerfile';
+    seedProject(tree, 'svc', [agent('my-agent')]);
+    tree.write(dockerfile, multiStageOldConnected);
+
+    await migration(tree);
+
+    const content = tree.read(dockerfile, 'utf-8')!;
+    expect(count(content, ENV_LINE)).toBe(1);
+    expect(content).toContain('    update-ca-certificates\n# Node trusts');
+    expect(content.indexOf(ENV_LINE)).toBeGreaterThan(
+      content.lastIndexOf('FROM public.ecr.aws/docker/library/node:lts-slim\n'),
+    );
+  });
+
+  it('migrates a Dockerfile that only mentions NODE_EXTRA_CA_CERTS in a comment', async () => {
+    const dockerfile = 'packages/svc/src/my-agent/Dockerfile';
+    seedProject(tree, 'svc', [agent('my-agent')]);
+    tree.write(
+      dockerfile,
+      oldConnectedDockerfile(8080).replace(
+        'EXPOSE 8080',
+        '# TODO: set NODE_EXTRA_CA_CERTS one day\n\nEXPOSE 8080',
+      ),
+    );
+
+    const result = await migration(tree);
+
+    expect(count(tree.read(dockerfile, 'utf-8')!, ENV_LINE)).toBe(1);
+    expect(result.nextSteps).toEqual([]);
+  });
+
+  it('reports a NODE_EXTRA_CA_CERTS pointing at another CA file', async () => {
+    const dockerfile = 'packages/svc/src/my-agent/Dockerfile';
+    const userSet = oldConnectedDockerfile(8080).replace(
+      'EXPOSE 8080',
+      'ENV NODE_EXTRA_CA_CERTS=/custom.pem\n\nEXPOSE 8080',
+    );
+    seedProject(tree, 'svc', [agent('my-agent')]);
+    tree.write(dockerfile, userSet);
+
+    const result = await migration(tree);
+
+    expect(tree.read(dockerfile, 'utf-8')).toBe(userSet);
+    expect(result.nextSteps).toHaveLength(1);
+    expect(result.nextSteps![0]).toContain(dockerfile);
+    expect(result.nextSteps![0]).toContain('/custom.pem');
+    expect(result.nextSteps![0]).toContain(
+      '/usr/local/share/ca-certificates/rds-bundle.crt',
+    );
+  });
+
+  it('reports a CA step that downloads the bundle under another name', async () => {
+    const dockerfile = 'packages/svc/src/my-agent/Dockerfile';
+    seedProject(tree, 'svc', [agent('my-agent')]);
+    tree.write(dockerfile, renamedBundleDockerfile);
+
+    const result = await migration(tree);
+
+    expect(tree.read(dockerfile, 'utf-8')).toBe(renamedBundleDockerfile);
+    expect(result.nextSteps).toHaveLength(1);
+    expect(result.nextSteps![0]).toContain(dockerfile);
+    expect(result.nextSteps![0]).toContain(ENV_LINE);
+  });
+
+  it('leaves a quoted bundle path alone', async () => {
+    const dockerfile = 'packages/svc/src/my-agent/Dockerfile';
+    const quoted = oldConnectedDockerfile(8080).replace(
+      'EXPOSE 8080',
+      `ENV NODE_EXTRA_CA_CERTS="/usr/local/share/ca-certificates/rds-bundle.crt"\n\nEXPOSE 8080`,
+    );
+    seedProject(tree, 'svc', [agent('my-agent')]);
+    tree.write(dockerfile, quoted);
+
+    const result = await migration(tree);
+
+    expect(tree.read(dockerfile, 'utf-8')).toBe(quoted);
+    expect(result.nextSteps).toEqual([]);
+  });
+
+  it('ignores a component without a path', async () => {
+    seedProject(tree, 'svc', [{ generator: 'ts#agent', name: 'my-agent' }]);
+    const dockerfile = 'packages/svc/Dockerfile';
+    tree.write(dockerfile, oldConnectedDockerfile(8080));
+
+    const result = await migration(tree);
+
+    expect(tree.read(dockerfile, 'utf-8')).toBe(oldConnectedDockerfile(8080));
+    expect(result.nextSteps).toEqual([]);
+  });
+
+  it('ignores a component whose Dockerfile is missing', async () => {
+    seedProject(tree, 'svc', [agent('my-agent')]);
+
+    const result = await migration(tree);
+
+    expect(result).toEqual({ nextSteps: [] });
   });
 
   it('is a no-op in a workspace without components', async () => {
