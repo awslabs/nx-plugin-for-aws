@@ -345,13 +345,23 @@ const waitForSignedIn = async (page: Page, target: string): Promise<void> => {
   // button renders (a premature load before the exchange finishes would
   // bounce back to the hosted UI).
   await page.waitForLoadState('networkidle').catch(() => {});
-  for (let attempt = 0; attempt < 30; attempt++) {
+  for (let attempt = 0; attempt < 15; attempt++) {
     if (!page.url().includes('amazoncognito.com')) {
       await page
         .goto(target, { waitUntil: 'domcontentloaded', timeout: 120_000 })
         .catch(() => {});
-      const button = page.getByTestId('run-integration-test');
-      if (await button.count()) {
+      // `domcontentloaded` resolves before React has rendered, so the button
+      // is read with a wait rather than a point-in-time count. A timeout
+      // means this load raced the code exchange, and the next attempt
+      // reloads the page.
+      const rendered = await page
+        .getByTestId('run-integration-test')
+        .waitFor({ state: 'visible', timeout: 10_000 })
+        .then(
+          () => true,
+          () => false,
+        );
+      if (rendered) {
         return;
       }
     }
