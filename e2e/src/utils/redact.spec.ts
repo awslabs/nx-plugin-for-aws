@@ -199,12 +199,45 @@ describe('redactOAuthValues', () => {
     [`code=${CODE}; path=/`, 'code=[REDACTED]; path=/'],
     ['(access_token=at-1)', '(access_token=[REDACTED])'],
     [`(code=${CODE})`, '(code=[REDACTED])'],
+    ['access_token=at-1, state=s1', 'access_token=[REDACTED], state=s1'],
+    [`code=${CODE}, state=s1`, 'code=[REDACTED], state=s1'],
   ])(
     'keeps the punctuation that follows a parameter value: %s',
     (input, expected) => {
       expect(redactOAuthValues(input)).toBe(expected);
     },
   );
+
+  // A comma separates one field from the next in a logged error message, so
+  // an unquoted parameter value stops there. That is what lets the errno
+  // name in `code=ECONNRESET, syscall=read` be read as a diagnostic and
+  // kept, instead of being judged as the value `ECONNRESET,` and redacted.
+
+  it.each([
+    'request failed: code=ECONNRESET, syscall=read',
+    'code=ETIMEDOUT, host=app.example.com',
+    'code=500, status=ok',
+    'code=ERR_INVALID_ARG_TYPE, path=/x',
+    'code=ResourceNotFoundException, service=cognito',
+  ])('keeps a diagnostic code value that a comma ends: %s', (text) => {
+    expect(redactOAuthValues(text)).toBe(text);
+  });
+
+  // The cost of stopping at the comma: a value that holds one is redacted
+  // only as far as it, and the tail stays in the log.
+
+  it.each([
+    [`code=${CODE},x`, 'code=[REDACTED],x'],
+    [`code=${CODE}, syscall=read`, 'code=[REDACTED], syscall=read'],
+    [`id_token=${CODE},x`, 'id_token=[REDACTED],x'],
+    ['access_token=abc,def', 'access_token=[REDACTED],def'],
+    ['access_token=at-1,state=s1', 'access_token=[REDACTED],state=s1'],
+    ['client_secret=s1,s2', 'client_secret=[REDACTED],s2'],
+  ])('redacts a parameter value up to a comma: %s', (input, expected) => {
+    const output = redactOAuthValues(input);
+    expect(output).toBe(expected);
+    expect(output).not.toContain(CODE);
+  });
 
   it.each(SURVIVING_CODES)(
     'keeps the diagnostic code value %s in JSON, a preview and prose',

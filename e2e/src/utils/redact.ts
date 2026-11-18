@@ -119,15 +119,21 @@ const quotedValue = (
  * prose. The lookbehind keeps compound names such as `my_access_token` and
  * `error_code` out.
  *
- * An unquoted value runs to the next `&`, `#`, whitespace, quote or angle
- * bracket, so no character inside it can end the match early and leave the
- * rest in the log. `;` and `)` are left alone so a cookie attribute or a
- * closing bracket after the value stays readable. A quoted value instead
- * runs to its matching quote, and the quotes are printed again, which is
- * what makes `code="<value>"` and `access_token="<two words>"` redact whole.
+ * An unquoted value runs to the next `&`, `#`, `;`, `)`, `,`, whitespace,
+ * quote or angle bracket. Each of those characters separates a value from
+ * what comes after it rather than belonging to it, so what follows stays
+ * readable: a cookie attribute in `access_token=X; path=/`, a closing
+ * bracket in `(code=X)`, and the next property in `code=ECONNRESET,
+ * syscall=read`, where the comma is what lets the errno name be recognised
+ * as a diagnostic and kept. The cost is that an unquoted value holding one
+ * of these characters is redacted only as far as the character:
+ * `access_token=abc,def` becomes `access_token=[REDACTED],def`. A quoted
+ * value instead runs to its matching quote, and the quotes are printed
+ * again, which is what makes `code="<value>"` and `access_token="<two
+ * words>"` redact whole.
  */
 const PARAM_PATTERN = new RegExp(
-  String.raw`(?<![\w.-])(${KEYS})=(?:${QUOTED_VALUE}|([^&#\s"'<>;)]*))`,
+  String.raw`(?<![\w.-])(${KEYS})=(?:${QUOTED_VALUE}|([^&#\s"'<>;),]*))`,
   'g',
 );
 
@@ -254,9 +260,11 @@ const redactBearer = (_match: string, scheme: string, space: string): string =>
  *
  * What is not covered: a credential under any other key, one with no key at
  * all, a key spelled in another case (`ACCESS_TOKEN=`) or separated from its
- * value by anything but `=` or `:`, and the tail of a value broken across
- * lines, which is redacted only as far as the line end. A `code` value
- * ending in `Exception` or `Error` is kept at any length.
+ * value by anything but `=` or `:`, the tail of a value broken across
+ * lines, which is redacted only as far as the line end, and the tail of an
+ * unquoted parameter value after a delimiter such as `,` or `;`, which is
+ * redacted only as far as that character. A `code` value ending in
+ * `Exception` or `Error` is kept at any length.
  *
  * This is a backup for text that reaches a log by a path a maintainer did
  * not choose, such as browser console output. It is not a licence to log a
