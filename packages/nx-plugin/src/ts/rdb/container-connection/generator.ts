@@ -35,6 +35,30 @@ export const TS_RDB_CONTAINER_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
 
 /**
+ * Node reads its own bundled CA store, not the system store
+ * `update-ca-certificates` writes, so the image points it at the RDS bundle.
+ */
+const NODE_CA_ENV =
+  'ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/rds-bundle.crt';
+
+/**
+ * Adds the `ENV` that makes Node trust the bundle the shared injector
+ * installs. Scoped to this generator: the sibling connections configure the
+ * variable on their deployed function or task instead. Leaves the Dockerfile
+ * alone when the install step is not where it was written, and adds the `ENV`
+ * once, so a re-run changes nothing.
+ */
+const trustRdsCaBundleInNode = (tree: Tree, dockerfilePath: string): void => {
+  if (!tree.exists(dockerfilePath)) return;
+  const content = tree.read(dockerfilePath, 'utf-8')!;
+  if (content.includes(NODE_CA_ENV)) return;
+  tree.write(
+    dockerfilePath,
+    content.replace(/^([ \t]*update-ca-certificates)$/m, `$1\n${NODE_CA_ENV}`),
+  );
+};
+
+/**
  * Connect a ts#container service to a ts#rdb project.
  */
 export const tsRdbContainerConnectionGenerator = async (
@@ -83,10 +107,9 @@ export const tsRdbContainerConnectionGenerator = async (
   );
 
   // Dockerfile: install RDS CA bundle for direct Aurora SSL connections
-  injectRdsCaBundleIntoDockerfile(
-    tree,
-    joinPathFragments(names.sourceDir, 'Dockerfile'),
-  );
+  const dockerfilePath = joinPathFragments(names.sourceDir, 'Dockerfile');
+  injectRdsCaBundleIntoDockerfile(tree, dockerfilePath);
+  trustRdsCaBundleInNode(tree, dockerfilePath);
 
   const serveTarget = `${names.prefix}-serve`;
   if (serviceProject.targets?.[serveTarget]) {

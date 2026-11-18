@@ -130,6 +130,15 @@ CMD [ "node", "index.js" ]
     );
   });
 
+  it('should set the CA environment variable once on a re-run', async () => {
+    await run();
+    await run();
+
+    expect(
+      tree.read(DOCKERFILE, 'utf-8')?.match(/^ENV NODE_EXTRA_CA_CERTS=/gm),
+    ).toHaveLength(1);
+  });
+
   it('should not fail when the service has no Dockerfile', async () => {
     tree.delete(DOCKERFILE);
 
