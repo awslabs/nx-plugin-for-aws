@@ -355,8 +355,8 @@ export const getAgent = async () => {
     });
 
     it('Dockerfile without an EXPOSE line is left unchanged', async () => {
-      // The CA step is inserted before the first EXPOSE; without one, nothing
-      // is inserted.
+      // The CA step is inserted before the EXPOSE of the last build stage;
+      // without one, nothing is inserted and the helper warns instead.
       const noExpose = readDockerfile().replace('EXPOSE 8080\n\n', '');
       tree.write(DOCKERFILE, noExpose);
 

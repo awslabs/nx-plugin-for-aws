@@ -72,6 +72,10 @@ const finalStageExposeIndex = (content: string): number | undefined => {
  * A Dockerfile with the CA step from an earlier version, but no
  * NODE_EXTRA_CA_CERTS, gets the ENV line after it. A NODE_EXTRA_CA_CERTS the
  * user set is never overridden, and a customised CA step is left alone.
+ *
+ * The step is recognised by the bundle filename alone: a Dockerfile that
+ * downloads the bundle under another name gets this step as well, which works,
+ * whereas skipping it would leave the image with no NODE_EXTRA_CA_CERTS.
  */
 export const injectRdsCaBundleIntoDockerfile = (
   tree: Tree,
