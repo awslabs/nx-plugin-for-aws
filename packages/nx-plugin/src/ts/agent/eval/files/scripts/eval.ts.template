@@ -95,7 +95,13 @@ const inStartupWindow = () => Date.now() - startedAt <= STARTUP_TIMEOUT_MS;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const loadCases = () => {
-  const json = JSON.parse(readFileSync(CASES_FILE, 'utf-8'));
+  let json: any;
+  try {
+    json = JSON.parse(readFileSync(CASES_FILE, 'utf-8'));
+  } catch (err) {
+    console.error(`Could not read eval cases from ${CASES_FILE}: ${(err as Error).message}`);
+    process.exit(1);
+  }
   const parsed = CasesFile.safeParse(json);
   if (parsed.success) {
     return parsed.data.cases;
@@ -117,7 +123,7 @@ const loadCases = () => {
 // AgentCore session ids must be at least 33 characters.
 const newSessionId = () => randomUUID().replaceAll('-', '').padEnd(33, '0');
 
-const invoke = (prompt: string): Promise<Result> =>
+const invoke = (prompt: string, cancelSignal: AbortSignal): Promise<Result> =>
   runWithSessionId(newSessionId(), async () => {
     const agent = await getAgent();
     const toolCalls: ToolCall[] = [];
@@ -136,12 +142,12 @@ const invoke = (prompt: string): Promise<Result> =>
         name: event.toolUse.name,
         error:
           event.result.status === 'error'
-            ? (event.error?.message ?? 'tool returned an error')
+            ? withStartupHint(event.error, event.error?.message ?? 'tool returned an error')
             : undefined,
       });
     });
     let response = '';
-    for await (const event of agent.stream(prompt)) {
+    for await (const event of agent.stream(prompt, { cancelSignal })) {
       if (
         event.type === 'modelStreamUpdateEvent' &&
         event.event.type === 'modelContentBlockDeltaEvent' &&
@@ -155,16 +161,24 @@ const invoke = (prompt: string): Promise<Result> =>
     return { response: response.trim(), toolCalls };
   });
 
-const withTimeout = <T>(promise: Promise<T>): Promise<T> =>
-  Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`Timed out after ${TIMEOUT_MS}ms`)),
-        TIMEOUT_MS,
-      ).unref(),
-    ),
-  ]);
+// Fails after TIMEOUT_MS and cancels the agent so it stops calling the model and tools.
+const withTimeout = async <T>(run: (cancelSignal: AbortSignal) => Promise<T>): Promise<T> => {
+  const controller = new AbortController();
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      run(controller.signal),
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new Error(`Timed out after ${TIMEOUT_MS}ms`));
+        }, TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 const isConnectionError = (err: unknown): boolean => {
   for (let e: any = err, depth = 0; e && depth < 5; e = e.cause, depth++) {
@@ -175,13 +189,18 @@ const isConnectionError = (err: unknown): boolean => {
   return false;
 };
 
+const withStartupHint = (err: unknown, message: string): string =>
+  isConnectionError(err)
+    ? `${message} (a connected server was not ready within ${STARTUP_TIMEOUT_MS}ms, set EVAL_STARTUP_TIMEOUT_MS to wait longer)`
+    : message;
+
 const invokeWhenReady = async (prompt: string): Promise<Result> => {
   for (;;) {
     try {
-      return await withTimeout(invoke(prompt));
+      return await withTimeout((cancelSignal) => invoke(prompt, cancelSignal));
     } catch (err) {
       if (!isConnectionError(err) || !inStartupWindow()) {
-        throw err;
+        throw new Error(withStartupHint(err, (err as Error).message), { cause: err });
       }
       await sleep(1_000);
     }
