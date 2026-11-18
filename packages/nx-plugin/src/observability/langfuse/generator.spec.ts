@@ -118,6 +118,8 @@ describe('observability#langfuse generator', () => {
       expect(config).not.toContain("resources: ['*']");
       expect.soft(config).toMatchSnapshot('Langfuse config');
       const construct = tree.read(CONSTRUCT, 'utf-8');
+      expect(construct).not.toContain('opentelemetry-instrument');
+      expect(construct).not.toContain('for OpenTelemetry packaged');
       const parsed = ts.createSourceFile(
         CONSTRUCT,
         construct,
@@ -138,15 +140,18 @@ describe('observability#langfuse generator', () => {
     },
   );
 
-  it('requires an explicit endpoint before changing the stock CloudWatch setup', async () => {
-    await addAgent();
-    const before = files(tree);
-    await expect(
-      observabilityLangfuseGenerator(tree, { ...options, host: undefined }),
-    ).rejects.toThrow('Provide --host');
-    expect(files(tree)).toEqual(before);
-    expect(tree.read(`${AGENT}/init.py`, 'utf-8')).not.toContain('langfuse');
-  });
+  it.each([undefined, '', ' \t\n'])(
+    'requires a nonblank endpoint on first use (%j)',
+    async (host) => {
+      await addAgent();
+      const before = files(tree);
+      await expect(
+        observabilityLangfuseGenerator(tree, { ...options, host }),
+      ).rejects.toThrow('Provide --host');
+      expect(files(tree)).toEqual(before);
+      expect(tree.read(`${AGENT}/init.py`, 'utf-8')).not.toContain('langfuse');
+    },
+  );
 
   it('generates Python imports and filenames from Windows agent paths', async () => {
     await addAgent();
@@ -220,15 +225,41 @@ describe('observability#langfuse generator', () => {
     ).toHaveLength(1);
   });
 
-  it.each(['cloudwatch', 'langfuse'])(
-    'rejects --mode=%s before changing files',
-    async (mode) => {
+  it('does not record a mode and preserves earlier experimental metadata on repeat runs', async () => {
+    await addAgent();
+    await observabilityLangfuseGenerator(tree, options);
+    const project = readProjectConfiguration(tree, options.project);
+    const component = (
+      project.metadata.components as Record<string, unknown>[]
+    ).find(
+      (entry) => entry.generator === OBSERVABILITY_LANGFUSE_GENERATOR_INFO.id,
+    );
+    expect(component).not.toHaveProperty('mode');
+    if (!component) {
+      throw new Error('Expected Langfuse metadata');
+    }
+    component.mode = 'langfuse';
+    updateProjectConfiguration(tree, project.name, project);
+    const before = files(tree);
+    await observabilityLangfuseGenerator(tree, options);
+    expect(files(tree)).toEqual(before);
+  });
+
+  it.each(['outputs', 'commands'])(
+    'rejects an unrecognized package target %s before editing files',
+    async (field) => {
       await addAgent();
+      const project = readProjectConfiguration(tree, options.project);
+      if (field === 'outputs') {
+        delete project.targets['agent-package'].outputs;
+      } else {
+        project.targets['agent-package'].options.commands = 'custom-package';
+      }
+      updateProjectConfiguration(tree, project.name, project);
       const before = files(tree);
-      const removedOption = { ...options, mode };
       await expect(
-        observabilityLangfuseGenerator(tree, removedOption),
-      ).rejects.toThrow('does not accept --mode');
+        observabilityLangfuseGenerator(tree, options),
+      ).rejects.toThrow('package target was not recognized');
       expect(files(tree)).toEqual(before);
     },
   );
@@ -295,6 +326,30 @@ describe('observability#langfuse generator', () => {
     },
   );
 
+  it.each(['removed', 'duplicate', 'cwd', 'executor'])(
+    'rejects ambiguous local target wiring (%s) before editing files',
+    async (customization) => {
+      await addAgent();
+      const project = readProjectConfiguration(tree, options.project);
+      const dev = project.targets['agent-dev'];
+      if (customization === 'removed') {
+        delete project.targets['agent-dev'];
+      } else if (customization === 'duplicate') {
+        dev.options.commands.push(dev.options.commands[0]);
+      } else if (customization === 'cwd') {
+        dev.options.cwd = 'another-directory';
+      } else {
+        dev.executor = 'custom:dev';
+      }
+      updateProjectConfiguration(tree, project.name, project);
+      const before = files(tree);
+      await expect(
+        observabilityLangfuseGenerator(tree, options),
+      ).rejects.toThrow('agent-dev target was customized or removed');
+      expect(files(tree)).toEqual(before);
+    },
+  );
+
   it('refuses to overwrite an existing local entrypoint', async () => {
     await addAgent();
     tree.write(LOCAL_CONFIG, '# User-owned entrypoint\n');
@@ -342,20 +397,74 @@ describe('observability#langfuse generator', () => {
     ).toHaveLength(1);
   });
 
-  it('reports removed wiring without claiming the agent is configured', async () => {
+  it.each([
+    [CONSTRUCT, 'langfuseObservability.entrypoint', "['custom.py']"],
+    [CONSTRUCT, 'configureLangfuseRuntime(this.agentCoreRuntime);', ''],
+    [CONSTRUCT, '...langfuseObservability.environmentVariables', '...{}'],
+    [`${AGENT}/init.py`, '**langfuse_fastapi_options()', '**{}'],
+    [LOCAL_CONFIG, 'initialize(', 'custom_initialize('],
+  ])(
+    'reports removed wiring in %s (%s) before editing files',
+    async (path, original, replacement) => {
+      await addAgent();
+      await observabilityLangfuseGenerator(tree, options);
+      const source = tree.read(path, 'utf-8');
+      expect(source).toContain(original);
+      tree.write(path, source.replace(original, replacement));
+      const before = files(tree);
+      await expect(
+        observabilityLangfuseGenerator(tree, options),
+      ).rejects.toThrow('runtime wiring was customized or removed');
+      expect(files(tree)).toEqual(before);
+    },
+  );
+
+  it.each([
+    { host: '' },
+    { secretArn: '' },
+    { host: '', secretArn: '' },
+    { host: ' \t\n', secretArn: ' \t\n' },
+  ])('retains saved options for blank prompt answers (%j)', async (blank) => {
     await addAgent();
     await observabilityLangfuseGenerator(tree, options);
-    tree.write(
-      CONSTRUCT,
-      tree
-        .read(CONSTRUCT, 'utf-8')
-        .replace('configureLangfuseRuntime(this.agentCoreRuntime);', ''),
-    );
     const before = files(tree);
-    await expect(observabilityLangfuseGenerator(tree, options)).rejects.toThrow(
-      'runtime wiring was customized or removed',
-    );
+    await observabilityLangfuseGenerator(tree, {
+      project: options.project,
+      ...blank,
+    });
     expect(files(tree)).toEqual(before);
+  });
+
+  it('trims pasted values and allows replacing one option while leaving the other blank', async () => {
+    await addAgent();
+    await observabilityLangfuseGenerator(tree, {
+      ...options,
+      host: `  ${options.host}/ \n`,
+      secretArn: ` \t${SECRET}\n`,
+    });
+    const before = files(tree);
+    await observabilityLangfuseGenerator(tree, options);
+    expect(files(tree)).toEqual(before);
+    await observabilityLangfuseGenerator(tree, {
+      project: options.project,
+      host: ' https://example.com/langfuse/ ',
+      secretArn: '',
+    });
+    expect(tree.read(CONFIG, 'utf-8')).toContain(SECRET);
+    expect(tree.read(CONFIG, 'utf-8')).toContain(
+      'https://example.com/langfuse',
+    );
+    const replacement = SECRET.replace('abcdef', 'ghijkl');
+    await observabilityLangfuseGenerator(tree, {
+      project: options.project,
+      host: '',
+      secretArn: ` ${replacement} `,
+    });
+    expect(tree.read(CONFIG, 'utf-8')).toContain(replacement);
+    expect(tree.read(LOCAL_CONFIG, 'utf-8')).toContain(
+      'https://example.com/langfuse',
+    );
+    expect(tree.read(LOCAL_CONFIG, 'utf-8')).toContain(replacement);
   });
 
   it('retains the previous host and allows an explicit host or secret change', async () => {
@@ -534,15 +643,40 @@ describe('observability#langfuse generator', () => {
     expect(files(tree)).toEqual(before);
   });
 
-  it('requires a complete secret ARN', async () => {
+  it.each([undefined, '', ' \t\n', SECRET.replace('-abcdef', '')])(
+    'requires a complete nonblank secret ARN on first use (%j)',
+    async (secretArn) => {
+      await addAgent();
+      const before = files(tree);
+      await expect(
+        observabilityLangfuseGenerator(tree, { ...options, secretArn }),
+      ).rejects.toThrow('complete ARN');
+      expect(files(tree)).toEqual(before);
+    },
+  );
+
+  it('wires an empty FastAPI constructor while preserving user comments', async () => {
     await addAgent();
+    tree.write(
+      `${AGENT}/init.py`,
+      'from fastapi import FastAPI\n\n# Custom application setup\napp = FastAPI()\n',
+    );
+    tree.write(
+      CONSTRUCT,
+      `${tree.read(CONSTRUCT, 'utf-8')}\n// Custom deployment note\n`,
+    );
+    await observabilityLangfuseGenerator(tree, options);
+    expect(tree.read(`${AGENT}/init.py`, 'utf-8')).toContain(
+      'app = FastAPI(**langfuse_fastapi_options())',
+    );
+    expect(tree.read(`${AGENT}/init.py`, 'utf-8')).toContain(
+      '# Custom application setup',
+    );
+    expect(tree.read(CONSTRUCT, 'utf-8')).toContain(
+      '// Custom deployment note',
+    );
     const before = files(tree);
-    await expect(
-      observabilityLangfuseGenerator(tree, {
-        project: options.project,
-        host: options.host,
-      }),
-    ).rejects.toThrow('complete ARN');
+    await observabilityLangfuseGenerator(tree, options);
     expect(files(tree)).toEqual(before);
   });
 

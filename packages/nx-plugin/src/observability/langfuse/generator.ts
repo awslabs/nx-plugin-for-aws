@@ -49,7 +49,6 @@ export const OBSERVABILITY_LANGFUSE_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
 
 export interface LangfuseMetadata {
-  readonly mode: 'langfuse';
   readonly host: string;
   readonly secretArn: string;
   readonly configHash: string;
@@ -130,11 +129,6 @@ export const observabilityLangfuseGenerator = async (
   options: ObservabilityLangfuseGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   assertSupportedNxVersion(tree);
-  if ('mode' in options) {
-    throw new Error(
-      'observability#langfuse does not accept --mode. To restore CloudWatch, revert the Langfuse setup commit, then rebuild and redeploy.',
-    );
-  }
   const project = readProjectConfigurationUnqualified(tree, options.project);
   const { esm } = esmVars(tree);
   const components = (project.metadata?.components ??
@@ -145,14 +139,14 @@ export const observabilityLangfuseGenerator = async (
       component.generator === OBSERVABILITY_LANGFUSE_GENERATOR_INFO.id &&
       component.name === agent.name,
   ) as (ComponentMetadata & LangfuseMetadata) | undefined;
-  const selectedHost = options.host ?? previous?.host;
+  const selectedHost = options.host?.trim() || previous?.host;
   if (!selectedHost) {
     throw new Error(
       'Provide --host with the HTTPS base URL of an existing Langfuse installation. There is no default destination.',
     );
   }
   const host = normalizeHost(selectedHost);
-  const secretArn = options.secretArn ?? previous?.secretArn;
+  const secretArn = options.secretArn?.trim() || previous?.secretArn;
   if (
     !secretArn ||
     !/^arn:(aws|aws-us-gov|aws-cn):secretsmanager:[a-z0-9-]+:\d{12}:secret:[A-Za-z0-9/_+=.@-]+-[A-Za-z0-9]{6}$/.test(
@@ -163,10 +157,7 @@ export const observabilityLangfuseGenerator = async (
       'Provide --secretArn with the complete ARN of an existing Secrets Manager secret. Do not provide Langfuse key values.',
     );
   }
-  const unchanged =
-    previous?.mode === 'langfuse' &&
-    previous.host === host &&
-    previous.secretArn === secretArn;
+  const unchanged = previous?.host === host && previous.secretArn === secretArn;
 
   const agentPathParts = agent.path.split(/[\\/]/);
   const agentDir = joinPathFragments(project.root, ...agentPathParts);
@@ -398,6 +389,11 @@ export const observabilityLangfuseGenerator = async (
     await applyGritQL(
       tree,
       construct,
+      'comment() as $comment where { $comment <: or { "// The `opentelemetry-instrument` prefix auto-instruments with the AWS Distro", "// for OpenTelemetry packaged alongside the code.", "// https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html" }, $comment => . }',
+    );
+    await applyGritQL(
+      tree,
+      construct,
       '`environmentVariables: { $values }` where { $values <: within `this.agentCoreRuntime = new Runtime($args)`, $values <: not contains `...langfuseObservability.environmentVariables`, $values += `...langfuseObservability.environmentVariables` }',
     );
     await applyGritQL(
@@ -436,7 +432,6 @@ export const observabilityLangfuseGenerator = async (
     await formatFilesInSubtree(tree, constructDir);
     await formatFilesInSubtree(tree, localConfig);
     const metadata: LangfuseMetadata = {
-      mode: 'langfuse',
       host,
       secretArn,
       configHash: digest(tree.read(config, 'utf-8')),
