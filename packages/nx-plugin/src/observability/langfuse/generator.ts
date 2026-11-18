@@ -158,6 +158,10 @@ export const observabilityLangfuseGenerator = async (
     );
   }
   const unchanged = previous?.host === host && previous.secretArn === secretArn;
+  const install = () =>
+    installDependencies(tree, options.preferInstallDependencies, {
+      languages: ['python'],
+    });
 
   const agentPathParts = agent.path.split(/[\\/]/);
   const agentDir = joinPathFragments(project.root, ...agentPathParts);
@@ -274,7 +278,7 @@ export const observabilityLangfuseGenerator = async (
         target.options.commands.includes(localCommand),
       )
     ) {
-      return () => {};
+      return install;
     }
   } else {
     for (const file of [
@@ -466,10 +470,7 @@ export const observabilityLangfuseGenerator = async (
   for (const [file, content] of preservedConfigs) {
     tree.write(file, content);
   }
-  return () =>
-    installDependencies(tree, options.preferInstallDependencies, {
-      languages: ['python'],
-    });
+  return install;
 };
 
 export default observabilityLangfuseGenerator;

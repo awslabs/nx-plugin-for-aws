@@ -11,12 +11,17 @@ import {
 } from '@nx/devkit';
 import ts from 'typescript';
 import { pyAgentGenerator } from '../../py/agent/generator.js';
+import { installDependencies } from '../../utils/install.js';
 import { expectHasMetricTags } from '../../utils/metrics-assertions.js';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
 import {
   OBSERVABILITY_LANGFUSE_GENERATOR_INFO,
   observabilityLangfuseGenerator,
 } from './generator.js';
+
+vi.mock('../../utils/install.js', () => ({
+  installDependencies: vi.fn(),
+}));
 
 const ROOT = 'apps/test-project';
 const MODULE = `${ROOT}/test_project`;
@@ -45,6 +50,7 @@ describe('observability#langfuse generator', () => {
   let tree: Tree;
 
   beforeEach(() => {
+    vi.mocked(installDependencies).mockReset();
     tree = createTreeUsingTsSolutionSetup();
     addProjectConfiguration(tree, 'test-project', {
       root: ROOT,
@@ -223,6 +229,54 @@ describe('observability#langfuse generator', () => {
           component.generator === OBSERVABILITY_LANGFUSE_GENERATOR_INFO.id,
       ),
     ).toHaveLength(1);
+  });
+
+  it.each([undefined, true, false])(
+    'honors the installation preference on an unchanged run (%s)',
+    async (preferInstallDependencies) => {
+      await addAgent();
+      const first = await observabilityLangfuseGenerator(tree, options);
+      await first();
+      expect(installDependencies).toHaveBeenCalledWith(tree, false, {
+        languages: ['python'],
+      });
+      vi.mocked(installDependencies).mockClear();
+      const before = files(tree);
+
+      const again = await observabilityLangfuseGenerator(tree, {
+        ...options,
+        preferInstallDependencies,
+      });
+      expect(installDependencies).not.toHaveBeenCalled();
+      await again();
+
+      expect(installDependencies).toHaveBeenCalledExactlyOnceWith(
+        tree,
+        preferInstallDependencies,
+        { languages: ['python'] },
+      );
+      expect(files(tree)).toEqual(before);
+    },
+  );
+
+  it('retries a failed installation without changing generated files', async () => {
+    await addAgent();
+    const installOptions = { ...options, preferInstallDependencies: true };
+    const first = await observabilityLangfuseGenerator(tree, installOptions);
+    vi.mocked(installDependencies).mockRejectedValueOnce(
+      new Error('Dependency installation failed'),
+    );
+    await expect(first()).rejects.toThrow('Dependency installation failed');
+    const before = files(tree);
+
+    const again = await observabilityLangfuseGenerator(tree, installOptions);
+    await again();
+
+    expect(installDependencies).toHaveBeenCalledTimes(2);
+    expect(installDependencies).toHaveBeenLastCalledWith(tree, true, {
+      languages: ['python'],
+    });
+    expect(files(tree)).toEqual(before);
   });
 
   it('does not record a mode and preserves earlier experimental metadata on repeat runs', async () => {
