@@ -35,7 +35,7 @@ describe('conditional node options', () => {
     expect(infra?.enum).toEqual(['rest-lambda', 'none']);
     expect(
       nodeType('ts#trpc-api').properties.find((p) => p.name === 'infra')?.enum,
-    ).toEqual(['rest-lambda', 'http-lambda', 'none']);
+    ).toEqual(['rest-lambda', 'http-lambda', 'http-ecs', 'none']);
   });
 
   it('should read a condition against the values a run would use', () => {
