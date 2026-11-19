@@ -119,7 +119,7 @@ describe('py#container generator', () => {
         'packages/common/constructs/project.json',
         [
           'packages/common/constructs/src/app/services/index.ts',
-          'packages/common/constructs/src/app/services/my-proj-service.ts',
+          'packages/common/constructs/src/app/services/my-proj-container.ts',
           'packages/common/constructs/src/core/container/ecs-service.ts',
         ],
       ],
@@ -127,7 +127,7 @@ describe('py#container generator', () => {
         'terraform',
         'packages/common/terraform/project.json',
         [
-          'packages/common/terraform/src/app/services/my-proj-service/my-proj-service.tf',
+          'packages/common/terraform/src/app/services/my-proj-container/my-proj-container.tf',
           'packages/common/terraform/src/core/container/ecs-service/ecs-service.tf',
           'packages/common/terraform/src/core/container/ecs-service/outputs.tf',
           'packages/common/terraform/src/core/container/ecs-service/variables.tf',
@@ -162,13 +162,13 @@ describe('py#container generator', () => {
   it('should vend the server, Dockerfile and .dockerignore', async () => {
     await pyContainerGenerator(tree, { project: PROJECT, iac: 'cdk' });
 
-    const main = tree.read(`${SRC}/service/main.py`, 'utf-8');
+    const main = tree.read(`${SRC}/container/main.py`, 'utf-8');
     expect(main).toContain('@app.get("/health")');
     expect(main).toContain('@app.get("/echo")');
     expect(main).toContain('os.environ.get("PORT", "8080")');
-    expect(tree.exists(`${SRC}/service/__init__.py`)).toBe(true);
+    expect(tree.exists(`${SRC}/container/__init__.py`)).toBe(true);
 
-    const dockerfile = tree.read(`${SRC}/service/Dockerfile`, 'utf-8');
+    const dockerfile = tree.read(`${SRC}/container/Dockerfile`, 'utf-8');
     expect(dockerfile).toContain(`FROM ${BASE_IMAGES.python}`);
     expect(dockerfile).toContain('pip uninstall -y pip');
     // The image's user must be the uid the ECS task definition sets: EcsService
@@ -179,20 +179,20 @@ describe('py#container generator', () => {
     expect(dockerfile).toContain('USER 1000:1000');
     expect(dockerfile).toContain(`EXPOSE ${CONTAINER_PORT}`);
     expect(dockerfile).toContain(
-      'CMD ["python", "-m", "proj_my_proj.service.main"]',
+      'CMD ["python", "-m", "proj_my_proj.container.main"]',
     );
-    expect(tree.exists(`${SRC}/service/.dockerignore`)).toBe(true);
+    expect(tree.exists(`${SRC}/container/.dockerignore`)).toBe(true);
   });
 
   it('should add the serve, bundle, docker and trivy targets', async () => {
     await pyContainerGenerator(tree, { project: PROJECT, iac: 'cdk' });
     const { targets } = readProject(tree);
 
-    expect(targets['service-serve']).toEqual({
+    expect(targets['container-serve']).toEqual({
       executor: 'nx:run-commands',
       continuous: true,
       options: {
-        commands: ['uv run python -m proj_my_proj.service.main'],
+        commands: ['uv run python -m proj_my_proj.container.main'],
         cwd: '{projectRoot}',
         env: { PORT: '8081', LOCAL_DEV: 'true' },
       },
@@ -201,26 +201,26 @@ describe('py#container generator', () => {
     expect(targets['bundle-arm']).toBeDefined();
     expect(targets.bundle.dependsOn).toContain('bundle-arm');
 
-    const ctx = 'dist/packages/my_proj/docker/my-proj-service';
-    expect(targets['service-docker'].options.commands).toEqual([
+    const ctx = 'dist/packages/my_proj/docker/my-proj-container';
+    expect(targets['container-docker'].options.commands).toEqual([
       `shx rm -rf ${ctx}`,
       `shx mkdir -p ${ctx}`,
       `shx cp -R dist/packages/my_proj/bundle-arm/. ${ctx}`,
-      `shx cp ${SRC}/service/Dockerfile ${ctx}/Dockerfile`,
-      `shx cp ${SRC}/service/.dockerignore ${ctx}/.dockerignore`,
-      `docker build --platform linux/arm64 -t proj-my-proj-service:latest ${ctx}`,
+      `shx cp ${SRC}/container/Dockerfile ${ctx}/Dockerfile`,
+      `shx cp ${SRC}/container/.dockerignore ${ctx}/.dockerignore`,
+      `docker build --platform linux/arm64 -t proj-my-proj-container:latest ${ctx}`,
     ]);
-    expect(targets['service-docker'].cache).toBe(false);
-    expect(targets['service-docker'].options.parallel).toBe(false);
-    expect(targets['service-docker'].dependsOn).toEqual(['bundle-arm']);
+    expect(targets['container-docker'].cache).toBe(false);
+    expect(targets['container-docker'].options.parallel).toBe(false);
+    expect(targets['container-docker'].dependsOn).toEqual(['bundle-arm']);
 
-    expect(targets.docker.dependsOn).toContain('service-docker');
+    expect(targets.docker.dependsOn).toContain('container-docker');
     expect(targets.build.dependsOn).toContain('docker');
     expect(targets.build.dependsOn).not.toContain('trivy');
 
-    expect(targets['service-trivy'].cache).toBe(false);
-    expect(targets['service-trivy'].dependsOn).toEqual(['service-docker']);
-    expect(targets.trivy.dependsOn).toContain('service-trivy');
+    expect(targets['container-trivy'].cache).toBe(false);
+    expect(targets['container-trivy'].dependsOn).toEqual(['container-docker']);
+    expect(targets.trivy.dependsOn).toContain('container-trivy');
   });
 
   // The clients the connection generators vend branch on LOCAL_DEV, so
@@ -229,7 +229,7 @@ describe('py#container generator', () => {
   it('should set LOCAL_DEV in the serve target', async () => {
     await pyContainerGenerator(tree, { project: PROJECT, iac: 'cdk' });
 
-    expect(readProject(tree).targets['service-serve'].options.env).toEqual(
+    expect(readProject(tree).targets['container-serve'].options.env).toEqual(
       expect.objectContaining({ LOCAL_DEV: 'true' }),
     );
   });
@@ -340,11 +340,11 @@ describe('py#container generator', () => {
 
   describe('dispatcher options', () => {
     const expected = {
-      nameClassName: 'MyProjService',
-      nameKebabCase: 'my-proj-service',
+      nameClassName: 'MyProjContainer',
+      nameKebabCase: 'my-proj-container',
       projectName: PROJECT,
-      dockerImageTag: 'proj-my-proj-service:latest',
-      dockerBuildContextDir: 'dist/packages/my_proj/docker/my-proj-service',
+      dockerImageTag: 'proj-my-proj-container:latest',
+      dockerBuildContextDir: 'dist/packages/my_proj/docker/my-proj-container',
       containerPort: CONTAINER_PORT,
       healthCheckCommand: [
         'CMD',
@@ -380,10 +380,10 @@ describe('py#container generator', () => {
     await pyContainerGenerator(tree, { project: PROJECT, iac: 'cdk' });
     const { targets } = readProject(tree);
 
-    expect(targets['service-docker'].options.commands.at(-1)).toMatch(
+    expect(targets['container-docker'].options.commands.at(-1)).toMatch(
       /^finch build --platform linux\/arm64 /,
     );
-    const trivy: string[] = targets['service-trivy'].options.commands;
+    const trivy: string[] = targets['container-trivy'].options.commands;
     expect(trivy.some((c) => c.startsWith('finch save '))).toBe(true);
     expect(trivy.some((c) => c.startsWith('finch run '))).toBe(true);
     expect(addContainerServiceCdkConstructs).toHaveBeenCalledWith(
@@ -435,11 +435,11 @@ describe('py#container generator', () => {
     expect(components(tree)).toEqual([
       {
         generator: PY_CONTAINER_GENERATOR_INFO.id,
-        path: 'proj_my_proj/service',
-        name: 'service',
+        path: 'proj_my_proj/container',
+        name: 'container',
         infra: 'ecs',
         port: 8081,
-        rc: 'MyProjService',
+        rc: 'MyProjContainer',
         iac: 'cdk',
       },
     ]);

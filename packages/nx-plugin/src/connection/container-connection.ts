@@ -116,7 +116,7 @@ export const containerServiceNames = (
     nameKebabCase,
     moduleName: snakeCase(nameKebabCase),
     variableName: camelCase(nameClassName),
-    prefix: component.name ?? 'service',
+    prefix: component.name ?? 'container',
     port: component.port,
     iac: component.iac,
     sourceDir: joinPathFragments(project.root, component.path ?? ''),

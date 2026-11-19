@@ -103,12 +103,12 @@ export const tsContainerGenerator = async (
     );
   }
 
-  // Same naming as ts#agent: an unnamed service is `<project>-service` for
-  // resource and class names, and `service` for targets and the source folder.
+  // Same naming as ts#agent: an unnamed service is `<project>-container` for
+  // resource and class names, and `container` for targets and the source folder.
   const name = kebabCase(
-    options.name || `${kebabCase(project.name.split('/').pop())}-service`,
+    options.name || `${kebabCase(project.name.split('/').pop())}-container`,
   );
-  const targetPrefix = options.name ? name : 'service';
+  const targetPrefix = options.name ? name : 'container';
   const nameClassName = toClassName(name);
   const sourceDirRelativeToProjectRoot = joinPathFragments('src', targetPrefix);
   const sourceDir = joinPathFragments(

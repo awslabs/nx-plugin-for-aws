@@ -33,7 +33,7 @@ exports[`py#container generator > snapshots > should vend the service with infra
 "
 `;
 
-exports[`py#container generator > snapshots > should vend the service with infra=ecs and iac=cdk > packages/my_proj/proj_my_proj/service/.dockerignore 1`] = `
+exports[`py#container generator > snapshots > should vend the service with infra=ecs and iac=cdk > packages/my_proj/proj_my_proj/container/.dockerignore 1`] = `
 "Dockerfile
 .dockerignore
 requirements.txt
@@ -42,9 +42,9 @@ requirements.txt
 "
 `;
 
-exports[`py#container generator > snapshots > should vend the service with infra=ecs and iac=cdk > packages/my_proj/proj_my_proj/service/__init__.py 1`] = `""`;
+exports[`py#container generator > snapshots > should vend the service with infra=ecs and iac=cdk > packages/my_proj/proj_my_proj/container/__init__.py 1`] = `""`;
 
-exports[`py#container generator > snapshots > should vend the service with infra=ecs and iac=cdk > packages/my_proj/proj_my_proj/service/Dockerfile 1`] = `
+exports[`py#container generator > snapshots > should vend the service with infra=ecs and iac=cdk > packages/my_proj/proj_my_proj/container/Dockerfile 1`] = `
 "FROM public.ecr.aws/docker/library/python:3.14-slim
 
 # Apply the distribution's security updates: base image tags lag behind the
@@ -82,11 +82,11 @@ EXPOSE 8080
 
 USER 1000:1000
 
-CMD ["python", "-m", "proj_my_proj.service.main"]
+CMD ["python", "-m", "proj_my_proj.container.main"]
 "
 `;
 
-exports[`py#container generator > snapshots > should vend the service with infra=ecs and iac=cdk > packages/my_proj/proj_my_proj/service/main.py 1`] = `
+exports[`py#container generator > snapshots > should vend the service with infra=ecs and iac=cdk > packages/my_proj/proj_my_proj/container/main.py 1`] = `
 "import os
 from typing import Annotated
 
@@ -94,7 +94,7 @@ import uvicorn
 from fastapi import FastAPI, Query
 from pydantic import BaseModel
 
-app = FastAPI(title="MyProjService")
+app = FastAPI(title="MyProjContainer")
 
 
 class HealthOutput(BaseModel):
@@ -138,11 +138,11 @@ exports[`py#container generator > snapshots > should vend the service with infra
     "components": [
       {
         "generator": "py#container",
-        "path": "proj_my_proj/service",
-        "name": "service",
+        "path": "proj_my_proj/container",
+        "name": "container",
         "infra": "ecs",
         "port": 8081,
-        "rc": "MyProjService",
+        "rc": "MyProjContainer",
         "iac": "cdk"
       }
     ]
@@ -202,8 +202,54 @@ exports[`py#container generator > snapshots > should vend the service with infra
         ]
       }
     },
+    "container-docker": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["bundle-arm"],
+      "cache": false,
+      "options": {
+        "commands": [
+          "shx rm -rf dist/packages/my_proj/docker/my-proj-container",
+          "shx mkdir -p dist/packages/my_proj/docker/my-proj-container",
+          "shx cp -R dist/packages/my_proj/bundle-arm/. dist/packages/my_proj/docker/my-proj-container",
+          "shx cp packages/my_proj/proj_my_proj/container/Dockerfile dist/packages/my_proj/docker/my-proj-container/Dockerfile",
+          "shx cp packages/my_proj/proj_my_proj/container/.dockerignore dist/packages/my_proj/docker/my-proj-container/.dockerignore",
+          "docker build --platform linux/arm64 -t proj-my-proj-container:latest dist/packages/my_proj/docker/my-proj-container"
+        ],
+        "parallel": false
+      }
+    },
+    "container-serve": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "options": {
+        "commands": ["uv run python -m proj_my_proj.container.main"],
+        "cwd": "{projectRoot}",
+        "env": {
+          "PORT": "8081",
+          "LOCAL_DEV": "true"
+        }
+      }
+    },
+    "container-trivy": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["container-docker"],
+      "cache": false,
+      "outputs": [
+        "{workspaceRoot}/dist/packages/my_proj/trivy/proj-my-proj-container-latest"
+      ],
+      "options": {
+        "commands": [
+          "shx rm -rf dist/packages/my_proj/trivy/proj-my-proj-container-latest",
+          "shx mkdir -p dist/packages/my_proj/trivy/proj-my-proj-container-latest",
+          "shx cp packages/my_proj/.trivyignore dist/packages/my_proj/trivy/proj-my-proj-container-latest/.trivyignore",
+          "docker save -o dist/packages/my_proj/trivy/proj-my-proj-container-latest/image-0.tar proj-my-proj-container:latest",
+          "docker run --rm -v \\"./dist/packages/my_proj/trivy/proj-my-proj-container-latest\\":/scan public.ecr.aws/aquasecurity/trivy:0.72.0 image --input /scan/image-0.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q"
+        ],
+        "parallel": false
+      }
+    },
     "docker": {
-      "dependsOn": ["service-docker"]
+      "dependsOn": ["container-docker"]
     },
     "format": {
       "executor": "@nxlv/python:ruff-format",
@@ -260,52 +306,6 @@ exports[`py#container generator > snapshots > should vend the service with infra
       "executor": "@nxlv/python:remove",
       "options": {}
     },
-    "service-docker": {
-      "executor": "nx:run-commands",
-      "dependsOn": ["bundle-arm"],
-      "cache": false,
-      "options": {
-        "commands": [
-          "shx rm -rf dist/packages/my_proj/docker/my-proj-service",
-          "shx mkdir -p dist/packages/my_proj/docker/my-proj-service",
-          "shx cp -R dist/packages/my_proj/bundle-arm/. dist/packages/my_proj/docker/my-proj-service",
-          "shx cp packages/my_proj/proj_my_proj/service/Dockerfile dist/packages/my_proj/docker/my-proj-service/Dockerfile",
-          "shx cp packages/my_proj/proj_my_proj/service/.dockerignore dist/packages/my_proj/docker/my-proj-service/.dockerignore",
-          "docker build --platform linux/arm64 -t proj-my-proj-service:latest dist/packages/my_proj/docker/my-proj-service"
-        ],
-        "parallel": false
-      }
-    },
-    "service-serve": {
-      "executor": "nx:run-commands",
-      "continuous": true,
-      "options": {
-        "commands": ["uv run python -m proj_my_proj.service.main"],
-        "cwd": "{projectRoot}",
-        "env": {
-          "PORT": "8081",
-          "LOCAL_DEV": "true"
-        }
-      }
-    },
-    "service-trivy": {
-      "executor": "nx:run-commands",
-      "dependsOn": ["service-docker"],
-      "cache": false,
-      "outputs": [
-        "{workspaceRoot}/dist/packages/my_proj/trivy/proj-my-proj-service-latest"
-      ],
-      "options": {
-        "commands": [
-          "shx rm -rf dist/packages/my_proj/trivy/proj-my-proj-service-latest",
-          "shx mkdir -p dist/packages/my_proj/trivy/proj-my-proj-service-latest",
-          "shx cp packages/my_proj/.trivyignore dist/packages/my_proj/trivy/proj-my-proj-service-latest/.trivyignore",
-          "docker save -o dist/packages/my_proj/trivy/proj-my-proj-service-latest/image-0.tar proj-my-proj-service:latest",
-          "docker run --rm -v \\"./dist/packages/my_proj/trivy/proj-my-proj-service-latest\\":/scan public.ecr.aws/aquasecurity/trivy:0.72.0 image --input /scan/image-0.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q"
-        ],
-        "parallel": false
-      }
-    },
     "sync": {
       "executor": "@nxlv/python:sync",
       "options": {}
@@ -323,7 +323,7 @@ exports[`py#container generator > snapshots > should vend the service with infra
       }
     },
     "trivy": {
-      "dependsOn": ["service-trivy"]
+      "dependsOn": ["container-trivy"]
     },
     "typecheck": {
       "cache": true,
@@ -420,7 +420,7 @@ exports[`py#container generator > snapshots > should vend the service with infra
   "packages/common/constructs/project.json",
   "packages/common/constructs/src/app/index.ts",
   "packages/common/constructs/src/app/services/index.ts",
-  "packages/common/constructs/src/app/services/my-proj-service.ts",
+  "packages/common/constructs/src/app/services/my-proj-container.ts",
   "packages/common/constructs/src/core/app.ts",
   "packages/common/constructs/src/core/checkov.ts",
   "packages/common/constructs/src/core/cloudfront.ts",
@@ -439,10 +439,10 @@ exports[`py#container generator > snapshots > should vend the service with infra
   "packages/my_proj/.trivyignore",
   "packages/my_proj/README.md",
   "packages/my_proj/proj_my_proj/__init__.py",
-  "packages/my_proj/proj_my_proj/service/.dockerignore",
-  "packages/my_proj/proj_my_proj/service/Dockerfile",
-  "packages/my_proj/proj_my_proj/service/__init__.py",
-  "packages/my_proj/proj_my_proj/service/main.py",
+  "packages/my_proj/proj_my_proj/container/.dockerignore",
+  "packages/my_proj/proj_my_proj/container/Dockerfile",
+  "packages/my_proj/proj_my_proj/container/__init__.py",
+  "packages/my_proj/proj_my_proj/container/main.py",
   "packages/my_proj/project.json",
   "packages/my_proj/pyproject.toml",
   "packages/my_proj/tests/__init__.py",
@@ -489,7 +489,7 @@ exports[`py#container generator > snapshots > should vend the service with infra
 "
 `;
 
-exports[`py#container generator > snapshots > should vend the service with infra=ecs and iac=terraform > packages/my_proj/proj_my_proj/service/.dockerignore 1`] = `
+exports[`py#container generator > snapshots > should vend the service with infra=ecs and iac=terraform > packages/my_proj/proj_my_proj/container/.dockerignore 1`] = `
 "Dockerfile
 .dockerignore
 requirements.txt
@@ -498,9 +498,9 @@ requirements.txt
 "
 `;
 
-exports[`py#container generator > snapshots > should vend the service with infra=ecs and iac=terraform > packages/my_proj/proj_my_proj/service/__init__.py 1`] = `""`;
+exports[`py#container generator > snapshots > should vend the service with infra=ecs and iac=terraform > packages/my_proj/proj_my_proj/container/__init__.py 1`] = `""`;
 
-exports[`py#container generator > snapshots > should vend the service with infra=ecs and iac=terraform > packages/my_proj/proj_my_proj/service/Dockerfile 1`] = `
+exports[`py#container generator > snapshots > should vend the service with infra=ecs and iac=terraform > packages/my_proj/proj_my_proj/container/Dockerfile 1`] = `
 "FROM public.ecr.aws/docker/library/python:3.14-slim
 
 # Apply the distribution's security updates: base image tags lag behind the
@@ -538,11 +538,11 @@ EXPOSE 8080
 
 USER 1000:1000
 
-CMD ["python", "-m", "proj_my_proj.service.main"]
+CMD ["python", "-m", "proj_my_proj.container.main"]
 "
 `;
 
-exports[`py#container generator > snapshots > should vend the service with infra=ecs and iac=terraform > packages/my_proj/proj_my_proj/service/main.py 1`] = `
+exports[`py#container generator > snapshots > should vend the service with infra=ecs and iac=terraform > packages/my_proj/proj_my_proj/container/main.py 1`] = `
 "import os
 from typing import Annotated
 
@@ -550,7 +550,7 @@ import uvicorn
 from fastapi import FastAPI, Query
 from pydantic import BaseModel
 
-app = FastAPI(title="MyProjService")
+app = FastAPI(title="MyProjContainer")
 
 
 class HealthOutput(BaseModel):
@@ -594,11 +594,11 @@ exports[`py#container generator > snapshots > should vend the service with infra
     "components": [
       {
         "generator": "py#container",
-        "path": "proj_my_proj/service",
-        "name": "service",
+        "path": "proj_my_proj/container",
+        "name": "container",
         "infra": "ecs",
         "port": 8081,
-        "rc": "MyProjService",
+        "rc": "MyProjContainer",
         "iac": "terraform"
       }
     ]
@@ -658,8 +658,54 @@ exports[`py#container generator > snapshots > should vend the service with infra
         ]
       }
     },
+    "container-docker": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["bundle-arm"],
+      "cache": false,
+      "options": {
+        "commands": [
+          "shx rm -rf dist/packages/my_proj/docker/my-proj-container",
+          "shx mkdir -p dist/packages/my_proj/docker/my-proj-container",
+          "shx cp -R dist/packages/my_proj/bundle-arm/. dist/packages/my_proj/docker/my-proj-container",
+          "shx cp packages/my_proj/proj_my_proj/container/Dockerfile dist/packages/my_proj/docker/my-proj-container/Dockerfile",
+          "shx cp packages/my_proj/proj_my_proj/container/.dockerignore dist/packages/my_proj/docker/my-proj-container/.dockerignore",
+          "docker build --platform linux/arm64 -t proj-my-proj-container:latest dist/packages/my_proj/docker/my-proj-container"
+        ],
+        "parallel": false
+      }
+    },
+    "container-serve": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "options": {
+        "commands": ["uv run python -m proj_my_proj.container.main"],
+        "cwd": "{projectRoot}",
+        "env": {
+          "PORT": "8081",
+          "LOCAL_DEV": "true"
+        }
+      }
+    },
+    "container-trivy": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["container-docker"],
+      "cache": false,
+      "outputs": [
+        "{workspaceRoot}/dist/packages/my_proj/trivy/proj-my-proj-container-latest"
+      ],
+      "options": {
+        "commands": [
+          "shx rm -rf dist/packages/my_proj/trivy/proj-my-proj-container-latest",
+          "shx mkdir -p dist/packages/my_proj/trivy/proj-my-proj-container-latest",
+          "shx cp packages/my_proj/.trivyignore dist/packages/my_proj/trivy/proj-my-proj-container-latest/.trivyignore",
+          "docker save -o dist/packages/my_proj/trivy/proj-my-proj-container-latest/image-0.tar proj-my-proj-container:latest",
+          "docker run --rm -v \\"./dist/packages/my_proj/trivy/proj-my-proj-container-latest\\":/scan public.ecr.aws/aquasecurity/trivy:0.72.0 image --input /scan/image-0.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q"
+        ],
+        "parallel": false
+      }
+    },
     "docker": {
-      "dependsOn": ["service-docker"]
+      "dependsOn": ["container-docker"]
     },
     "format": {
       "executor": "@nxlv/python:ruff-format",
@@ -716,52 +762,6 @@ exports[`py#container generator > snapshots > should vend the service with infra
       "executor": "@nxlv/python:remove",
       "options": {}
     },
-    "service-docker": {
-      "executor": "nx:run-commands",
-      "dependsOn": ["bundle-arm"],
-      "cache": false,
-      "options": {
-        "commands": [
-          "shx rm -rf dist/packages/my_proj/docker/my-proj-service",
-          "shx mkdir -p dist/packages/my_proj/docker/my-proj-service",
-          "shx cp -R dist/packages/my_proj/bundle-arm/. dist/packages/my_proj/docker/my-proj-service",
-          "shx cp packages/my_proj/proj_my_proj/service/Dockerfile dist/packages/my_proj/docker/my-proj-service/Dockerfile",
-          "shx cp packages/my_proj/proj_my_proj/service/.dockerignore dist/packages/my_proj/docker/my-proj-service/.dockerignore",
-          "docker build --platform linux/arm64 -t proj-my-proj-service:latest dist/packages/my_proj/docker/my-proj-service"
-        ],
-        "parallel": false
-      }
-    },
-    "service-serve": {
-      "executor": "nx:run-commands",
-      "continuous": true,
-      "options": {
-        "commands": ["uv run python -m proj_my_proj.service.main"],
-        "cwd": "{projectRoot}",
-        "env": {
-          "PORT": "8081",
-          "LOCAL_DEV": "true"
-        }
-      }
-    },
-    "service-trivy": {
-      "executor": "nx:run-commands",
-      "dependsOn": ["service-docker"],
-      "cache": false,
-      "outputs": [
-        "{workspaceRoot}/dist/packages/my_proj/trivy/proj-my-proj-service-latest"
-      ],
-      "options": {
-        "commands": [
-          "shx rm -rf dist/packages/my_proj/trivy/proj-my-proj-service-latest",
-          "shx mkdir -p dist/packages/my_proj/trivy/proj-my-proj-service-latest",
-          "shx cp packages/my_proj/.trivyignore dist/packages/my_proj/trivy/proj-my-proj-service-latest/.trivyignore",
-          "docker save -o dist/packages/my_proj/trivy/proj-my-proj-service-latest/image-0.tar proj-my-proj-service:latest",
-          "docker run --rm -v \\"./dist/packages/my_proj/trivy/proj-my-proj-service-latest\\":/scan public.ecr.aws/aquasecurity/trivy:0.72.0 image --input /scan/image-0.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q"
-        ],
-        "parallel": false
-      }
-    },
     "sync": {
       "executor": "@nxlv/python:sync",
       "options": {}
@@ -779,7 +779,7 @@ exports[`py#container generator > snapshots > should vend the service with infra
       }
     },
     "trivy": {
-      "dependsOn": ["service-trivy"]
+      "dependsOn": ["container-trivy"]
     },
     "typecheck": {
       "cache": true,
@@ -873,7 +873,7 @@ exports[`py#container generator > snapshots > should vend the service with infra
   "package.json",
   "packages/common/terraform/checkov.yml",
   "packages/common/terraform/project.json",
-  "packages/common/terraform/src/app/services/my-proj-service/my-proj-service.tf",
+  "packages/common/terraform/src/app/services/my-proj-container/my-proj-container.tf",
   "packages/common/terraform/src/core/asset-bucket/asset-bucket.tf",
   "packages/common/terraform/src/core/asset-ecr/asset-ecr.tf",
   "packages/common/terraform/src/core/container/ecs-service/ecs-service.tf",
@@ -890,10 +890,10 @@ exports[`py#container generator > snapshots > should vend the service with infra
   "packages/my_proj/.trivyignore",
   "packages/my_proj/README.md",
   "packages/my_proj/proj_my_proj/__init__.py",
-  "packages/my_proj/proj_my_proj/service/.dockerignore",
-  "packages/my_proj/proj_my_proj/service/Dockerfile",
-  "packages/my_proj/proj_my_proj/service/__init__.py",
-  "packages/my_proj/proj_my_proj/service/main.py",
+  "packages/my_proj/proj_my_proj/container/.dockerignore",
+  "packages/my_proj/proj_my_proj/container/Dockerfile",
+  "packages/my_proj/proj_my_proj/container/__init__.py",
+  "packages/my_proj/proj_my_proj/container/main.py",
   "packages/my_proj/project.json",
   "packages/my_proj/pyproject.toml",
   "packages/my_proj/tests/__init__.py",
@@ -939,7 +939,7 @@ exports[`py#container generator > snapshots > should vend the service with infra
 "
 `;
 
-exports[`py#container generator > snapshots > should vend the service with infra=none > packages/my_proj/proj_my_proj/service/.dockerignore 1`] = `
+exports[`py#container generator > snapshots > should vend the service with infra=none > packages/my_proj/proj_my_proj/container/.dockerignore 1`] = `
 "Dockerfile
 .dockerignore
 requirements.txt
@@ -948,9 +948,9 @@ requirements.txt
 "
 `;
 
-exports[`py#container generator > snapshots > should vend the service with infra=none > packages/my_proj/proj_my_proj/service/__init__.py 1`] = `""`;
+exports[`py#container generator > snapshots > should vend the service with infra=none > packages/my_proj/proj_my_proj/container/__init__.py 1`] = `""`;
 
-exports[`py#container generator > snapshots > should vend the service with infra=none > packages/my_proj/proj_my_proj/service/Dockerfile 1`] = `
+exports[`py#container generator > snapshots > should vend the service with infra=none > packages/my_proj/proj_my_proj/container/Dockerfile 1`] = `
 "FROM public.ecr.aws/docker/library/python:3.14-slim
 
 # Apply the distribution's security updates: base image tags lag behind the
@@ -988,11 +988,11 @@ EXPOSE 8080
 
 USER 1000:1000
 
-CMD ["python", "-m", "proj_my_proj.service.main"]
+CMD ["python", "-m", "proj_my_proj.container.main"]
 "
 `;
 
-exports[`py#container generator > snapshots > should vend the service with infra=none > packages/my_proj/proj_my_proj/service/main.py 1`] = `
+exports[`py#container generator > snapshots > should vend the service with infra=none > packages/my_proj/proj_my_proj/container/main.py 1`] = `
 "import os
 from typing import Annotated
 
@@ -1000,7 +1000,7 @@ import uvicorn
 from fastapi import FastAPI, Query
 from pydantic import BaseModel
 
-app = FastAPI(title="MyProjService")
+app = FastAPI(title="MyProjContainer")
 
 
 class HealthOutput(BaseModel):
@@ -1044,11 +1044,11 @@ exports[`py#container generator > snapshots > should vend the service with infra
     "components": [
       {
         "generator": "py#container",
-        "path": "proj_my_proj/service",
-        "name": "service",
+        "path": "proj_my_proj/container",
+        "name": "container",
         "infra": "none",
         "port": 8081,
-        "rc": "MyProjService"
+        "rc": "MyProjContainer"
       }
     ]
   },
@@ -1107,8 +1107,54 @@ exports[`py#container generator > snapshots > should vend the service with infra
         ]
       }
     },
+    "container-docker": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["bundle-arm"],
+      "cache": false,
+      "options": {
+        "commands": [
+          "shx rm -rf dist/packages/my_proj/docker/my-proj-container",
+          "shx mkdir -p dist/packages/my_proj/docker/my-proj-container",
+          "shx cp -R dist/packages/my_proj/bundle-arm/. dist/packages/my_proj/docker/my-proj-container",
+          "shx cp packages/my_proj/proj_my_proj/container/Dockerfile dist/packages/my_proj/docker/my-proj-container/Dockerfile",
+          "shx cp packages/my_proj/proj_my_proj/container/.dockerignore dist/packages/my_proj/docker/my-proj-container/.dockerignore",
+          "docker build --platform linux/arm64 -t proj-my-proj-container:latest dist/packages/my_proj/docker/my-proj-container"
+        ],
+        "parallel": false
+      }
+    },
+    "container-serve": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "options": {
+        "commands": ["uv run python -m proj_my_proj.container.main"],
+        "cwd": "{projectRoot}",
+        "env": {
+          "PORT": "8081",
+          "LOCAL_DEV": "true"
+        }
+      }
+    },
+    "container-trivy": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["container-docker"],
+      "cache": false,
+      "outputs": [
+        "{workspaceRoot}/dist/packages/my_proj/trivy/proj-my-proj-container-latest"
+      ],
+      "options": {
+        "commands": [
+          "shx rm -rf dist/packages/my_proj/trivy/proj-my-proj-container-latest",
+          "shx mkdir -p dist/packages/my_proj/trivy/proj-my-proj-container-latest",
+          "shx cp packages/my_proj/.trivyignore dist/packages/my_proj/trivy/proj-my-proj-container-latest/.trivyignore",
+          "docker save -o dist/packages/my_proj/trivy/proj-my-proj-container-latest/image-0.tar proj-my-proj-container:latest",
+          "docker run --rm -v \\"./dist/packages/my_proj/trivy/proj-my-proj-container-latest\\":/scan public.ecr.aws/aquasecurity/trivy:0.72.0 image --input /scan/image-0.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q"
+        ],
+        "parallel": false
+      }
+    },
     "docker": {
-      "dependsOn": ["service-docker"]
+      "dependsOn": ["container-docker"]
     },
     "format": {
       "executor": "@nxlv/python:ruff-format",
@@ -1165,52 +1211,6 @@ exports[`py#container generator > snapshots > should vend the service with infra
       "executor": "@nxlv/python:remove",
       "options": {}
     },
-    "service-docker": {
-      "executor": "nx:run-commands",
-      "dependsOn": ["bundle-arm"],
-      "cache": false,
-      "options": {
-        "commands": [
-          "shx rm -rf dist/packages/my_proj/docker/my-proj-service",
-          "shx mkdir -p dist/packages/my_proj/docker/my-proj-service",
-          "shx cp -R dist/packages/my_proj/bundle-arm/. dist/packages/my_proj/docker/my-proj-service",
-          "shx cp packages/my_proj/proj_my_proj/service/Dockerfile dist/packages/my_proj/docker/my-proj-service/Dockerfile",
-          "shx cp packages/my_proj/proj_my_proj/service/.dockerignore dist/packages/my_proj/docker/my-proj-service/.dockerignore",
-          "docker build --platform linux/arm64 -t proj-my-proj-service:latest dist/packages/my_proj/docker/my-proj-service"
-        ],
-        "parallel": false
-      }
-    },
-    "service-serve": {
-      "executor": "nx:run-commands",
-      "continuous": true,
-      "options": {
-        "commands": ["uv run python -m proj_my_proj.service.main"],
-        "cwd": "{projectRoot}",
-        "env": {
-          "PORT": "8081",
-          "LOCAL_DEV": "true"
-        }
-      }
-    },
-    "service-trivy": {
-      "executor": "nx:run-commands",
-      "dependsOn": ["service-docker"],
-      "cache": false,
-      "outputs": [
-        "{workspaceRoot}/dist/packages/my_proj/trivy/proj-my-proj-service-latest"
-      ],
-      "options": {
-        "commands": [
-          "shx rm -rf dist/packages/my_proj/trivy/proj-my-proj-service-latest",
-          "shx mkdir -p dist/packages/my_proj/trivy/proj-my-proj-service-latest",
-          "shx cp packages/my_proj/.trivyignore dist/packages/my_proj/trivy/proj-my-proj-service-latest/.trivyignore",
-          "docker save -o dist/packages/my_proj/trivy/proj-my-proj-service-latest/image-0.tar proj-my-proj-service:latest",
-          "docker run --rm -v \\"./dist/packages/my_proj/trivy/proj-my-proj-service-latest\\":/scan public.ecr.aws/aquasecurity/trivy:0.72.0 image --input /scan/image-0.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q"
-        ],
-        "parallel": false
-      }
-    },
     "sync": {
       "executor": "@nxlv/python:sync",
       "options": {}
@@ -1228,7 +1228,7 @@ exports[`py#container generator > snapshots > should vend the service with infra
       }
     },
     "trivy": {
-      "dependsOn": ["service-trivy"]
+      "dependsOn": ["container-trivy"]
     },
     "typecheck": {
       "cache": true,
@@ -1325,10 +1325,10 @@ exports[`py#container generator > snapshots > should vend the service with infra
   "packages/my_proj/.trivyignore",
   "packages/my_proj/README.md",
   "packages/my_proj/proj_my_proj/__init__.py",
-  "packages/my_proj/proj_my_proj/service/.dockerignore",
-  "packages/my_proj/proj_my_proj/service/Dockerfile",
-  "packages/my_proj/proj_my_proj/service/__init__.py",
-  "packages/my_proj/proj_my_proj/service/main.py",
+  "packages/my_proj/proj_my_proj/container/.dockerignore",
+  "packages/my_proj/proj_my_proj/container/Dockerfile",
+  "packages/my_proj/proj_my_proj/container/__init__.py",
+  "packages/my_proj/proj_my_proj/container/main.py",
   "packages/my_proj/project.json",
   "packages/my_proj/pyproject.toml",
   "packages/my_proj/tests/__init__.py",

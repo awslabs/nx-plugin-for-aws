@@ -174,14 +174,14 @@ describe('containerServiceNames', () => {
     expect(
       containerServiceNames(
         { root: 'packages/svc' },
-        container({ rc: 'MyProjectService', name: 'service', port: 8090 }),
+        container({ rc: 'MyProjectContainer', name: 'container', port: 8090 }),
       ),
     ).toEqual({
-      nameClassName: 'MyProjectService',
-      nameKebabCase: 'my-project-service',
-      moduleName: 'my_project_service',
-      variableName: 'myProjectService',
-      prefix: 'service',
+      nameClassName: 'MyProjectContainer',
+      nameKebabCase: 'my-project-container',
+      moduleName: 'my_project_container',
+      variableName: 'myProjectContainer',
+      prefix: 'container',
       port: 8090,
       iac: 'cdk',
       sourceDir: 'packages/svc/src/orders',

@@ -104,15 +104,15 @@ export const pyContainerGenerator = async (
     );
   }
 
-  // Same naming as py#agent: an unnamed service is `<project>-service` for
-  // resource and class names, and `service` for targets; the source folder is
+  // Same naming as py#agent: an unnamed service is `<project>-container` for
+  // resource and class names, and `container` for targets; the source folder is
   // the snake_case name inside the project's module.
   const name = kebabCase(
-    options.name || `${kebabCase(project.name.split('.').pop())}-service`,
+    options.name || `${kebabCase(project.name.split('.').pop())}-container`,
   );
-  const targetPrefix = options.name ? name : 'service';
+  const targetPrefix = options.name ? name : 'container';
   const nameClassName = toClassName(name);
-  const nameSnakeCase = toSnakeCase(options.name || 'service');
+  const nameSnakeCase = toSnakeCase(options.name || 'container');
   const sourceDir = joinPathFragments(project.sourceRoot, nameSnakeCase);
   const moduleName = project.sourceRoot.split('/').pop();
 

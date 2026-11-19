@@ -37,11 +37,11 @@ const sharedConstructsDeclaration = declareDependencies()({
 });
 
 const PROJECT_ROOT = 'apps/test-project';
-const SERVICE_DIR = `${PROJECT_ROOT}/src/service`;
+const CONTAINER_DIR = `${PROJECT_ROOT}/src/container`;
 const CONSTRUCTS_SRC = 'packages/common/constructs/src';
-const SERVICE_FILE = `${CONSTRUCTS_SRC}/app/services/test-project-service.ts`;
+const SERVICE_FILE = `${CONSTRUCTS_SRC}/app/services/test-project-container.ts`;
 const BUNDLE_DIR =
-  'dist/apps/test-project/bundle/container/test-project-service';
+  'dist/apps/test-project/bundle/container/test-project-container';
 
 const readProject = (tree: Tree, root = PROJECT_ROOT) =>
   readJson(tree, `${root}/project.json`);
@@ -114,18 +114,18 @@ describe('ts#container generator', () => {
       'Dockerfile',
       '.dockerignore',
     ]) {
-      expect(tree.exists(`${SERVICE_DIR}/${file}`)).toBe(true);
+      expect(tree.exists(`${CONTAINER_DIR}/${file}`)).toBe(true);
     }
     expect(tree.exists(`${PROJECT_ROOT}/.trivyignore`)).toBe(true);
     const rolldownConfig = tree.read(
       `${PROJECT_ROOT}/rolldown.config.ts`,
       'utf-8',
     );
-    expect(rolldownConfig).toContain("input: 'src/service/index.ts'");
+    expect(rolldownConfig).toContain("input: 'src/container/index.ts'");
     expect(rolldownConfig).toContain(
-      '../../dist/apps/test-project/bundle/container/test-project-service/index.js',
+      '../../dist/apps/test-project/bundle/container/test-project-container/index.js',
     );
-    expect(tree.read(`${SERVICE_DIR}/.dockerignore`, 'utf-8')).toBe(
+    expect(tree.read(`${CONTAINER_DIR}/.dockerignore`, 'utf-8')).toBe(
       '*\n!index.js\n',
     );
   });
@@ -134,15 +134,15 @@ describe('ts#container generator', () => {
     await run();
 
     new TypeScriptVerifier(['@types/node']).expectTypeScriptToCompile(tree, [
-      `${SERVICE_DIR}/server.ts`,
-      `${SERVICE_DIR}/index.ts`,
+      `${CONTAINER_DIR}/server.ts`,
+      `${CONTAINER_DIR}/index.ts`,
     ]);
   });
 
   it('should vend a hardened Dockerfile', async () => {
     await run();
 
-    const dockerfile = tree.read(`${SERVICE_DIR}/Dockerfile`, 'utf-8');
+    const dockerfile = tree.read(`${CONTAINER_DIR}/Dockerfile`, 'utf-8');
     expect(dockerfile).toMatch(new RegExp(`^FROM ${BASE_IMAGES.node}\n`));
     expect(dockerfile).toContain('apt-get upgrade');
     expect(dockerfile).toContain('npm uninstall -g npm');
@@ -156,9 +156,9 @@ describe('ts#container generator', () => {
   it('should keep the steps a connection inserts before EXPOSE running as root', async () => {
     await run();
 
-    const dockerfile = tree.read(`${SERVICE_DIR}/Dockerfile`, 'utf-8') ?? '';
-    injectRdsCaBundleIntoDockerfile(tree, `${SERVICE_DIR}/Dockerfile`);
-    const injected = tree.read(`${SERVICE_DIR}/Dockerfile`, 'utf-8') ?? '';
+    const dockerfile = tree.read(`${CONTAINER_DIR}/Dockerfile`, 'utf-8') ?? '';
+    injectRdsCaBundleIntoDockerfile(tree, `${CONTAINER_DIR}/Dockerfile`);
+    const injected = tree.read(`${CONTAINER_DIR}/Dockerfile`, 'utf-8') ?? '';
 
     expect(dockerfile.indexOf('EXPOSE 8080')).toBeLessThan(
       dockerfile.indexOf('USER node'),
@@ -174,37 +174,37 @@ describe('ts#container generator', () => {
 
     const { targets, metadata } = readProject(tree);
     expect(targets.bundle.dependsOn).toEqual(['compile']);
-    expect(targets['service-docker']).toEqual(
+    expect(targets['container-docker']).toEqual(
       expect.objectContaining({
         cache: false,
         dependsOn: ['bundle'],
       }),
     );
-    const commands: string[] = targets['service-docker'].options.commands;
+    const commands: string[] = targets['container-docker'].options.commands;
     expect(commands).toHaveLength(3);
-    expect(commands[0]).toContain(`${SERVICE_DIR}/Dockerfile`);
-    expect(commands[1]).toContain(`${SERVICE_DIR}/.dockerignore`);
+    expect(commands[0]).toContain(`${CONTAINER_DIR}/Dockerfile`);
+    expect(commands[1]).toContain(`${CONTAINER_DIR}/.dockerignore`);
     expect(commands[2]).toBe(
-      `docker build --platform linux/arm64 -t proj-test-project-service:latest ${BUNDLE_DIR}`,
+      `docker build --platform linux/arm64 -t proj-test-project-container:latest ${BUNDLE_DIR}`,
     );
-    expect(targets.docker.dependsOn).toContain('service-docker');
+    expect(targets.docker.dependsOn).toContain('container-docker');
     expect(targets.build.dependsOn).toContain('docker');
-    expect(targets['service-trivy'].dependsOn).toEqual(['service-docker']);
-    expect(targets.trivy.dependsOn).toContain('service-trivy');
+    expect(targets['container-trivy'].dependsOn).toEqual(['container-docker']);
+    expect(targets.trivy.dependsOn).toContain('container-trivy');
 
     const [component] = metadata.components;
-    expect(targets['service-serve']).toEqual({
+    expect(targets['container-serve']).toEqual({
       executor: 'nx:run-commands',
       continuous: true,
       options: {
-        commands: ['tsx --watch ./src/service/index.ts'],
+        commands: ['tsx --watch ./src/container/index.ts'],
         cwd: '{projectRoot}',
         env: { PORT: `${component.port}`, LOCAL_DEV: 'true' },
       },
     });
     expect(targets.dev).toEqual({
       continuous: true,
-      dependsOn: ['service-serve'],
+      dependsOn: ['container-serve'],
     });
   });
 
@@ -214,7 +214,7 @@ describe('ts#container generator', () => {
   it('should set LOCAL_DEV in the serve target', async () => {
     await run();
 
-    expect(readProject(tree).targets['service-serve'].options.env).toEqual(
+    expect(readProject(tree).targets['container-serve'].options.env).toEqual(
       expect.objectContaining({ LOCAL_DEV: 'true' }),
     );
   });
@@ -226,7 +226,7 @@ describe('ts#container generator', () => {
     for (const target of ['orders-docker', 'orders-trivy', 'orders-serve']) {
       expect(targets[target]).toBeDefined();
     }
-    expect(targets['service-docker']).toBeUndefined();
+    expect(targets['container-docker']).toBeUndefined();
     expect(tree.exists(`${PROJECT_ROOT}/src/orders/index.ts`)).toBe(true);
     expect(
       tree.read(`${CONSTRUCTS_SRC}/app/services/orders.ts`, 'utf-8'),
@@ -240,10 +240,10 @@ describe('ts#container generator', () => {
     await run();
 
     const { targets } = readProject(tree);
-    expect(targets['service-docker'].options.commands[2]).toMatch(
+    expect(targets['container-docker'].options.commands[2]).toMatch(
       /^finch build --platform linux\/arm64 /,
     );
-    expect(targets['service-trivy'].options.commands.join('\n')).toContain(
+    expect(targets['container-trivy'].options.commands.join('\n')).toContain(
       'finch save',
     );
   });
@@ -287,7 +287,7 @@ describe('ts#container generator', () => {
     const terraformSrc = 'packages/common/terraform/src';
     const appModule =
       tree.read(
-        `${terraformSrc}/app/services/test-project-service/test-project-service.tf`,
+        `${terraformSrc}/app/services/test-project-container/test-project-container.tf`,
         'utf-8',
       ) ?? '';
     expect(appModule).toMatch(
@@ -321,8 +321,8 @@ describe('ts#container generator', () => {
 
     expect(tree.exists(SERVICE_FILE)).toBe(false);
     expect(tree.exists('packages/common/constructs/project.json')).toBe(false);
-    expect(tree.exists(`${SERVICE_DIR}/Dockerfile`)).toBe(true);
-    expect(readProject(tree).targets['service-docker']).toBeDefined();
+    expect(tree.exists(`${CONTAINER_DIR}/Dockerfile`)).toBe(true);
+    expect(readProject(tree).targets['container-docker']).toBeDefined();
     const [component] = componentsOf(tree);
     expect(component.infra).toBe('none');
     expect(component).not.toHaveProperty('ingress');
@@ -355,7 +355,7 @@ describe('ts#container generator', () => {
     expect(components[0]).not.toHaveProperty('ingress');
     expect(components[0]).not.toHaveProperty('auth');
     expect(tree.read(`${CONSTRUCTS_SRC}/app/services/index.ts`, 'utf-8')).toBe(
-      "export * from './test-project-service.js';\n",
+      "export * from './test-project-container.js';\n",
     );
   });
 
@@ -380,22 +380,22 @@ describe('ts#container generator', () => {
     expect(allFiles(tree)).toEqual(before);
     const { targets } = readProject(tree);
     expect(
-      targets.docker.dependsOn.filter((t: string) => t === 'service-docker'),
+      targets.docker.dependsOn.filter((t: string) => t === 'container-docker'),
     ).toHaveLength(1);
     expect(
       tree
         .read(`${PROJECT_ROOT}/rolldown.config.ts`, 'utf-8')
-        ?.split("input: 'src/service/index.ts'"),
+        ?.split("input: 'src/container/index.ts'"),
     ).toHaveLength(2);
   });
 
   it('should keep a user edit to the server on re-run', async () => {
     await run();
-    tree.write(`${SERVICE_DIR}/server.ts`, '// edited by the user\n');
+    tree.write(`${CONTAINER_DIR}/server.ts`, '// edited by the user\n');
 
     await run();
 
-    expect(tree.read(`${SERVICE_DIR}/server.ts`, 'utf-8')).toBe(
+    expect(tree.read(`${CONTAINER_DIR}/server.ts`, 'utf-8')).toBe(
       '// edited by the user\n',
     );
   });
@@ -409,14 +409,14 @@ describe('ts#container generator', () => {
     expect(tree.read(SERVICE_FILE, 'utf-8')).toBe(firstServiceFile);
     const components = componentsOf(tree);
     expect(components.map((c: { name: string }) => c.name)).toEqual([
-      'service',
+      'container',
       'orders',
     ]);
     expect(components.map((c: { port: number }) => c.port)).toEqual([
       8081, 8082,
     ]);
     expect(readProject(tree).targets.dev.dependsOn).toEqual([
-      'service-serve',
+      'container-serve',
       'orders-serve',
     ]);
   });
