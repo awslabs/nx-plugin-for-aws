@@ -666,6 +666,17 @@ describe('EcsService synth', () => {
         expect(key.Properties.EnableKeyRotation).toBe(true);
       }
     });
+
+    // Parity with the Terraform module, which schedules the key for deletion.
+    // The key only encrypts the two log groups the stack also deletes, so
+    // retaining it would leave an orphaned customer-managed key per service.
+    it('should destroy the logs KMS key with the stack', () => {
+      const keys = out.ofType('AWS::KMS::Key');
+      expect(keys).toHaveLength(1);
+      const [[, key]] = keys;
+      expect(key.DeletionPolicy).toBe('Delete');
+      expect(key.UpdateReplacePolicy).toBe('Delete');
+    });
   });
 
   it('should pass the health check to the container', () => {

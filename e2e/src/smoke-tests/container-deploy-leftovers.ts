@@ -41,6 +41,8 @@ export interface DeployedResourceIds {
   dbClusterIds: string[];
   /** ARNs of Secrets Manager secrets (the Aurora admin secret). */
   secretIds: string[];
+  /** Ids or ARNs of customer-managed KMS keys (the container log keys). */
+  kmsKeyIds: string[];
 }
 
 export const emptyResourceIds = (): DeployedResourceIds => ({
@@ -49,6 +51,7 @@ export const emptyResourceIds = (): DeployedResourceIds => ({
   appConfigApplicationIds: [],
   dbClusterIds: [],
   secretIds: [],
+  kmsKeyIds: [],
 });
 
 /** The CloudFormation resource types whose physical id goes in each list. */
@@ -59,6 +62,7 @@ const CFN_RESOURCE_TYPES: Record<string, keyof DeployedResourceIds> = {
   'AWS::AppConfig::Application': 'appConfigApplicationIds',
   'AWS::RDS::DBCluster': 'dbClusterIds',
   'AWS::SecretsManager::Secret': 'secretIds',
+  'AWS::KMS::Key': 'kmsKeyIds',
 };
 
 const listCfnStackResources = async (cfn: CloudFormation, stackId: string) => {
@@ -173,9 +177,9 @@ export function findLeftoverTerraformState(infraSrcDir: string): string[] {
 type Existence = 'exists' | 'deleted' | `unknown: ${string}`;
 
 /**
- * Calls an AWS JSON-protocol `Describe*` action with SigV4. `ResourceNotFound`
- * means deleted; `isDeleting` lets a resource that is being deleted count as
- * deleted.
+ * Calls an AWS JSON-protocol `Describe*` action with SigV4. `notFoundError`
+ * names the error the service returns for a resource that is gone;
+ * `isDeleting` lets a resource that is being deleted count as deleted.
  */
 const describeJson = async (
   service: string,
@@ -183,6 +187,7 @@ const describeJson = async (
   contentType: string,
   body: Record<string, string>,
   isDeleting: (body: unknown) => boolean = () => false,
+  notFoundError = 'ResourceNotFoundException',
 ): Promise<Existence> => {
   const aws = await createAwsClient(service);
   const response = await aws.fetch(
@@ -197,7 +202,7 @@ const describeJson = async (
   if (response.status === 200) {
     return isDeleting(JSON.parse(text)) ? 'deleted' : 'exists';
   }
-  if (response.status === 400 && text.includes('ResourceNotFoundException')) {
+  if (response.status === 400 && text.includes(notFoundError)) {
     return 'deleted';
   }
   return `unknown: HTTP ${response.status} ${text.slice(0, 200)}`;
@@ -300,6 +305,22 @@ const probes = (ids: DeployedResourceIds) => {
           'application/x-amz-json-1.1',
           { SecretId: id },
           (body) => (body as { DeletedDate?: unknown }).DeletedDate != null,
+        ),
+    })),
+    // Only the keys the test's own stacks created, by physical id. CloudFormation
+    // deletes a KMS key by scheduling it, so PendingDeletion counts as deleted.
+    ...ids.kmsKeyIds.map((id) => ({
+      label: `KMS key ${id}`,
+      check: () =>
+        describeJson(
+          'kms',
+          'TrentService.DescribeKey',
+          'application/x-amz-json-1.1',
+          { KeyId: id },
+          (body) =>
+            (body as { KeyMetadata?: { KeyState?: string } }).KeyMetadata
+              ?.KeyState === 'PendingDeletion',
+          'NotFoundException',
         ),
     })),
   ];
