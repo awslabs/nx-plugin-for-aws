@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { stampMigrationsFile } from './stamp-migrations';
@@ -45,14 +45,13 @@ const RELEASE_TRAIN: 'rc' | 'stable' = 'stable';
  */
 const STABLE_PROMOTION_BUMP = 'major';
 
+/** Path to a package's built dist manifest. */
+const distManifest = (project: string): string =>
+  join(DIST, project.replace('@aws/', ''), 'package.json');
+
 /** Read a package's built dist manifest version. */
 const distVersion = (project: string): string =>
-  JSON.parse(
-    readFileSync(
-      join(DIST, project.replace('@aws/', ''), 'package.json'),
-      'utf-8',
-    ),
-  ).version;
+  JSON.parse(readFileSync(distManifest(project), 'utf-8')).version;
 
 /** Run a command, echoing its output; throws on a non-zero exit. */
 const run = (cmd: string, args: string[]): void => {
@@ -64,6 +63,26 @@ const currentTag = (): string =>
   execFileSync('git', ['describe', '--tags', '--abbrev=0'], {
     encoding: 'utf-8',
   }).trim();
+
+/**
+ * Report that the release stopped before publishing. A skipped release leaves a
+ * green job that published nothing, and the same unchanged version is also what
+ * a broken release looks like (tags not fetched, a release project missing from
+ * nx.json, a re-run of a job that already tagged). So in CI the message goes to
+ * the run page as an annotation and to the job summary as well as to the log,
+ * where a surprising skip would otherwise only be visible to someone who opens
+ * the step output.
+ */
+const reportSkippedRelease = (message: string): void => {
+  console.log(message);
+  if (process.env.GITHUB_ACTIONS === 'true' || process.env.CI === 'true') {
+    console.log(`::notice title=Release skipped::${message}`);
+  }
+  const summaryFile = process.env.GITHUB_STEP_SUMMARY;
+  if (summaryFile) {
+    appendFileSync(summaryFile, `${message}\n`);
+  }
+};
 
 /**
  * `nx release version` flags, from the release train (`RELEASE_TRAIN`) and the
@@ -131,7 +150,14 @@ const main = async (): Promise<void> => {
   if (!existsSync(PLUGIN_ROOT)) {
     throw new Error(`Run from the repo root — ${PLUGIN_ROOT} not found.`);
   }
+  const pluginManifest = distManifest(NX_PLUGIN_PACKAGE);
+  if (!existsSync(pluginManifest)) {
+    throw new Error(
+      `Build first — ${pluginManifest} not found; run \`pnpm package:all\`.`,
+    );
+  }
   const args = releaseArgs();
+  const tag = currentTag();
   const versionBeforeBump = distVersion(NX_PLUGIN_PACKAGE);
   // Write the pending version into the dist manifests only (no tag/commit), so
   // migrations can be stamped with it before the tag-and-changelog step resolves
@@ -151,9 +177,13 @@ const main = async (): Promise<void> => {
   // e2e, docs or CI passes the workflow's subject grep and reaches here. Nothing
   // a user installs changed, so stop before any side effect: publishing the
   // unbumped build fails on the version already on the registry.
-  if (version === versionBeforeBump) {
-    console.log(
-      `No releasable changes since ${currentTag()}; skipping publish.`,
+  //
+  // The second condition reads the same state without relying on nx leaving the
+  // manifest alone, which nx does not promise: a version equal to the tag's is
+  // already released, whether nx wrote it or left the build's version in place.
+  if (version === versionBeforeBump || version === tag.replace(/^v/, '')) {
+    reportSkippedRelease(
+      `No releasable changes since ${tag}; skipping publish.`,
     );
     return;
   }
