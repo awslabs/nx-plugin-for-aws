@@ -548,7 +548,9 @@ export const runWebsiteIntegrationTest = async (options: {
         return keys.every((k) => k in obj);
       },
       expectedKeys,
-      { timeout: 300_000 },
+      // Covers the retry budget of every connected API and agent (each
+      // invocation makes up to 4 attempts with 15s between them).
+      { timeout: 900_000 },
     );
 
     const results = JSON.parse(
