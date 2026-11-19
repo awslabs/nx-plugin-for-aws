@@ -22,6 +22,10 @@ Le service s'exécute sur [AWS Fargate](https://docs.aws.amazon.com/AmazonECS/la
 
 Le service est privé. Il n'a pas de répartiteur de charge, pas d'API et pas d'adresse IP publique. Son groupe de sécurité n'a pas de règle entrante, donc rien ne peut ouvrir une connexion au service jusqu'à ce que vous autorisiez un appelant. Le service peut toujours effectuer des appels sortants, par exemple vers une base de données ou vers d'autres services AWS.
 
+:::note[Atteindre votre service via HTTP]
+Le service généré est privé et n'a pas de point de terminaison HTTP que vous pouvez atteindre depuis l'extérieur du VPC. Pour servir des clients HTTP, par exemple un site web, un agent ou un appelant en dehors d'AWS, placez une API devant le service. L'exécution des générateurs d'API (tRPC, FastAPI et Smithy) sur Amazon ECS est prévue comme suite. En attendant, vous pouvez laisser un appelant à l'intérieur du VPC se connecter avec `connections.allowFrom` dans CDK ou une règle d'entrée dans Terraform, comme le montre « Permettre à un appelant d'atteindre votre service » ci-dessous.
+:::
+
 ## Utilisation
 
 ### Ajouter un Container Service
@@ -42,12 +46,12 @@ Avec `infra` défini sur `none`, le générateur ne fournit aucune infrastructur
 
 ## Sortie du générateur
 
-Le générateur ajoute les fichiers suivants à votre projet. Le dossier source est nommé d'après l'option `name` en snake_case (par exemple `my_service` pour `--name=my-service`), ou `service` si vous l'omettez :
+Le générateur ajoute les fichiers suivants à votre projet. Le dossier source est nommé d'après l'option `name` en snake_case (par exemple `my_container` pour `--name=my-container`), ou `container` si vous l'omettez :
 
 <FileTree>
   - your-project/
     - your_module/
-      - service/ (ou le nom que vous avez choisi)
+      - container/ (ou le nom que vous avez choisi)
         - \_\_init\_\_.py Initialisation du package Python
         - main.py Application FastAPI avec `GET /health` et la route d'exemple `GET /echo`, servie par uvicorn sur `PORT`
         - Dockerfile Définition de l'image conteneur
@@ -56,14 +60,14 @@ Le générateur ajoute les fichiers suivants à votre projet. Le dossier source 
     - project.json Mis à jour avec les cibles `bundle-arm` et `bundle` et les cibles `<name>-serve`, `<name>-docker` et `<name>-trivy` pour votre service
 </FileTree>
 
-Les noms de cibles commencent par l'option `name`, ou par `service` si vous l'omettez. Par exemple, les cibles sont `service-serve`, `service-docker` et `service-trivy` sans nom, et `orders-serve`, `orders-docker` et `orders-trivy` pour `--name=orders`. Les cibles `bundle-arm` et `bundle` sont partagées par tout ce que le projet regroupe.
+Les noms de cibles commencent par l'option `name`, ou par `container` si vous l'omettez. Par exemple, les cibles sont `container-serve`, `container-docker` et `container-trivy` sans nom, et `orders-serve`, `orders-docker` et `orders-trivy` pour `--name=orders`. Les cibles `bundle-arm` et `bundle` sont partagées par tout ce que le projet regroupe.
 
 <OptionFilter when={{ infra: 'ecs' }} description="Infrastructure du service ECS">
 ### Infrastructure
 
 <Snippet name="shared-constructs" />
 
-Pour déployer votre service, les fichiers suivants sont générés :
+Pour déployer votre service, les fichiers suivants sont générés. `<name>` est le nom de votre service en kebab-case : l'option `name`, ou la dernière partie du nom de votre projet suivie de `-container` lorsque vous omettez l'option. Le projet `orders` sans option `name` donne `orders-container`, et `--name=api` donne `api` :
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -109,7 +113,7 @@ Si vous définissez `infra` sur `none`, aucun construct CDK ou module Terraform 
 
 La cible `<name>-serve` exécute le serveur sur votre machine, sans conteneur :
 
-<NxCommands commands={['run your-project:service-serve']} />
+<NxCommands commands={['run your-project:container-serve']} />
 
 Le serveur écoute sur le port dans la variable d'environnement `PORT`. La cible `<name>-serve` le définit sur un port que le générateur attribue, en commençant à 8081 et en sautant les ports que d'autres projets de votre espace de travail utilisent déjà. À l'intérieur du conteneur, le serveur écoute sur le port 8080.
 
@@ -127,7 +131,7 @@ Le serveur a également une route d'exemple que vous remplacez par vos propres r
 
 La cible `<name>-docker` construit une image linux/arm64 de votre service. Elle exécute d'abord la cible `bundle-arm`, qui écrit votre code et ses dépendances linux/arm64 dans `dist/<project root>/bundle-arm`. La cible agrégée `bundle` dépend de `bundle-arm`. La cible `<name>-docker` copie ensuite ce dossier, le `Dockerfile` et le `.dockerignore` dans `dist/<project root>/docker/<name>`, et construit l'image avec ce dossier comme contexte de construction (les fichiers que la construction de l'image peut lire). Elle utilise le moteur de conteneur avec lequel votre espace de travail est configuré, `docker` ou [Finch](https://runfinch.com/). La cible s'exécute dans le cadre de la cible agrégée `docker`, qui construit chaque image du projet.
 
-<NxCommands commands={['run your-project:service-docker']} />
+<NxCommands commands={['run your-project:container-docker']} />
 
 Sur ECS, une commande de vérification de santé s'exécute à l'intérieur du conteneur et appelle `GET /health` sur le port du conteneur. Elle n'a besoin d'aucun accès entrant. ECS remplace une tâche dont la vérification de santé continue d'échouer. ECS ignore une instruction `HEALTHCHECK` dans le Dockerfile. Pour plus d'informations sur la façon dont les images sont construites et publiées, consultez <Link path="/guides/docker-bundling">Docker Bundling</Link>.
 
@@ -144,7 +148,9 @@ Le construct et le module ne créent jamais de VPC. Vous en créez ou en importe
 
 <Infrastructure>
 <Fragment slot="cdk">
-Le construct CDK est créé dans `common/constructs` et nommé d'après votre service. Exemple d'utilisation avec un nouveau VPC :
+Le construct CDK est créé dans `common/constructs`. Son nom de classe est `<name>` en PascalCase, donc le projet `orders` sans option `name` donne la classe `OrdersContainer` dans `packages/common/constructs/src/app/services/orders-container.ts`, et `--name=api` donne `Api` dans `api.ts`. `MyService` ci-dessous est un espace réservé pour votre propre classe, que votre package `@<scope>/common-constructs` exporte sous ce nom. Le package n'exporte aucun construct appelé `Service`, donc si votre éditeur en propose un, il s'agit de `Service` de `aws-cdk-lib/aws-servicediscovery`.
+
+Exemple d'utilisation avec un nouveau VPC :
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { MyService } from '@my-scope/common-constructs';
@@ -169,7 +175,7 @@ export class ApplicationStack extends Stack {
 Pour utiliser un VPC existant, recherchez-le avec `Vpc.fromLookup(this, 'Vpc', { vpcId: '<vpc-id>' })` et transmettez-le comme `vpc`.
 </Fragment>
 <Fragment slot="terraform">
-Le module Terraform est créé dans `common/terraform`. L'image du service est publiée dans le dépôt d'actifs partagé, donc instanciez le module `core/asset-ecr` une fois par déploiement et transmettez ses sorties à chaque module de service. Transmettez également les sorties du module partagé `runtime_config_appconfig`, qui contiennent l'application AWS AppConfig à partir de laquelle le service lit sa <Link path="/guides/runtime-config">configuration d'exécution</Link> :
+Le module Terraform est créé dans `common/terraform`, dans `app/services/<name>/<name>.tf`. Le projet `orders` sans option `name` donne `packages/common/terraform/src/app/services/orders-container/orders-container.tf`, et `my-service` ci-dessous est un espace réservé pour votre propre dossier de module. L'image du service est publiée dans le dépôt d'actifs partagé, donc instanciez le module `core/asset-ecr` une fois par déploiement et transmettez ses sorties à chaque module de service. Transmettez également les sorties du module partagé `runtime_config_appconfig`, qui contiennent l'application AWS AppConfig à partir de laquelle le service lit sa <Link path="/guides/runtime-config">configuration d'exécution</Link> :
 
 ```hcl title="packages/infra/src/main.tf"
 module "asset_ecr" {
@@ -226,6 +232,8 @@ L'infrastructure générée applique ces paramètres par défaut :
 - Le groupe de journaux est chiffré avec une clé AWS KMS, et les journaux sont conservés pendant un an.
 
 ### Permettre à un appelant d'atteindre votre service
+
+Cette section concerne les appelants à l'intérieur du VPC. Un client HTTP en dehors du VPC a besoin d'une API devant le service, comme l'explique la note en haut de ce guide.
 
 Rien ne peut appeler le service tel que généré. Si une autre charge de travail dans le VPC doit l'appeler, par exemple une fonction Lambda ou un autre service ECS, vous ajoutez vous-même une règle entrante au groupe de sécurité du service. Le générateur n'ajoute aucune règle entrante. Autorisez un appelant nommé par son groupe de sécurité, sur le port du conteneur, et n'autorisez jamais une plage d'adresses.
 
@@ -432,7 +440,7 @@ Exécutez la cible `destroy` de votre projet d'infrastructure :
 </Fragment>
 </Infrastructure>
 
-Vérifiez ensuite dans la console AWS ou avec l'AWS CLI que le service et le cluster ECS ont disparu. Avec Terraform, destroy supprime également le groupe de journaux du service et planifie la suppression de sa clé AWS KMS après 7 jours. Avec CDK, destroy conserve le groupe de journaux du service et sa clé AWS KMS, car CDK conserve les groupes de journaux et les clés sauf indication contraire d'une politique de suppression. Supprimez-les vous-même si vous n'avez plus besoin des journaux. Les images restent dans Amazon ECR, dans le dépôt d'actifs CDK ou le dépôt partagé `asset-ecr`. Supprimez-les si vous n'en avez plus besoin. Le VPC est le vôtre, donc la destruction du service le laisse en place.
+Vérifiez ensuite dans la console AWS ou avec l'AWS CLI que le service et le cluster ECS ont disparu. Avec CDK et Terraform, destroy supprime le groupe de journaux du service et planifie la suppression de sa clé AWS KMS, de sorte que rien du service ne reste. La période d'attente de la clé avant que KMS ne la supprime est de 30 jours avec CDK et de 7 jours avec Terraform. Les images restent dans Amazon ECR, dans le dépôt d'actifs CDK ou le dépôt partagé `asset-ecr`. Supprimez-les si vous n'en avez plus besoin. Le VPC est le vôtre, donc la destruction du service le laisse en place.
 </OptionFilter>
 
 ## Connecter votre service

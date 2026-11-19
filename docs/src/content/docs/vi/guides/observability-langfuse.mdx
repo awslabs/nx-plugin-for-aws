@@ -1,0 +1,146 @@
+---
+title: Langfuse Observability
+description: Xuất các dấu vết ứng dụng của agent Python Strands hiện có sang Langfuse
+generator: observability#langfuse
+---
+
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Link from '@components/link.astro';
+
+Thêm khả năng xem dấu vết Langfuse vào một `py#agent` hiện có, cả trong quá trình phát triển cục bộ và sau khi triển khai. Trình tạo thành phần thử nghiệm này hỗ trợ **Python Strands, HTTP, triển khai zip AgentCore (`infra: agentcore`), CDK và xác thực IAM**. Nó bảo toàn mô hình, công cụ và bộ nhớ phiên đã cấu hình của agent.
+
+Các ngôn ngữ khác, framework, giao thức, máy chủ MCP, container, Terraform và `infra: none` đều bị từ chối. Xuất Langfuse chọn nền tảng AgentCore V1 và thất bại xác thực CDK cho V2: thông tin xác thực và kết nối exporter không được ghi lại trong snapshot khởi động không đủ điều kiện. Trình tạo không triển khai Langfuse hoặc tạo secret.
+
+Các agent hiện có tiếp tục sử dụng thiết lập tracing đã tạo của chúng trừ khi bạn chạy trình tạo này. Langfuse bắt đầu ở lần chạy `dev` cục bộ tiếp theo; các agent đã triển khai chuyển đổi sau khi bạn xây dựng lại và triển khai lại. Là một trình tạo thử nghiệm, đầu ra của nó có thể thay đổi mà không có migration nâng cấp; người dùng phải tự xem xét và điều chỉnh những thay đổi đó.
+
+## Tác động đến CloudWatch
+
+:::caution[Dấu vết ứng dụng chuyển sang Langfuse]
+Đối với các agent đã triển khai, việc bật Langfuse sẽ tắt ADOT và thay đổi điểm vào zip. **Các span ứng dụng mới từ agent, lời gọi mô hình và công cụ sẽ đi đến Langfuse thay vì CloudWatch.** Chúng biến mất khỏi CloudWatch GenAI Observability và Transaction Search. **Không hỗ trợ xuất kép.** Các lời gọi cục bộ cũng xuất sang Langfuse; stdout/stderr của chúng vẫn ở trong terminal cục bộ.
+:::
+
+| Tín hiệu hoặc tính năng | Hiệu ứng khi bật Langfuse |
+| --- | --- |
+| Span ứng dụng agent/model/tool | Được xuất sang Langfuse. Các span này không còn được gửi đến `aws/spans` hoặc luồng span ứng dụng của runtime. |
+| Số liệu dịch vụ runtime | Invocations, Latency, UserErrors và SystemErrors vẫn có sẵn trong CloudWatch. |
+| Agent stdout/stderr | Log Uvicorn và đầu ra ứng dụng vẫn đi đến nhóm log CloudWatch của runtime. Prompt hoặc kết quả công cụ được in bởi ứng dụng của bạn do đó cũng có thể vẫn ở trong log AWS. |
+| Log telemetry có cấu trúc ADOT | Bị tắt cùng với ADOT. Log ứng dụng thông thường tiếp tục độc lập. Khôi phục ADOT sẽ khôi phục log telemetry có cấu trúc của nó. |
+| Span dịch vụ AgentCore được gửi riêng | Không bị chuyển hướng bởi exporter ứng dụng này. Kiểm tra cấu hình gửi riêng cho Memory, Gateway, Identity và các công cụ tích hợp; tích hợp này không cấu hình hoặc đảm bảo việc gửi của chúng. |
+| AgentCore Evaluations | Đánh giá trực tuyến/theo lô được hỗ trợ bởi CloudWatch và `CloudWatchAgentSpanCollector` mất các span ứng dụng mới cho agent này. API Evaluate theo yêu cầu có thể chấp nhận span do người gọi cung cấp, nhưng trình tạo này không cung cấp collector thay thế. |
+| Kiểm thử ứng dụng, dashboard và công việc đánh giá | Các kiểm thử ứng dụng đã tạo không yêu cầu dấu vết CloudWatch. Bất kỳ dashboard, cảnh báo hoặc công việc đánh giá nào đọc span ứng dụng từ CloudWatch sẽ mất các span mới đó. Kiểm tra nguồn dấu vết được sử dụng bởi mỗi tích hợp trước khi bật Langfuse. |
+
+Xem [supported evaluation telemetry](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/supported-frameworks-telemetry.html) và [observability configuration](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html) của AWS để biết yêu cầu về gửi dịch vụ và đánh giá.
+
+### Nơi lưu trữ dữ liệu và chi phí
+
+Prompt, completion, sử dụng mô hình và đầu vào/đầu ra công cụ từ **các lời gọi cục bộ và đã triển khai** được gửi đến endpoint Langfuse đã cấu hình. Với Langfuse Cloud, dữ liệu này rời khỏi laptop hoặc môi trường AWS của bạn đến dịch vụ bên thứ ba. Với Langfuse tự lưu trữ, nó đi đến máy chủ bạn chọn. Kiểm tra endpoint, vùng, thời gian lưu trữ và kiểm soát truy cập đó so với yêu cầu xử lý dữ liệu của bạn trước khi bật xuất. Trình tạo này không che giấu nội dung dấu vết.
+
+Phí sử dụng CloudWatch/X-Ray liên quan đến các dấu vết ứng dụng đã tắt giảm; phí số liệu runtime và log vẫn giữ nguyên. Langfuse có chi phí kế hoạch hoặc lưu trữ riêng và Secrets Manager và truyền tải ra ngoài có thể thêm phí. Không có chi phí xuất kép trong phiên bản này.
+
+Exporter gộp các span và cố gắng flush trước khung phản hồi cuối cùng của mỗi lời gọi, với thời gian chờ flush 8 giây bên trong bảo vệ 10 giây. Điều này có thể thêm tới 10 giây độ trễ trước khung phản hồi cuối cùng. Lỗi xuất hoặc quá trình bị gián đoạn vẫn có thể mất telemetry; dấu vết không phải là nhật ký kiểm toán bền vững.
+
+## Cách sử dụng
+
+Commit các thay đổi workspace hiện có của bạn trước khi chạy trình tạo này. Xem xét và commit các thay đổi Langfuse, bao gồm cài đặt phụ thuộc, riêng biệt để bạn có thể hoàn nguyên tích hợp sau này.
+
+### Chọn một agent hiện có
+
+<RunGenerator generator="observability#langfuse" />
+
+Sử dụng tên dự án được ghi trong `project.json`. Nếu nó chứa nhiều agent, cũng truyền tên thành phần agent với `--agent`.
+
+<GeneratorParameters generator="observability#langfuse" />
+
+### Chuẩn bị secret và endpoint
+
+Chúng tôi khuyến nghị [tự lưu trữ Langfuse trên AWS](https://langfuse.com/self-hosting) khi chọn nơi lưu giữ dữ liệu dấu vết của bạn. Sử dụng cài đặt HTTPS hiện có, được bảo mật; trình tạo này không cung cấp một cài đặt. Langfuse Cloud cũng được hỗ trợ khi bạn chọn rõ ràng endpoint của nó.
+
+Tạo một secret Secrets Manager trong tài khoản AWS và vùng của agent. JSON của nó phải chứa các trường chuỗi `LANGFUSE_PUBLIC_KEY` và `LANGFUSE_SECRET_KEY` với các khóa của dự án Langfuse của bạn. Sử dụng console Secrets Manager hoặc quy trình quản lý secret đã được phê duyệt; không đặt khóa trong cờ trình tạo, tệp nguồn, lịch sử shell hoặc biến môi trường runtime.
+
+Sử dụng khóa mã hóa Secrets Manager được quản lý bởi AWS cho phiên bản đầu tiên này. Một secret được mã hóa bằng khóa KMS do khách hàng quản lý cần một quyền giải mã bổ sung, được phạm vi rõ ràng mà trình tạo này không tạo.
+
+Truyền **ARN đầy đủ** của secret, bao gồm hậu tố sáu ký tự, và URL cơ sở HTTPS của triển khai Langfuse hiện có, chẳng hạn như một cái bạn đã lưu trữ trên AWS. Endpoint phải có thể truy cập được từ **cả máy phát triển của bạn và agent đã triển khai**. **Không có đích đến mặc định; `--host` là bắt buộc khi sử dụng lần đầu.** Trình tạo thử nghiệm này chấp nhận ARN trong các phân vùng `aws`, `aws-us-gov` và `aws-cn`; các phân vùng ISO không được hỗ trợ.
+
+```sh
+pnpm nx g @aws/nx-plugin:observability#langfuse \
+  --project=my_agent \
+  --secretArn="$LANGFUSE_SECRET_ARN" \
+  --host=https://langfuse.example.com
+```
+
+Ở đây `LANGFUSE_SECRET_ARN` chỉ chứa ARN, không phải khóa. CDK cấp `secretsmanager:GetSecretValue` chính xác trên ARN đó. Ứng dụng tải cả hai khóa một lần khi khởi động quá trình và xây dựng xác thực Basic trong bộ nhớ. Sắp xếp khởi động lại runtime khi xoay khóa; một triển khai CDK không thay đổi không làm mới các quá trình đang chạy.
+
+Helper CDK ghi host và secret ARN vào AppConfig tại `agentcore.langfuse.<AgentClass>`, bảo toàn các mục cho các agent khác. Khởi động đã triển khai đọc mục này thông qua `get_agentcore_runtime_config()`, sử dụng quyền đọc AppConfig hiện có của agent. Runtime đã tạo đặt `DISABLE_ADOT_OBSERVABILITY=true` để pipeline ADOT được quản lý của AgentCore để tracing cho ứng dụng; host và secret ARN không phải là biến môi trường runtime.
+
+Thay thế `https://langfuse.example.com` bằng endpoint hiện có của bạn. Để sử dụng Langfuse Cloud, truyền rõ ràng URL cơ sở khu vực của nó, chẳng hạn như `https://cloud.langfuse.com` cho EU hoặc `https://us.cloud.langfuse.com` cho US. Tiền tố đường dẫn được hỗ trợ. Cung cấp URL cơ sở, không có `/api/public/otel`; thông tin xác thực, tham số truy vấn và fragment trong URL bị từ chối. Các lần chạy lặp lại giữ lại host và secret trước đó trừ khi bạn cung cấp thay thế; để trống một trong hai đầu vào sẽ giữ giá trị đã lưu của nó.
+
+Exporter sử dụng OTLP/HTTP với `x-langfuse-ingestion-version: 4`. Các cài đặt tự lưu trữ phải hỗ trợ hợp đồng ingestion đó. Tham khảo [OpenTelemetry integration](https://langfuse.com/integrations/native/opentelemetry) và [v4 migration guide](https://langfuse.com/integrations/native/opentelemetry/migration-to-v4) của Langfuse khi chọn endpoint.
+
+### Chạy cục bộ
+
+Sử dụng thông tin xác thực phát triển AWS bình thường của bạn, chẳng hạn như hồ sơ AWS đã xác thực được chọn bằng `AWS_PROFILE`. Danh tính đó cần `secretsmanager:GetSecretValue` trên secret đã chọn, ngoài các quyền mà agent của bạn thường cần cho mô hình và công cụ của nó. Quyền execution-role đã tạo bao gồm agent đã triển khai; nó không cấp quyền cho danh tính nhà phát triển của bạn.
+
+```sh
+pnpm nx run my_agent:dev
+```
+
+Các target `dev` và `serve` của agent chạy `langfuse_dev.py` thông qua Uvicorn với tự động tải lại. Nó chỉ lưu trữ host và secret ARN, đọc các khóa từ Secrets Manager và khởi tạo tracing trước khi import agent. **Không cần ứng dụng AppConfig đã triển khai để bắt đầu tracing cục bộ.** Cổng cục bộ được gán được bảo toàn. Khóa không bao giờ được đọc từ tệp `.env` cục bộ hoặc biến môi trường Langfuse.
+
+**Phát triển cục bộ có thể chạy mà không cần truy cập secret Langfuse.** Nếu cấu hình hoặc thông tin xác thực của nó không thể được tải, khởi động ghi một cảnh báo và agent cục bộ tiếp tục mà không xuất Langfuse. Các yêu cầu không thử lại tra cứu secret. Sửa thông tin xác thực AWS, quyền đọc secret hoặc cấu hình của bạn, sau đó khởi động lại `dev`/`serve` để bật tracing. Agent của bạn vẫn cần quyền mô hình và công cụ bình thường của nó. Các agent đã triển khai tiếp tục thất bại khởi động khi không thể tải thông tin xác thực Langfuse của chúng.
+
+Gọi agent cục bộ bằng cách sử dụng client chat đã tạo hoặc endpoint HTTP của nó. Cả lời gọi cục bộ và đã triển khai đều sử dụng cùng đích đến Langfuse và ánh xạ phiên. Máy chủ HTTP cục bộ của agent giữ hành vi bình thường của nó; yêu cầu HTTPS áp dụng cho đích đến Langfuse. Endpoint Langfuse chỉ dành cho laptop như `http://localhost:3000` không được hỗ trợ.
+
+Build, tạo OpenAPI và các kiểm thử đã tạo không lấy khóa Langfuse. Kiểm thử Python ngoại tuyến đã tạo kiểm tra cả cấu hình cục bộ và cấu hình AppConfig với thông tin xác thực tổng hợp và exporter trong bộ nhớ.
+
+### Build, triển khai và kiểm tra dấu vết
+
+Build workspace của bạn như được mô tả trong <Link path="guides/py-agent">hướng dẫn agent Python</Link>. Trình tạo thay đổi các tệp triển khai; nó không triển khai chúng.
+
+:::caution[Sử dụng triển khai có bật rollback cho các thay đổi cấu hình]
+Bật Langfuse trên stack hiện có, thay đổi host hoặc secret ARN của nó, hoặc hoàn nguyên tích hợp sẽ thay thế phiên bản cấu hình AppConfig bất biến. Target `deploy-sandbox` đã tạo sử dụng chế độ express với rollback bị tắt theo mặc định, điều này từ chối thay thế tài nguyên và có thể để stack ở trạng thái `UPDATE_FAILED`.
+
+Sử dụng triển khai tiêu chuẩn với rollback được bật cho các thay đổi này. Thay thế `my_infra` bằng tên dự án cơ sở hạ tầng của bạn:
+
+```sh
+pnpm nx run my_infra:deploy-sandbox --no-express --rollback
+```
+
+Đối với các giai đoạn khác, sử dụng target `deploy` với bộ chọn giai đoạn hoặc stack rõ ràng và rollback được bật, như được mô tả trong <Link path="guides/typescript-infrastructure">hướng dẫn cơ sở hạ tầng</Link>.
+
+Nếu một triển khai trước đó đã để stack ở trạng thái `UPDATE_FAILED`, hãy khôi phục nó trước khi chuyển đổi chế độ triển khai. CloudFormation có thể yêu cầu các hoạt động tiếp theo sử dụng cùng cấu hình express cho đến khi stack đạt trạng thái hoàn chỉnh. Làm theo [hướng dẫn khôi phục stack thất bại](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/stack-failure-options.html) của AWS; chỉ thay đổi cờ triển khai không khôi phục stack thất bại.
+:::
+
+Gọi agent cục bộ hoặc đã triển khai với một prompt gọi một công cụ. Mở chế độ xem chi tiết dấu vết của nó trong giao diện Langfuse và xác minh gốc lời gọi, các con agent/model/tool và nội dung đầu vào/đầu ra của chúng. Chọn quan sát mô hình (generation) để kiểm tra việc sử dụng token của nó. Mở phiên của dấu vết để xác nhận ID phiên AgentCore, sau đó lặp lại một yêu cầu ngắn trong phiên đó để kiểm tra flushing và nhóm.
+
+Gốc ứng dụng giữ lại ID dấu vết và parent AWS upstream; SDK Langfuse đánh dấu nó là gốc ứng dụng logic mặc dù parent dịch vụ AWS không được xuất sang Langfuse.
+
+ID phiên từ 33 đến 200 ký tự xuất hiện không thay đổi trong Langfuse. ID dài hơn sử dụng digest hex SHA-256 64 ký tự của chúng làm ID phiên Langfuse, vì vậy các yêu cầu lặp lại vẫn xuất hiện trong cùng một phiên. Ánh xạ này chỉ thay đổi nhóm Langfuse; ID phiên AgentCore được gửi đến ứng dụng không thay đổi. ID bị thiếu hoặc ngắn hơn 33 ký tự nhận UUID mới cho lời gọi đó. Client đã tạo sử dụng UUID trong các giới hạn này.
+
+## Các tệp đã tạo và chạy lặp lại
+
+Trình tạo thêm `langfuse_telemetry.py` và `langfuse_dev.py` bên cạnh agent, một điểm vào `package/<agent>/langfuse_main.py` riêng biệt và một kiểm thử exporter Python. Nó nối construct CDK hiện có với `langfuse-observability.ts`, sao chép điểm vào triển khai vào zip và khai báo các phụ thuộc của nó. Trình khởi chạy ADOT chuẩn vẫn được đóng gói.
+
+Điểm vào Langfuse tạo một provider trước khi import agent. Tracing chồng chéo của FastAPI chỉ bị tắt trong quá trình đó; các span Strands gốc sử dụng cùng provider. API quan sát công khai của SDK Langfuse cung cấp gốc ứng dụng và thuộc tính phiên. Bắt giữ đầu vào/đầu ra lời gọi được giới hạn ở 1 MiB mỗi cái; gốc ghi lại `content_truncated` khi vượt quá giới hạn đó.
+
+Bộ phụ thuộc sử dụng Langfuse 4.18.0 và ADOT 0.22.0. Các pin OpenTelemetry được cung cấp khớp với yêu cầu của ADOT, bao gồm API/SDK/HTTP exporter 1.45.1, và được giữ để bảo toàn khả năng tương thích đó. ADOT và Langfuse vẫn đủ điều kiện cho các cập nhật phụ thuộc thường xuyên của kho lưu trữ; kiểm tra khả năng tương thích của chúng và điều chỉnh các pin OpenTelemetry khi nâng cấp. Starlette tuân theo yêu cầu phụ thuộc của FastAPI.
+
+Lặp lại trình tạo với cùng đầu vào không nhân đôi nối dây hoặc ghi đè các chỉnh sửa runtime của bạn. Nó vẫn tôn trọng tùy chọn cài đặt phụ thuộc của bạn, vì vậy bạn có thể chạy lại nó để thử lại cài đặt thất bại hoặc bị hoãn. Thay đổi host hoặc secret cập nhật cả điểm vào cục bộ và cấu hình CDK; khởi động lại phát triển cục bộ, xây dựng lại và sử dụng [lệnh triển khai có bật rollback](#build-deploy-and-check-a-trace) để áp dụng thay đổi trong cả hai môi trường. Nếu bạn chỉnh sửa một trong hai cấu hình hoặc tùy chỉnh các lệnh khởi động cục bộ, trình tạo yêu cầu bạn điều chỉnh chúng trước khi thay đổi tùy chọn. Điều này ngăn một thay đổi tùy chọn thay thế nối dây tùy chỉnh một cách im lặng.
+
+Thiết lập thử nghiệm trước đó không có `langfuse_dev.py` phải được hoàn nguyên và tạo lại với trình tạo đã cập nhật. Bảo toàn và áp dụng lại bất kỳ tùy chỉnh nào riêng biệt.
+
+## Chuyển lại sang CloudWatch
+
+Hoàn nguyên commit chuyên dụng chứa các thay đổi của trình tạo Langfuse:
+
+```sh
+git revert <langfuse-setup-commit>
+```
+
+Xem xét hoàn nguyên cho các xung đột với các thay đổi agent tiếp theo. Các trình tạo khác có thể đã thêm thẻ usage-metric vào cùng mảng trong `packages/common/constructs/src/core/app.ts`; bảo toàn các thẻ đó khi giải quyết xung đột. Chỉ xóa thẻ Langfuse (`g79`) nếu không có agent nào khác vẫn sử dụng Langfuse và bảo toàn các phụ thuộc được chia sẻ cần thiết bởi các tích hợp còn lại.
+
+Cài đặt lại các phụ thuộc workspace, xây dựng lại, sau đó triển khai lại bằng cách sử dụng [lệnh triển khai có bật rollback](#build-deploy-and-check-a-trace). Xóa mục AppConfig cũng yêu cầu thay thế tài nguyên; không sử dụng lệnh express mặc định cho bước này. Hoàn nguyên thiết lập hoàn chỉnh khôi phục điểm vào ADOT chuẩn và các lệnh khởi động cục bộ, và xóa nối dây Langfuse, tệp, bổ sung phụ thuộc, cài đặt runtime và quyền đọc secret. Khởi động lại bất kỳ quá trình `dev` cục bộ đang chạy nào. Gọi agent đã triển khai với một phiên mới và xác minh các dấu vết ứng dụng mới trong CloudWatch.
+
+Trình tạo không có cờ rollback. Giữ các thay đổi không liên quan ra khỏi commit thiết lập để hoàn nguyên nó không xóa chúng.
+
+Secret hiện có vẫn là của bạn để quản lý. Hoàn nguyên tích hợp không sao chép, xóa hoặc di chuyển dấu vết lịch sử giữa các backend. Để bật Langfuse lại, chạy trình tạo với host và secret ARN.

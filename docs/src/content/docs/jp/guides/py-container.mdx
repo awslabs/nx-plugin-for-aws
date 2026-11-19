@@ -22,6 +22,10 @@ import Snippet from '@components/snippet.astro';
 
 サービスはプライベートです。ロードバランサー、API、パブリックIPアドレスはありません。セキュリティグループにはインバウンドルールがないため、呼び出し元を許可するまで、何もサービスへの接続を開くことができません。サービスは、データベースや他のAWSサービスなどへのアウトバウンド呼び出しを行うことができます。
 
+:::note[HTTP経由でサービスに到達する]
+生成されたサービスはプライベートであり、VPCの外部から到達できるHTTPエンドポイントはありません。HTTPクライアント（例えば、ウェブサイト、エージェント、またはAWS外部の呼び出し元）にサービスを提供するには、サービスの前にAPIを配置します。Amazon ECS上でAPIジェネレーター（tRPC、FastAPI、Smithy）を実行することは、フォローアップとして計画されています。それまでは、以下の「呼び出し元がサービスに到達できるようにする」で示すように、CDKの`connections.allowFrom`またはTerraformのingressルールを使用して、VPC内の呼び出し元を接続させることができます。
+:::
+
 ## 使用方法
 
 ### Container Serviceの追加
@@ -42,12 +46,12 @@ Pythonプロジェクトにコンテナサービスを追加するには、2つ�
 
 ## ジェネレーターの出力
 
-ジェネレーターは、プロジェクトに以下のファイルを追加します。ソースフォルダーは、snake_caseの`name`オプションにちなんで名付けられます（例：`--name=my-service`の場合は`my_service`）。省略した場合は`service`になります：
+ジェネレーターは、プロジェクトに以下のファイルを追加します。ソースフォルダーは、snake_caseの`name`オプションにちなんで名付けられます（例：`--name=my-container`の場合は`my_container`）。省略した場合は`container`になります：
 
 <FileTree>
   - your-project/
     - your_module/
-      - service/ (または選択した名前)
+      - container/ (または選択した名前)
         - \_\_init\_\_.py Pythonパッケージの初期化
         - main.py `GET /health`とサンプルルート`GET /echo`を持つFastAPIアプリ、`PORT`でuvicornによって提供される
         - Dockerfile コンテナイメージの定義
@@ -56,14 +60,14 @@ Pythonプロジェクトにコンテナサービスを追加するには、2つ�
     - project.json `bundle-arm`と`bundle`ターゲット、およびサービス用の`<name>-serve`、`<name>-docker`、`<name>-trivy`ターゲットで更新
 </FileTree>
 
-ターゲット名は`name`オプションで始まるか、省略した場合は`service`で始まります。例えば、名前なしの場合、ターゲットは`service-serve`、`service-docker`、`service-trivy`となり、`--name=orders`の場合は`orders-serve`、`orders-docker`、`orders-trivy`となります。`bundle-arm`と`bundle`ターゲットは、プロジェクトがバンドルするすべてのもので共有されます。
+ターゲット名は`name`オプションで始まるか、省略した場合は`container`で始まります。例えば、名前なしの場合、ターゲットは`container-serve`、`container-docker`、`container-trivy`となり、`--name=orders`の場合は`orders-serve`、`orders-docker`、`orders-trivy`となります。`bundle-arm`と`bundle`ターゲットは、プロジェクトがバンドルするすべてのもので共有されます。
 
 <OptionFilter when={{ infra: 'ecs' }} description="ECSサービスインフラストラクチャ">
 ### インフラストラクチャ
 
 <Snippet name="shared-constructs" />
 
-サービスをデプロイするために、以下のファイルが生成されます：
+サービスをデプロイするために、以下のファイルが生成されます。`<name>`はkebab-caseのサービス名です：`name`オプション、またはオプションを省略した場合はプロジェクト名の最後の部分に`-container`を付けたものです。`name`オプションなしのプロジェクト`orders`は`orders-container`を与え、`--name=api`は`api`を与えます：
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -109,7 +113,7 @@ Pythonプロジェクトにコンテナサービスを追加するには、2つ�
 
 `<name>-serve`ターゲットは、コンテナなしでマシン上でサーバーを実行します：
 
-<NxCommands commands={['run your-project:service-serve']} />
+<NxCommands commands={['run your-project:container-serve']} />
 
 サーバーは`PORT`環境変数のポートでリッスンします。`<name>-serve`ターゲットは、ジェネレーターが割り当てるポートに設定し、8081から始まり、ワークスペース内の他のプロジェクトがすでに使用しているポートをスキップします。コンテナ内では、サーバーはポート8080でリッスンします。
 
@@ -127,7 +131,7 @@ curl http://localhost:<port>/health
 
 `<name>-docker`ターゲットは、サービスのlinux/arm64イメージをビルドします。最初に`bundle-arm`ターゲットを実行し、コードとlinux/arm64依存関係を`dist/<project root>/bundle-arm`に書き込みます。集約`bundle`ターゲットは`bundle-arm`に依存します。次に、`<name>-docker`ターゲットは、そのフォルダー、`Dockerfile`、`.dockerignore`を`dist/<project root>/docker/<name>`にコピーし、そのフォルダーをビルドコンテキスト（イメージビルドが読み取れるファイル）としてイメージをビルドします。ワークスペースが設定されているコンテナエンジン、`docker`または[Finch](https://runfinch.com/)を使用します。ターゲットは、プロジェクト内のすべてのイメージをビルドする集約`docker`ターゲットの一部として実行されます。
 
-<NxCommands commands={['run your-project:service-docker']} />
+<NxCommands commands={['run your-project:container-docker']} />
 
 ECS上では、ヘルスチェックコマンドがコンテナ内で実行され、コンテナポートで`GET /health`を呼び出します。インバウンドアクセスは必要ありません。ECSは、ヘルスチェックが失敗し続けるタスクを置き換えます。ECSはDockerfileの`HEALTHCHECK`命令を無視します。イメージのビルドと公開方法の詳細については、<Link path="/guides/docker-bundling">Docker Bundling</Link>を参照してください。
 
@@ -144,7 +148,9 @@ ECS上では、ヘルスチェックコマンドがコンテナ内で実行さ�
 
 <Infrastructure>
 <Fragment slot="cdk">
-CDKコンストラクトは`common/constructs`に作成され、サービスにちなんで名付けられます。新しいVPCでの使用例：
+CDKコンストラクトは`common/constructs`に作成されます。クラス名はPascalCaseの`<name>`なので、`name`オプションなしのプロジェクト`orders`は`packages/common/constructs/src/app/services/orders-container.ts`にクラス`OrdersContainer`を与え、`--name=api`は`api.ts`に`Api`を与えます。以下の`MyService`は、`@<scope>/common-constructs`パッケージがその名前でエクスポートする独自のクラスのプレースホルダーです。パッケージは`Service`という名前のコンストラクトをエクスポートしないため、エディターが提案する場合は`aws-cdk-lib/aws-servicediscovery`の`Service`です。
+
+新しいVPCでの使用例：
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { MyService } from '@my-scope/common-constructs';
@@ -169,7 +175,7 @@ export class ApplicationStack extends Stack {
 既存のVPCを使用するには、`Vpc.fromLookup(this, 'Vpc', { vpcId: '<vpc-id>' })`で検索し、`vpc`として渡します。
 </Fragment>
 <Fragment slot="terraform">
-Terraformモジュールは`common/terraform`に作成されます。サービスのイメージは共有アセットリポジトリに公開されるため、デプロイごとに`core/asset-ecr`モジュールを1回インスタンス化し、その出力をすべてのサービスモジュールに渡します。また、サービスが<Link path="/guides/runtime-config">ランタイム設定</Link>を読み取るAWS AppConfigアプリケーションを保持する共有`runtime_config_appconfig`モジュールの出力も渡します：
+Terraformモジュールは`common/terraform`の`app/services/<name>/<name>.tf`に作成されます。`name`オプションなしのプロジェクト`orders`は`packages/common/terraform/src/app/services/orders-container/orders-container.tf`を与え、以下の`my-service`は独自のモジュールフォルダーのプレースホルダーです。サービスのイメージは共有アセットリポジトリに公開されるため、デプロイごとに`core/asset-ecr`モジュールを1回インスタンス化し、その出力をすべてのサービスモジュールに渡します。また、サービスが<Link path="/guides/runtime-config">ランタイム設定</Link>を読み取るAWS AppConfigアプリケーションを保持する共有`runtime_config_appconfig`モジュールの出力も渡します：
 
 ```hcl title="packages/infra/src/main.tf"
 module "asset_ecr" {
@@ -226,6 +232,8 @@ VPCにこれらのエンドポイントを作成し、`<region>`をAWSリージ�
 - ロググループはAWS KMSキーで暗号化され、ログは1年間保持されます。
 
 ### 呼び出し元がサービスに到達できるようにする
+
+このセクションは、VPC内の呼び出し元についてです。VPC外部のHTTPクライアントは、このガイドの冒頭の注記で説明されているように、サービスの前にAPIが必要です。
 
 生成されたままでは、何もサービスを呼び出すことができません。VPC内の別のワークロード、例えばLambda関数や別のECSサービスがサービスを呼び出す必要がある場合は、サービスのセキュリティグループに自分でインバウンドルールを追加します。ジェネレーターはインバウンドルールを追加しません。セキュリティグループによって名前付きの呼び出し元を1つ、コンテナポートで許可し、アドレス範囲を許可しないでください。
 
@@ -432,7 +440,7 @@ Terraformでは、`container_user`は`ecs-service`モジュールの変数です
 </Fragment>
 </Infrastructure>
 
-次に、AWSコンソールまたはAWS CLIで、ECSサービスとクラスターがなくなったことを確認します。Terraformでは、destroyはサービスのロググループも削除し、7日後に削除するためにAWS KMSキーをスケジュールします。CDKでは、destroyはサービスのロググループとAWS KMSキーを保持します。これは、CDKが削除ポリシーで指定されない限り、ロググループとキーを保持するためです。ログが不要になった場合は、自分で削除してください。イメージはAmazon ECRに残り、CDKアセットリポジトリまたは共有`asset-ecr`リポジトリにあります。不要になった場合は削除してください。VPCはあなたのものなので、サービスを破棄してもそのまま残ります。
+次に、AWSコンソールまたはAWS CLIで、ECSサービスとクラスターがなくなったことを確認します。CDKとTerraformの両方で、destroyはサービスのロググループを削除し、AWS KMSキーの削除をスケジュールするため、サービスの何も残りません。KMSがキーを削除する前の待機期間は、CDKでは30日、Terraformでは7日です。イメージはAmazon ECRに残り、CDKアセットリポジトリまたは共有`asset-ecr`リポジトリにあります。不要になった場合は削除してください。VPCはあなたのものなので、サービスを破棄してもそのまま残ります。
 </OptionFilter>
 
 ## サービスの接続

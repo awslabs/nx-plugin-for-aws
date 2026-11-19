@@ -1,0 +1,146 @@
+---
+title: Osservabilità Langfuse
+description: Esporta le tracce dell'applicazione di un agente Python Strands esistente su Langfuse
+generator: observability#langfuse
+---
+
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Link from '@components/link.astro';
+
+Aggiungi la visualizzazione delle tracce Langfuse a un `py#agent` esistente, sia durante lo sviluppo locale che dopo il deployment. Questo generatore di componenti sperimentale supporta **Python Strands, HTTP, deployment zip AgentCore (`infra: agentcore`), CDK e autenticazione IAM**. Preserva il modello, gli strumenti e l'archiviazione delle sessioni configurata dell'agente.
+
+Altri linguaggi, framework, protocolli, server MCP, container, Terraform e `infra: none` vengono rifiutati. L'esportazione Langfuse seleziona la piattaforma AgentCore V1 e fallisce la validazione CDK per V2: le credenziali e le connessioni dell'esportatore non devono essere catturate in uno snapshot di avvio non qualificato. Il generatore non effettua il deployment di Langfuse né crea un secret.
+
+Gli agenti esistenti continuano a utilizzare la loro configurazione di tracing generata a meno che non si esegua questo generatore. Langfuse si avvia alla prossima esecuzione locale di `dev`; gli agenti deployati passano dopo la ricostruzione e il rideploy. Come generatore sperimentale, il suo output può cambiare senza una migrazione di aggiornamento; gli utenti devono rivedere e riconciliare tali modifiche da soli.
+
+## Implicazioni CloudWatch
+
+:::caution[Le tracce dell'applicazione si spostano su Langfuse]
+Per gli agenti deployati, l'abilitazione di Langfuse disabilita ADOT e cambia l'entrypoint dello zip. **I nuovi span dell'applicazione dall'agente, dalle chiamate al modello e dagli strumenti vanno su Langfuse invece che su CloudWatch.** Scompaiono da CloudWatch GenAI Observability e Transaction Search. **L'esportazione duale non è supportata.** Anche le invocazioni locali esportano su Langfuse; il loro stdout/stderr rimane nel terminale locale.
+:::
+
+| Segnale o funzionalità | Effetto con Langfuse abilitato |
+| --- | --- |
+| Span dell'applicazione agente/modello/strumento | Esportati su Langfuse. Questi span non vengono più consegnati a `aws/spans` o allo stream degli span dell'applicazione del runtime. |
+| Metriche del servizio runtime | Invocations, Latency, UserErrors e SystemErrors rimangono disponibili in CloudWatch. |
+| Stdout/stderr dell'agente | I log Uvicorn e l'output dell'applicazione vanno ancora al gruppo di log CloudWatch del runtime. Prompt o risultati degli strumenti stampati dalla tua app possono quindi rimanere anche nei log AWS. |
+| Log di telemetria strutturati ADOT | Disabilitati con ADOT. I log ordinari dell'applicazione continuano indipendentemente. Il ripristino di ADOT ripristina i suoi log di telemetria strutturati. |
+| Span del servizio AgentCore consegnati separatamente | Non reindirizzati da questo esportatore dell'applicazione. Controlla la configurazione di consegna separata per Memory, Gateway, Identity e strumenti integrati; questa integrazione non configura né garantisce la loro consegna. |
+| Valutazioni AgentCore | La valutazione online/batch supportata da CloudWatch e `CloudWatchAgentSpanCollector` perdono i nuovi span dell'applicazione per questo agente. L'API Evaluate on-demand può accettare span forniti dal chiamante, ma questo generatore non fornisce un collector sostitutivo. |
+| Test dell'applicazione, dashboard e job di valutazione | I test dell'applicazione generati non richiedono tracce CloudWatch. Eventuali dashboard, allarmi o job di valutazione che leggono gli span dell'applicazione da CloudWatch perdono quei nuovi span. Controlla la fonte delle tracce utilizzata da ciascuna integrazione prima di abilitare Langfuse. |
+
+Consulta la [telemetria di valutazione supportata](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/supported-frameworks-telemetry.html) e la [configurazione dell'osservabilità](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html) di AWS per i requisiti di consegna del servizio e valutazione.
+
+### Residenza dei dati e costi
+
+Prompt, completamenti, utilizzo del modello e input/output degli strumenti dalle **invocazioni locali e deployate** vengono inviati all'endpoint Langfuse configurato. Con Langfuse Cloud, questi dati lasciano il tuo laptop o ambiente AWS per un servizio di terze parti. Con Langfuse self-hosted, vanno all'host che selezioni. Controlla endpoint, regione, retention e controlli di accesso rispetto ai tuoi requisiti di gestione dei dati prima di abilitare l'esportazione. Questo generatore non redige il contenuto delle tracce.
+
+I costi di utilizzo di CloudWatch/X-Ray associati alle tracce dell'applicazione disattivate diminuiscono; i costi delle metriche del runtime e dei log rimangono. Langfuse ha i propri costi di piano o hosting, e Secrets Manager e il trasferimento in uscita possono aggiungere costi. Non ci sono costi di esportazione duale in questa versione.
+
+L'esportatore raggruppa gli span e tenta un flush prima del frame di risposta finale di ogni invocazione, con un timeout di flush di 8 secondi all'interno di un guard di 10 secondi. Questo può aggiungere fino a 10 secondi di latenza prima del frame di risposta finale. I fallimenti dell'esportazione o un processo interrotto possono comunque perdere telemetria; le tracce non sono un log di audit durevole.
+
+## Utilizzo
+
+Esegui il commit delle modifiche esistenti del workspace prima di eseguire questo generatore. Rivedi ed esegui il commit delle modifiche Langfuse, inclusa l'installazione delle dipendenze, separatamente in modo da poter ripristinare l'integrazione in seguito.
+
+### Seleziona un agente esistente
+
+<RunGenerator generator="observability#langfuse" />
+
+Usa il nome del progetto registrato in `project.json`. Se contiene diversi agenti, passa anche il nome del componente dell'agente con `--agent`.
+
+<GeneratorParameters generator="observability#langfuse" />
+
+### Prepara un secret e un endpoint
+
+Raccomandiamo di [self-hostare Langfuse su AWS](https://langfuse.com/self-hosting) quando scegli dove conservare i tuoi dati di traccia. Usa un'installazione HTTPS esistente e protetta; questo generatore non ne effettua il provisioning. Langfuse Cloud è anche supportato quando selezioni esplicitamente il suo endpoint.
+
+Crea un secret Secrets Manager nell'account AWS e nella regione dell'agente. Il suo JSON deve contenere i campi stringa `LANGFUSE_PUBLIC_KEY` e `LANGFUSE_SECRET_KEY` con le chiavi del tuo progetto Langfuse. Usa la console Secrets Manager o un processo di gestione dei secret approvato; non inserire le chiavi nei flag del generatore, nei file sorgente, nella cronologia della shell o nelle variabili d'ambiente del runtime.
+
+Usa la chiave di crittografia gestita da AWS di Secrets Manager per questa prima versione. Un secret crittografato con una chiave KMS gestita dal cliente necessita di un grant di decrittografia aggiuntivo, esplicitamente definito, che questo generatore non crea.
+
+Passa l'**ARN completo** del secret, incluso il suo suffisso di sei caratteri, e l'URL base HTTPS di un deployment Langfuse esistente, come uno che già ospiti su AWS. L'endpoint deve essere raggiungibile sia **dalla tua macchina di sviluppo che dall'agente deployato**. **Non c'è una destinazione predefinita; `--host` è richiesto al primo utilizzo.** Questo generatore sperimentale accetta ARN nelle partizioni `aws`, `aws-us-gov` e `aws-cn`; le partizioni ISO non sono supportate.
+
+```sh
+pnpm nx g @aws/nx-plugin:observability#langfuse \
+  --project=my_agent \
+  --secretArn="$LANGFUSE_SECRET_ARN" \
+  --host=https://langfuse.example.com
+```
+
+Qui `LANGFUSE_SECRET_ARN` contiene solo l'ARN, non una chiave. CDK concede `secretsmanager:GetSecretValue` esattamente su quell'ARN. L'applicazione carica entrambe le chiavi una volta all'avvio del processo e costruisce l'autenticazione Basic in memoria. Organizza un riavvio del runtime quando ruoti le chiavi; un deployment CDK invariato non aggiorna i processi in esecuzione.
+
+L'helper CDK scrive l'host e l'ARN del secret su AppConfig a `agentcore.langfuse.<AgentClass>`, preservando le voci per altri agenti. L'avvio deployato legge questa voce tramite `get_agentcore_runtime_config()`, utilizzando il grant di lettura AppConfig esistente dell'agente. Il runtime generato imposta `DISABLE_ADOT_OBSERVABILITY=true` in modo che la pipeline ADOT gestita di AgentCore lasci il tracing all'applicazione; l'host e l'ARN del secret non sono variabili d'ambiente del runtime.
+
+Sostituisci `https://langfuse.example.com` con il tuo endpoint esistente. Per usare Langfuse Cloud, passa esplicitamente il suo URL base regionale, come `https://cloud.langfuse.com` per l'UE o `https://us.cloud.langfuse.com` per gli USA. I prefissi di percorso sono supportati. Fornisci l'URL base, senza `/api/public/otel`; credenziali, parametri di query e frammenti nell'URL vengono rifiutati. Le esecuzioni ripetute mantengono l'host e il secret precedenti a meno che non fornisci sostituzioni; lasciare vuoto uno dei due input mantiene il suo valore salvato.
+
+L'esportatore usa OTLP/HTTP con `x-langfuse-ingestion-version: 4`. Le installazioni self-hosted devono supportare quel contratto di ingestione. Consulta l'[integrazione OpenTelemetry](https://langfuse.com/integrations/native/opentelemetry) di Langfuse e la [guida alla migrazione v4](https://langfuse.com/integrations/native/opentelemetry/migration-to-v4) quando scegli un endpoint.
+
+### Esegui localmente
+
+Usa le tue normali credenziali di sviluppo AWS, come un profilo AWS autenticato selezionato con `AWS_PROFILE`. Quell'identità necessita di `secretsmanager:GetSecretValue` sul secret selezionato, oltre ai permessi che il tuo agente normalmente necessita per il suo modello e strumenti. Il grant del ruolo di esecuzione generato copre l'agente deployato; non concede permessi alla tua identità di sviluppatore.
+
+```sh
+pnpm nx run my_agent:dev
+```
+
+I target `dev` e `serve` dell'agente eseguono `langfuse_dev.py` tramite Uvicorn con ricaricamento automatico. Memorizza solo l'host e l'ARN del secret, legge le chiavi da Secrets Manager e inizializza il tracing prima di importare l'agente. **Non è necessaria alcuna applicazione AppConfig deployata per avviare il tracing locale.** La porta locale assegnata viene preservata. Le chiavi non vengono mai lette da un file `.env` locale o da variabili d'ambiente Langfuse.
+
+**Lo sviluppo locale può essere eseguito senza accesso al secret Langfuse.** Se la sua configurazione o le credenziali non possono essere caricate, l'avvio registra un avviso e l'agente locale continua senza esportazione Langfuse. Le richieste non ritentano la ricerca del secret. Correggi le tue credenziali AWS, il permesso di lettura del secret o la configurazione, quindi riavvia `dev`/`serve` per abilitare il tracing. Il tuo agente necessita ancora dei suoi normali permessi per modello e strumenti. Gli agenti deployati continuano a fallire l'avvio quando le loro credenziali Langfuse non possono essere caricate.
+
+Invoca l'agente locale usando il suo client di chat generato o l'endpoint HTTP. Sia le invocazioni locali che quelle deployate usano la stessa destinazione Langfuse e mappatura delle sessioni. Il server HTTP locale dell'agente mantiene il suo comportamento normale; il requisito HTTPS si applica alla destinazione Langfuse. Un endpoint Langfuse solo per laptop come `http://localhost:3000` non è supportato.
+
+Le build, la generazione OpenAPI e i test generati non recuperano le chiavi Langfuse. Il test Python offline generato controlla sia la configurazione locale che la configurazione AppConfig con credenziali sintetiche e un esportatore in memoria.
+
+### Build, deploy e verifica di una traccia
+
+Costruisci il tuo workspace come descritto nella <Link path="guides/py-agent">guida agli agenti Python</Link>. Il generatore modifica i file di deployment; non li deploya.
+
+:::caution[Usa il deployment con rollback abilitato per le modifiche alla configurazione]
+L'abilitazione di Langfuse su uno stack esistente, la modifica del suo host o ARN del secret, o il ripristino dell'integrazione sostituisce una versione di configurazione AppConfig immutabile. Il target `deploy-sandbox` generato usa la modalità express con rollback disabilitato per impostazione predefinita, che rifiuta le sostituzioni di risorse e può lasciare lo stack in `UPDATE_FAILED`.
+
+Usa il deployment standard con rollback abilitato per queste modifiche. Sostituisci `my_infra` con il nome del tuo progetto di infrastruttura:
+
+```sh
+pnpm nx run my_infra:deploy-sandbox --no-express --rollback
+```
+
+Per altri stage, usa il target `deploy` con uno stage esplicito o un selettore di stack e rollback abilitato, come descritto nella <Link path="guides/typescript-infrastructure">guida all'infrastruttura</Link>.
+
+Se un deployment precedente ha già lasciato lo stack in `UPDATE_FAILED`, recuperalo prima di cambiare modalità di deployment. CloudFormation può richiedere operazioni di follow-up per usare la stessa configurazione express finché lo stack non raggiunge uno stato completo. Segui la [guida al recupero degli stack falliti](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/stack-failure-options.html) di AWS; cambiare solo il flag di deployment non recupera uno stack fallito.
+:::
+
+Invoca l'agente locale o deployato con un prompt che chiama uno strumento. Apri la sua vista dettagliata della traccia nell'interfaccia utente Langfuse e verifica la radice dell'invocazione, i figli agente/modello/strumento e il loro contenuto di input/output. Seleziona l'osservazione del modello (generazione) per controllare il suo utilizzo dei token. Apri la sessione della traccia per confermare l'ID sessione AgentCore, quindi ripeti una breve richiesta in quella sessione per controllare il flushing e il raggruppamento.
+
+La radice dell'applicazione mantiene gli ID di traccia e parent AWS upstream; l'SDK Langfuse la contrassegna come radice logica dell'applicazione anche se il parent del servizio AWS non viene esportato su Langfuse.
+
+Gli ID sessione tra 33 e 200 caratteri appaiono invariati in Langfuse. Gli ID più lunghi usano il loro digest esadecimale SHA-256 di 64 caratteri come ID sessione Langfuse, quindi le richieste ripetute appaiono ancora nella stessa sessione. Questa mappatura modifica solo il raggruppamento Langfuse; l'ID sessione AgentCore inviato all'applicazione rimane invariato. Un ID mancante o più corto di 33 caratteri ottiene un nuovo UUID per quell'invocazione. Il client generato usa UUID entro questi limiti.
+
+## File generati ed esecuzioni ripetute
+
+Il generatore aggiunge `langfuse_telemetry.py` e `langfuse_dev.py` accanto all'agente, un entrypoint separato `package/<agent>/langfuse_main.py` e un test dell'esportatore Python. Collega il costrutto CDK esistente a `langfuse-observability.ts`, copia l'entrypoint di deployment nello zip e dichiara le sue dipendenze. Il launcher ADOT standard rimane impacchettato.
+
+L'entrypoint Langfuse crea un provider prima di importare l'agente. Il tracing sovrapposto di FastAPI è disabilitato solo in quel processo; gli span nativi di Strands usano lo stesso provider. L'API di osservazione pubblica dell'SDK Langfuse fornisce la radice dell'applicazione e gli attributi della sessione. La cattura di input/output dell'invocazione è limitata a 1 MiB ciascuno; la radice registra `content_truncated` quando quel limite viene superato.
+
+Il set di dipendenze usa Langfuse 4.18.0 e ADOT 0.22.0. I pin OpenTelemetry forniti corrispondono ai requisiti di ADOT, inclusi API/SDK/HTTP exporter 1.45.1, e sono mantenuti per preservare quella compatibilità. ADOT e Langfuse rimangono idonei per gli aggiornamenti regolari delle dipendenze del repository; controlla la loro compatibilità e regola i pin OpenTelemetry durante l'aggiornamento. Starlette segue i requisiti di dipendenza di FastAPI.
+
+Ripetere il generatore con gli stessi input non duplica il cablaggio né sovrascrive le tue modifiche al runtime. Rispetta comunque la tua preferenza di installazione delle dipendenze, quindi puoi rieseguirlo per ritentare un'installazione fallita o differita. Modificare l'host o il secret aggiorna sia l'entrypoint locale che la configurazione CDK; riavvia lo sviluppo locale, ricostruisci e usa il [comando di deployment con rollback abilitato](#build-deploy-e-verifica-di-una-traccia) per applicare la modifica in entrambi gli ambienti. Se modifichi una delle due configurazioni o personalizzi i comandi di avvio locali, il generatore ti chiede di riconciliarli prima di modificare le opzioni. Questo impedisce che una modifica dell'opzione sostituisca silenziosamente il cablaggio personalizzato.
+
+Una configurazione sperimentale precedente senza `langfuse_dev.py` deve essere ripristinata e rigenerata con il generatore aggiornato. Preserva e riapplica eventuali personalizzazioni separatamente.
+
+## Torna a CloudWatch
+
+Ripristina il commit dedicato contenente le modifiche del generatore Langfuse:
+
+```sh
+git revert <langfuse-setup-commit>
+```
+
+Rivedi il revert per conflitti con modifiche successive dell'agente. Altri generatori potrebbero aver aggiunto tag di metriche di utilizzo allo stesso array in `packages/common/constructs/src/core/app.ts`; preserva quei tag quando risolvi il conflitto. Rimuovi il tag Langfuse (`g79`) solo se nessun altro agente usa ancora Langfuse, e preserva le dipendenze condivise necessarie per le integrazioni rimanenti.
+
+Reinstalla le dipendenze del workspace, ricostruisci, quindi rideploya usando il [comando di deployment con rollback abilitato](#build-deploy-e-verifica-di-una-traccia). Anche la rimozione della voce AppConfig richiede una sostituzione di risorsa; non usare il comando express predefinito per questo passaggio. Il ripristino della configurazione completa ripristina l'entrypoint ADOT standard e i comandi di avvio locali, e rimuove il cablaggio Langfuse, i file, le aggiunte di dipendenze, le impostazioni del runtime e il grant di lettura del secret. Riavvia qualsiasi processo `dev` locale in esecuzione. Invoca l'agente deployato con una nuova sessione e verifica le nuove tracce dell'applicazione in CloudWatch.
+
+Il generatore non ha un flag di rollback. Mantieni le modifiche non correlate fuori dal commit di configurazione in modo che il suo ripristino non le rimuova.
+
+Il secret esistente rimane tuo da gestire. Il ripristino dell'integrazione non copia, elimina o sposta le tracce storiche tra backend. Per abilitare nuovamente Langfuse, esegui il generatore con l'host e l'ARN del secret.

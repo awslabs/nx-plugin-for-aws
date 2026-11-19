@@ -22,6 +22,10 @@ Dịch vụ chạy trên [AWS Fargate](https://docs.aws.amazon.com/AmazonECS/lat
 
 Dịch vụ là riêng tư. Nó không có load balancer, không có API và không có địa chỉ IP công khai. Security group của nó không có quy tắc inbound, vì vậy không có gì có thể mở kết nối đến dịch vụ cho đến khi bạn cho phép một người gọi. Dịch vụ vẫn có thể thực hiện các cuộc gọi đi ra, ví dụ đến cơ sở dữ liệu hoặc các dịch vụ AWS khác.
 
+:::note[Truy cập dịch vụ của bạn qua HTTP]
+Dịch vụ được tạo ra là riêng tư và không có HTTP endpoint mà bạn có thể truy cập từ bên ngoài VPC. Để phục vụ các HTTP client, ví dụ như một trang web, một agent hoặc một người gọi bên ngoài AWS, hãy đặt một API phía trước dịch vụ. Việc chạy các API generator (tRPC, FastAPI và Smithy) trên Amazon ECS được lên kế hoạch như một bước tiếp theo. Cho đến lúc đó, bạn có thể cho phép một người gọi bên trong VPC kết nối với `connections.allowFrom` trong CDK hoặc một ingress rule trong Terraform, như phần "Cho phép người gọi tiếp cận dịch vụ của bạn" bên dưới cho thấy.
+:::
+
 ## Cách sử dụng
 
 ### Thêm Container Service
@@ -42,12 +46,12 @@ Với `infra` được đặt thành `none`, generator không tạo infrastructu
 
 ## Đầu ra của Generator
 
-Generator thêm các tệp sau vào dự án của bạn. Thư mục nguồn được đặt tên theo tùy chọn `name` ở dạng snake_case (ví dụ `my_service` cho `--name=my-service`), hoặc `service` nếu bạn bỏ qua nó:
+Generator thêm các tệp sau vào dự án của bạn. Thư mục nguồn được đặt tên theo tùy chọn `name` ở dạng snake_case (ví dụ `my_container` cho `--name=my-container`), hoặc `container` nếu bạn bỏ qua nó:
 
 <FileTree>
   - your-project/
     - your_module/
-      - service/ (hoặc tên bạn đã chọn)
+      - container/ (hoặc tên bạn đã chọn)
         - \_\_init\_\_.py Khởi tạo package Python
         - main.py Ứng dụng FastAPI với `GET /health` và route mẫu `GET /echo`, được phục vụ bởi uvicorn trên `PORT`
         - Dockerfile Định nghĩa container image
@@ -56,14 +60,14 @@ Generator thêm các tệp sau vào dự án của bạn. Thư mục nguồn đ�
     - project.json Được cập nhật với các target `bundle-arm` và `bundle` cùng các target `<name>-serve`, `<name>-docker` và `<name>-trivy` cho dịch vụ của bạn
 </FileTree>
 
-Tên target bắt đầu bằng tùy chọn `name`, hoặc bằng `service` nếu bạn bỏ qua nó. Ví dụ, các target là `service-serve`, `service-docker` và `service-trivy` khi không có tên, và `orders-serve`, `orders-docker` và `orders-trivy` cho `--name=orders`. Các target `bundle-arm` và `bundle` được chia sẻ bởi mọi thứ mà dự án đóng gói.
+Tên target bắt đầu bằng tùy chọn `name`, hoặc bằng `container` nếu bạn bỏ qua nó. Ví dụ, các target là `container-serve`, `container-docker` và `container-trivy` khi không có tên, và `orders-serve`, `orders-docker` và `orders-trivy` cho `--name=orders`. Các target `bundle-arm` và `bundle` được chia sẻ bởi mọi thứ mà dự án đóng gói.
 
 <OptionFilter when={{ infra: 'ecs' }} description="ECS service infrastructure">
 ### Infrastructure
 
 <Snippet name="shared-constructs" />
 
-Để triển khai dịch vụ của bạn, các tệp sau được tạo ra:
+Để triển khai dịch vụ của bạn, các tệp sau được tạo ra. `<name>` là tên dịch vụ của bạn ở dạng kebab-case: tùy chọn `name`, hoặc phần cuối cùng của tên dự án của bạn theo sau bởi `-container` khi bạn bỏ qua tùy chọn. Dự án `orders` không có tùy chọn `name` cho ra `orders-container`, và `--name=api` cho ra `api`:
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -109,7 +113,7 @@ Nếu bạn đặt `infra` thành `none`, không có CDK construct hoặc Terraf
 
 Target `<name>-serve` chạy máy chủ trên máy của bạn, không có container:
 
-<NxCommands commands={['run your-project:service-serve']} />
+<NxCommands commands={['run your-project:container-serve']} />
 
 Máy chủ lắng nghe trên cổng trong biến môi trường `PORT`. Target `<name>-serve` đặt nó thành một cổng mà generator chỉ định, bắt đầu từ 8081 và bỏ qua các cổng mà các dự án khác trong workspace của bạn đã sử dụng. Bên trong container, máy chủ lắng nghe trên cổng 8080.
 
@@ -127,7 +131,7 @@ Máy chủ cũng có một route mẫu mà bạn thay thế bằng các route c�
 
 Target `<name>-docker` xây dựng một image linux/arm64 của dịch vụ của bạn. Nó chạy target `bundle-arm` trước, ghi mã của bạn và các dependency linux/arm64 của nó vào `dist/<project root>/bundle-arm`. Target tổng hợp `bundle` phụ thuộc vào `bundle-arm`. Target `<name>-docker` sau đó sao chép thư mục đó, `Dockerfile` và `.dockerignore` vào `dist/<project root>/docker/<name>`, và xây dựng image với thư mục đó làm build context (các tệp mà quá trình xây dựng image có thể đọc). Nó sử dụng container engine mà workspace của bạn được thiết lập, `docker` hoặc [Finch](https://runfinch.com/). Target chạy như một phần của target tổng hợp `docker`, xây dựng mọi image trong dự án.
 
-<NxCommands commands={['run your-project:service-docker']} />
+<NxCommands commands={['run your-project:container-docker']} />
 
 Trên ECS, một lệnh kiểm tra sức khỏe chạy bên trong container và gọi `GET /health` trên cổng container. Nó không cần quyền truy cập inbound. ECS thay thế một task mà kiểm tra sức khỏe của nó liên tục thất bại. ECS bỏ qua chỉ thị `HEALTHCHECK` trong Dockerfile. Để biết thêm về cách image được xây dựng và xuất bản, xem <Link path="/guides/docker-bundling">Docker Bundling</Link>.
 
@@ -144,7 +148,9 @@ Construct và module không bao giờ tạo VPC. Bạn tạo hoặc import một
 
 <Infrastructure>
 <Fragment slot="cdk">
-CDK construct được tạo trong `common/constructs` và được đặt tên theo dịch vụ của bạn. Ví dụ sử dụng với VPC mới:
+CDK construct được tạo trong `common/constructs`. Tên class của nó là `<name>` ở dạng PascalCase, vì vậy dự án `orders` không có tùy chọn `name` cho ra class `OrdersContainer` trong `packages/common/constructs/src/app/services/orders-container.ts`, và `--name=api` cho ra `Api` trong `api.ts`. `MyService` bên dưới là một placeholder cho class của riêng bạn, mà package `@<scope>/common-constructs` của bạn xuất dưới tên đó. Package không xuất construct nào có tên `Service`, vì vậy nếu editor của bạn đề xuất một cái thì đó là `Service` từ `aws-cdk-lib/aws-servicediscovery`.
+
+Ví dụ sử dụng với VPC mới:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { MyService } from '@my-scope/common-constructs';
@@ -169,7 +175,7 @@ export class ApplicationStack extends Stack {
 Để sử dụng VPC hiện có, tra cứu nó với `Vpc.fromLookup(this, 'Vpc', { vpcId: '<vpc-id>' })` và truyền nó làm `vpc`.
 </Fragment>
 <Fragment slot="terraform">
-Terraform module được tạo trong `common/terraform`. Image của dịch vụ được xuất bản vào kho lưu trữ asset được chia sẻ, vì vậy hãy khởi tạo module `core/asset-ecr` một lần cho mỗi triển khai và truyền đầu ra của nó cho mọi service module. Cũng truyền đầu ra của module `runtime_config_appconfig` được chia sẻ, chứa ứng dụng AWS AppConfig mà dịch vụ đọc <Link path="/guides/runtime-config">runtime configuration</Link> của nó từ đó:
+Terraform module được tạo trong `common/terraform`, trong `app/services/<name>/<name>.tf`. Dự án `orders` không có tùy chọn `name` cho ra `packages/common/terraform/src/app/services/orders-container/orders-container.tf`, và `my-service` bên dưới là một placeholder cho thư mục module của riêng bạn. Image của dịch vụ được xuất bản vào kho lưu trữ asset được chia sẻ, vì vậy hãy khởi tạo module `core/asset-ecr` một lần cho mỗi triển khai và truyền đầu ra của nó cho mọi service module. Cũng truyền đầu ra của module `runtime_config_appconfig` được chia sẻ, chứa ứng dụng AWS AppConfig mà dịch vụ đọc <Link path="/guides/runtime-config">runtime configuration</Link> của nó từ đó:
 
 ```hcl title="packages/infra/src/main.tf"
 module "asset_ecr" {
@@ -226,6 +232,8 @@ Infrastructure được tạo áp dụng các cài đặt này theo mặc địn
 - Log group được mã hóa bằng khóa AWS KMS, và log được giữ trong một năm.
 
 ### Cho phép người gọi tiếp cận dịch vụ của bạn
+
+Phần này nói về các người gọi bên trong VPC. Một HTTP client bên ngoài VPC cần một API phía trước dịch vụ, như ghi chú ở đầu hướng dẫn này giải thích.
 
 Không có gì có thể gọi dịch vụ như được tạo ra. Nếu một workload khác trong VPC cần gọi nó, ví dụ một Lambda function hoặc một dịch vụ ECS khác, bạn tự thêm một quy tắc inbound vào security group của dịch vụ. Generator không thêm quy tắc inbound nào. Cho phép một người gọi được đặt tên theo security group của nó, trên cổng container, và không bao giờ cho phép một dải địa chỉ.
 
@@ -432,7 +440,7 @@ Chạy target `destroy` của dự án infrastructure của bạn:
 </Fragment>
 </Infrastructure>
 
-Sau đó kiểm tra trong AWS console hoặc với AWS CLI rằng dịch vụ ECS và cluster đã biến mất. Với Terraform, destroy cũng xóa log group của dịch vụ và lên lịch xóa khóa AWS KMS của nó sau 7 ngày. Với CDK, destroy giữ log group của dịch vụ và khóa AWS KMS của nó, vì CDK giữ log group và khóa trừ khi một removal policy nói khác đi. Tự xóa chúng nếu bạn không còn cần log nữa. Các image vẫn ở trong Amazon ECR, trong kho lưu trữ CDK assets hoặc kho lưu trữ `asset-ecr` được chia sẻ. Xóa chúng nếu bạn không còn cần chúng nữa. VPC là của bạn, vì vậy việc hủy dịch vụ để nó nguyên vị trí.
+Sau đó kiểm tra trong AWS console hoặc với AWS CLI rằng dịch vụ ECS và cluster đã biến mất. Với cả CDK và Terraform, destroy đều xóa log group của dịch vụ và lên lịch xóa khóa AWS KMS của nó, vì vậy không có gì của dịch vụ còn lại. Thời gian chờ của khóa trước khi KMS xóa nó là 30 ngày với CDK và 7 ngày với Terraform. Các image vẫn ở trong Amazon ECR, trong kho lưu trữ CDK assets hoặc kho lưu trữ `asset-ecr` được chia sẻ. Xóa chúng nếu bạn không còn cần chúng nữa. VPC là của bạn, vì vậy việc hủy dịch vụ để nó nguyên vị trí.
 </OptionFilter>
 
 ## Kết nối dịch vụ của bạn
