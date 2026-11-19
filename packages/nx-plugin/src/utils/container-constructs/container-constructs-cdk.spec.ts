@@ -667,15 +667,17 @@ describe('EcsService synth', () => {
       }
     });
 
-    // Parity with the Terraform module, which schedules the key for deletion.
-    // The key only encrypts the two log groups the stack also deletes, so
-    // retaining it would leave an orphaned customer-managed key per service.
-    it('should destroy the logs KMS key with the stack', () => {
+    // Parity with the Terraform module, which schedules the key for deletion
+    // on a 7 day window. The key only encrypts the two log groups the stack
+    // also deletes, so retaining it would leave an orphaned customer-managed
+    // key per service, billed until its window elapses.
+    it('should destroy the logs KMS key with the stack after 7 days', () => {
       const keys = out.ofType('AWS::KMS::Key');
       expect(keys).toHaveLength(1);
       const [[, key]] = keys;
       expect(key.DeletionPolicy).toBe('Delete');
       expect(key.UpdateReplacePolicy).toBe('Delete');
+      expect(key.Properties.PendingWindowInDays).toBe(7);
     });
   });
 
