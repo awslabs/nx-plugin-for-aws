@@ -110,13 +110,31 @@ export interface SmithyBackendOptions extends BackendOptions {
   authorizerBundleOutputDir?: string;
 }
 
+export interface EcsBackendOptions {
+  /** Class name of the vended ECS service construct the API routes to. */
+  serviceClassName: string;
+  /** File name (without extension) of that construct under `app/services`. */
+  serviceFileKebabCase: string;
+  /** Port the server listens on inside the container. */
+  containerPort: number;
+  /** Path the ALB target group health check calls. */
+  healthCheckPath: string;
+}
+
 export interface AddApiGatewayConstructOptions {
   apiProjectName: string;
   apiNameClassName: string;
   apiNameKebabCase: string;
-  constructType: 'http' | 'rest';
+  /**
+   * `http` and `rest` put API Gateway in front of Lambda functions. `http-ecs`
+   * puts an HTTP API in front of a container service on Amazon ECS, through an
+   * internal load balancer, and requires `ecs`.
+   */
+  constructType: 'http' | 'rest' | 'http-ecs';
   backend: TrpcBackendOptions | FastApiBackendOptions | SmithyBackendOptions;
   auth: 'iam' | 'cognito' | 'custom';
+  /** The ECS service the API routes to. Required for `http-ecs`. */
+  ecs?: EcsBackendOptions;
 }
 
 export const addApiGatewayInfra = async <const D extends DependencyDeclaration>(
@@ -124,6 +142,17 @@ export const addApiGatewayInfra = async <const D extends DependencyDeclaration>(
   options: AddApiGatewayConstructOptions & { iac: Iac },
   declaration: D & MustDeclare<typeof API_CONSTRUCTS_DEPENDENCIES, D>,
 ) => {
+  if (options.constructType === 'http-ecs') {
+    if (options.iac !== 'cdk') {
+      throw new Error(
+        `infra 'http-ecs' is only implemented for the cdk IaC provider. Pass --iac=cdk, or choose rest-lambda or http-lambda for terraform.`,
+      );
+    }
+    if (!options.ecs) {
+      throw new Error(`constructType 'http-ecs' requires ecs options`);
+    }
+  }
+
   if (options.iac === 'cdk') {
     await addApiGatewayCdkConstructs(tree, options, declaration);
   } else if (options.iac === 'terraform') {
@@ -179,8 +208,10 @@ const addApiGatewayCdkConstructs = async (
     );
   };
 
-  // Generate relevant core CDK construct and utilities
-  generateCoreApiFile(options.constructType);
+  // Generate relevant core CDK construct and utilities. `http-ecs` fronts the
+  // container service with the same core HTTP API construct as `http`.
+  const coreApiType = options.constructType === 'rest' ? 'rest' : 'http';
+  generateCoreApiFile(coreApiType);
   generateCoreApiFile('utils');
   if (options.backend.type === 'trpc') {
     generateCoreApiFile('trpc');

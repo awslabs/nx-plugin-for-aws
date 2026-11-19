@@ -1,5 +1,1054 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`trpc backend generator > infra=http-ecs > should serve the tRPC router from the container entry point > apps/test-api/src/test-api-container/.dockerignore 1`] = `
+"*
+!index.js
+"
+`;
+
+exports[`trpc backend generator > infra=http-ecs > should serve the tRPC router from the container entry point > apps/test-api/src/test-api-container/Dockerfile 1`] = `
+"FROM public.ecr.aws/docker/library/node:lts-slim
+
+# Apply the distribution's security updates: base image tags lag behind the
+# security suite, so its OS packages carry fixed HIGH/CRITICAL vulnerabilities
+# flagged by the image scan.
+RUN apt-get update && \\
+    apt-get upgrade -y --no-install-recommends && \\
+    rm -rf /var/lib/apt/lists/*
+
+# The runtime only needs node; npm's bundled dependencies would otherwise carry
+# vulnerabilities into the image.
+RUN npm uninstall -g npm
+
+WORKDIR /app
+
+# Copy the bundled server
+COPY index.js /app
+
+# The server listens on loopback unless HOST is set.
+ENV HOST=0.0.0.0
+
+EXPOSE 8080
+
+# Run as the image's non-root user. Kept after EXPOSE: connections such as
+# ts#rdb#container-connection insert root-only install steps before EXPOSE.
+USER node
+
+CMD [ "node", "index.js" ]
+"
+`;
+
+exports[`trpc backend generator > infra=http-ecs > should serve the tRPC router from the container entry point > apps/test-api/src/test-api-container/index.ts 1`] = `
+"import { createServer } from './server.js';
+
+const PORT = parseInt(process.env.PORT || '8080');
+// Loopback for local development; the image sets HOST=0.0.0.0.
+const HOST = process.env.HOST || '127.0.0.1';
+
+const server = createServer();
+
+server.listen(PORT, HOST, () => {
+  console.log(\`Listening on \${HOST}:\${PORT}\`);
+});
+
+// ECS stops a task with SIGTERM.
+process.on('SIGTERM', () => {
+  server.close(() => process.exit(0));
+});
+"
+`;
+
+exports[`trpc backend generator > infra=http-ecs > should serve the tRPC router from the container entry point > apps/test-api/src/test-api-container/server.ts 1`] = `
+"import { createServer as createHttpServer, Server } from 'node:http';
+import { createHTTPHandler } from '@trpc/server/adapters/standalone';
+import { appRouter } from '../router.js';
+
+/**
+ * Path the load balancer's target group and the container health check call.
+ * Changing it means changing the health check in your API CDK construct too.
+ */
+export const HEALTH_CHECK_PATH = '/health';
+
+/**
+ * Serves the tRPC router over HTTP. There is no API Gateway event here, so the
+ * procedure context carries empty placeholders in the fields a Lambda handler
+ * would fill in. Request identity comes from the HTTP API's authorizer, which
+ * does not reach the container unless you map it to a request header.
+ */
+const handleTrpcRequest = createHTTPHandler({
+  router: appRouter,
+  createContext() {
+    return {
+      event: {} as any,
+      context: {} as any,
+      info: {} as any,
+    };
+  },
+});
+
+export const createServer = (): Server =>
+  createHttpServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+
+    if (req.method === 'GET' && url.pathname === HEALTH_CHECK_PATH) {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ status: 'ok' }));
+    }
+
+    return handleTrpcRequest(req, res);
+  });
+"
+`;
+
+exports[`trpc backend generator > infra=http-ecs > should vend the HTTP API and the container service for cognito auth > test-api.ts-cognito 1`] = `
+"import { Construct } from 'constructs';
+import { Duration } from 'aws-cdk-lib';
+import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
+import {
+  IVpc,
+  SecurityGroup,
+  SubnetSelection,
+  SubnetType,
+} from 'aws-cdk-lib/aws-ec2';
+import {
+  ApplicationListener,
+  ApplicationLoadBalancer,
+  ApplicationProtocol,
+  ApplicationTargetGroup,
+} from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import { CfnApi, CorsHttpMethod, VpcLink } from 'aws-cdk-lib/aws-apigatewayv2';
+import { HttpUserPoolAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import { HttpAlbIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
+import {
+  ApiIntegrations,
+  HttpApiIntegration,
+  IntegrationBuilder,
+} from '../../core/api/utils.js';
+import { findCloudFrontDomainNames } from '../../core/cloudfront.js';
+import { HttpApi } from '../../core/api/http-api.js';
+import {
+  TestApiContainer,
+  TestApiContainerProps,
+} from '../services/test-api-container.js';
+import { Procedures, routerToOperations } from '../../core/api/trpc-utils.js';
+import { AppRouter, appRouter } from '@proj/test-api';
+
+// String union type for all API operation names
+type Operations = Procedures<AppRouter>;
+
+/** Port the container listens on, which the target group sends requests to. */
+const CONTAINER_PORT = 8080;
+/** Port the internal load balancer's listener accepts requests on. */
+const LISTENER_PORT = 80;
+
+/**
+ * Where the API's container service runs. The construct never creates a VPC;
+ * you create or import one in your stack and pass it in.
+ */
+export interface TestApiBackendProps {
+  /**
+   * VPC holding the load balancer and the container service.
+   */
+  readonly vpc: IVpc;
+  /**
+   * Subnets for the load balancer, the VPC link and the tasks. They must be
+   * private: nothing in this API is reachable from the internet except the
+   * API Gateway HTTP API.
+   *
+   * @default { subnetType: SubnetType.PRIVATE_WITH_EGRESS }
+   */
+  readonly vpcSubnets?: SubnetSelection;
+  /**
+   * Overrides for the container service, for example \`cpu\`, \`memoryLimitMiB\`,
+   * \`desiredCount\`, \`environment\` or \`grantTaskRole\`.
+   *
+   * @default a health check grace period of two minutes, and the service's own
+   * defaults otherwise
+   */
+  readonly service?: Omit<TestApiContainerProps, 'vpc' | 'vpcSubnets'>;
+}
+
+/**
+ * The container service behind the API, and the load balancer and VPC link that
+ * API Gateway reaches it through.
+ */
+export interface TestApiBackend {
+  /** The ECS service running the API. */
+  readonly service: TestApiContainer;
+  /** The internal load balancer in front of the service. */
+  readonly loadBalancer: ApplicationLoadBalancer;
+  /** The load balancer's listener, which the HTTP API integrates with. */
+  readonly listener: ApplicationListener;
+  /** The target group holding the service's tasks. */
+  readonly targetGroup: ApplicationTargetGroup;
+  /** API Gateway's path into the VPC. */
+  readonly vpcLink: VpcLink;
+}
+
+/**
+ * Properties for creating a TestApi construct
+ *
+ * @template TIntegrations - Map of operation names to their integrations
+ */
+export interface TestApiProps<
+  TIntegrations extends ApiIntegrations<Operations, HttpApiIntegration>,
+> {
+  /**
+   * Map of operation names to their API Gateway integrations
+   */
+  integrations: TIntegrations;
+  /**
+   * Identity details for Cognito Authentication
+   */
+  identity: {
+    userPool: IUserPool;
+    userPoolClient: IUserPoolClient;
+  };
+}
+
+/**
+ * A CDK construct that creates and configures an AWS API Gateway HTTP API in
+ * front of the TestApi container service on Amazon ECS.
+ *
+ * The HTTP API is the only public entry point, and every route carries the
+ * API's authorizer. It reaches the service through a VPC link and an internal
+ * load balancer, so neither the load balancer nor the tasks are reachable from
+ * the internet.
+ *
+ * @template TIntegrations - Map of operation names to their integrations
+ */
+export class TestApi<
+  TIntegrations extends ApiIntegrations<Operations, HttpApiIntegration>,
+> extends HttpApi<Operations, TIntegrations> {
+  /**
+   * Creates the API's container service, the internal load balancer and VPC
+   * link that API Gateway reaches it through, and a single integration which
+   * every operation is routed to.
+   *
+   * @param scope - The CDK construct scope
+   * @param props - The VPC the service runs in
+   * @returns An IntegrationBuilder with the load-balancer integration
+   */
+  public static defaultIntegrations = (
+    scope: Construct,
+    props: TestApiBackendProps,
+  ) => {
+    return IntegrationBuilder.http({
+      pattern: 'shared',
+      operations: routerToOperations(appRouter),
+      defaultIntegrationOptions: props,
+      buildDefaultIntegration: (_op, options: TestApiBackendProps) => {
+        const backend = TestApi.createBackend(scope, options);
+        return {
+          ...backend,
+          integration: new HttpAlbIntegration(
+            'TestApiAlbIntegration',
+            backend.listener,
+            { vpcLink: backend.vpcLink },
+          ),
+        };
+      },
+    });
+  };
+
+  /**
+   * Creates the container service, the internal load balancer and the VPC
+   * link, and allows exactly the two connections the request path needs: the
+   * VPC link to the load balancer's listener, and the load balancer to the
+   * tasks' container port.
+   */
+  private static createBackend(
+    scope: Construct,
+    props: TestApiBackendProps,
+  ): TestApiBackend {
+    const parent = new Construct(scope, 'TestApiBackend');
+    const vpcSubnets = props.vpcSubnets ?? {
+      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+    };
+
+    // Named so the load balancer's only inbound rule can reference it.
+    const vpcLinkSecurityGroup = new SecurityGroup(
+      parent,
+      'VpcLinkSecurityGroup',
+      {
+        vpc: props.vpc,
+        description:
+          'API Gateway VPC link for TestApi. Reaches the internal load balancer only.',
+        allowAllOutbound: true,
+      },
+    );
+    const vpcLink = new VpcLink(parent, 'VpcLink', {
+      vpc: props.vpc,
+      subnets: vpcSubnets,
+      securityGroups: [vpcLinkSecurityGroup],
+    });
+
+    const loadBalancer = new ApplicationLoadBalancer(parent, 'LoadBalancer', {
+      vpc: props.vpc,
+      vpcSubnets,
+      // Only API Gateway reaches this load balancer, through the VPC link.
+      internetFacing: false,
+    });
+    const listener = loadBalancer.addListener('Listener', {
+      port: LISTENER_PORT,
+      protocol: ApplicationProtocol.HTTP,
+      // \`open\` defaults to true, which would allow 0.0.0.0/0 on the listener
+      // port. The VPC link's security group below is the only source allowed.
+      open: false,
+    });
+    listener.connections.allowDefaultPortFrom(
+      vpcLinkSecurityGroup,
+      'API Gateway VPC link to the load balancer',
+    );
+
+    const service = new TestApiContainer(parent, 'Service', {
+      // ECS replaces a task whose health check fails. Without a grace period
+      // it can do so while the task is still starting up.
+      healthCheckGracePeriod: Duration.minutes(2),
+      ...props.service,
+      vpc: props.vpc,
+      vpcSubnets,
+    });
+
+    // Registering the service as a target adds the tasks' only inbound rule:
+    // the load balancer's security group on the container port.
+    const targetGroup = listener.addTargets('Targets', {
+      port: CONTAINER_PORT,
+      protocol: ApplicationProtocol.HTTP,
+      targets: [service.service],
+      healthCheck: {
+        path: '/health',
+        healthyHttpCodes: '200',
+        interval: Duration.seconds(15),
+        timeout: Duration.seconds(5),
+        healthyThresholdCount: 2,
+        unhealthyThresholdCount: 3,
+      },
+      deregistrationDelay: Duration.seconds(30),
+    });
+
+    return { service, loadBalancer, listener, targetGroup, vpcLink };
+  }
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props: TestApiProps<TIntegrations>,
+  ) {
+    super(scope, id, {
+      apiName: 'TestApi',
+      corsPreflight: {
+        allowOrigins: ['*'],
+        allowMethods: [CorsHttpMethod.ANY],
+        allowHeaders: [
+          'authorization',
+          'content-type',
+          'x-amz-content-sha256',
+          'x-amz-date',
+          'x-amz-security-token',
+        ],
+      },
+      defaultAuthorizer: new HttpUserPoolAuthorizer(
+        'TestApiAuthorizer',
+        props.identity.userPool,
+        {
+          userPoolClients: [props.identity.userPoolClient],
+        },
+      ),
+      operations: routerToOperations(appRouter),
+      ...props,
+    });
+  }
+
+  /**
+   * Restricts CORS to the provided origins
+   *
+   * Configures the provided CloudFront distribution domains or origin strings
+   * as the only permitted CORS origins in the API gateway.
+   * Any custom domain names (aliases) configured on a CloudFront distribution are
+   * included automatically alongside its default \`*.cloudfront.net\` domain.
+   *
+   * @param origins - The origin strings, CloudFront distributions, or objects containing a CloudFront distribution to grant CORS from
+   */
+  public restrictCorsTo(
+    ...origins: (
+      | string
+      | Distribution
+      | { cloudFrontDistribution: Distribution }
+    )[]
+  ) {
+    const allowedOrigins = origins.flatMap((origin) =>
+      typeof origin === 'string'
+        ? [origin]
+        : findCloudFrontDomainNames(
+            'cloudFrontDistribution' in origin
+              ? origin.cloudFrontDistribution
+              : origin,
+          ).map((domain) => \`https://\${domain}\`),
+    );
+
+    const cfnApi = this.api.node.defaultChild;
+    if (!(cfnApi instanceof CfnApi)) {
+      throw new Error(
+        'Unable to configure CORS: API default child is not a CfnApi instance',
+      );
+    }
+
+    cfnApi.corsConfiguration = {
+      allowOrigins: allowedOrigins,
+      allowMethods: [CorsHttpMethod.ANY],
+      allowHeaders: [
+        'authorization',
+        'content-type',
+        'x-amz-content-sha256',
+        'x-amz-date',
+        'x-amz-security-token',
+      ],
+    };
+  }
+}
+"
+`;
+
+exports[`trpc backend generator > infra=http-ecs > should vend the HTTP API and the container service for custom auth > test-api.ts-custom 1`] = `
+"import { Construct } from 'constructs';
+import * as url from 'url';
+import { Duration } from 'aws-cdk-lib';
+import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
+import {
+  IVpc,
+  SecurityGroup,
+  SubnetSelection,
+  SubnetType,
+} from 'aws-cdk-lib/aws-ec2';
+import {
+  ApplicationListener,
+  ApplicationLoadBalancer,
+  ApplicationProtocol,
+  ApplicationTargetGroup,
+} from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import { CfnApi, CorsHttpMethod, VpcLink } from 'aws-cdk-lib/aws-apigatewayv2';
+import {
+  HttpLambdaAuthorizer,
+  HttpLambdaResponseType,
+} from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import { HttpAlbIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import { Code, Function, Runtime, Tracing } from 'aws-cdk-lib/aws-lambda';
+import {
+  ApiIntegrations,
+  HttpApiIntegration,
+  IntegrationBuilder,
+} from '../../core/api/utils.js';
+import { findCloudFrontDomainNames } from '../../core/cloudfront.js';
+import { HttpApi } from '../../core/api/http-api.js';
+import {
+  TestApiContainer,
+  TestApiContainerProps,
+} from '../services/test-api-container.js';
+import { Procedures, routerToOperations } from '../../core/api/trpc-utils.js';
+import { AppRouter, appRouter } from '@proj/test-api';
+
+// String union type for all API operation names
+type Operations = Procedures<AppRouter>;
+
+/** Port the container listens on, which the target group sends requests to. */
+const CONTAINER_PORT = 8080;
+/** Port the internal load balancer's listener accepts requests on. */
+const LISTENER_PORT = 80;
+
+/**
+ * Where the API's container service runs. The construct never creates a VPC;
+ * you create or import one in your stack and pass it in.
+ */
+export interface TestApiBackendProps {
+  /**
+   * VPC holding the load balancer and the container service.
+   */
+  readonly vpc: IVpc;
+  /**
+   * Subnets for the load balancer, the VPC link and the tasks. They must be
+   * private: nothing in this API is reachable from the internet except the
+   * API Gateway HTTP API.
+   *
+   * @default { subnetType: SubnetType.PRIVATE_WITH_EGRESS }
+   */
+  readonly vpcSubnets?: SubnetSelection;
+  /**
+   * Overrides for the container service, for example \`cpu\`, \`memoryLimitMiB\`,
+   * \`desiredCount\`, \`environment\` or \`grantTaskRole\`.
+   *
+   * @default a health check grace period of two minutes, and the service's own
+   * defaults otherwise
+   */
+  readonly service?: Omit<TestApiContainerProps, 'vpc' | 'vpcSubnets'>;
+}
+
+/**
+ * The container service behind the API, and the load balancer and VPC link that
+ * API Gateway reaches it through.
+ */
+export interface TestApiBackend {
+  /** The ECS service running the API. */
+  readonly service: TestApiContainer;
+  /** The internal load balancer in front of the service. */
+  readonly loadBalancer: ApplicationLoadBalancer;
+  /** The load balancer's listener, which the HTTP API integrates with. */
+  readonly listener: ApplicationListener;
+  /** The target group holding the service's tasks. */
+  readonly targetGroup: ApplicationTargetGroup;
+  /** API Gateway's path into the VPC. */
+  readonly vpcLink: VpcLink;
+}
+
+/**
+ * Properties for creating a TestApi construct
+ *
+ * @template TIntegrations - Map of operation names to their integrations
+ */
+export interface TestApiProps<
+  TIntegrations extends ApiIntegrations<Operations, HttpApiIntegration>,
+> {
+  /**
+   * Map of operation names to their API Gateway integrations
+   */
+  integrations: TIntegrations;
+}
+
+/**
+ * A CDK construct that creates and configures an AWS API Gateway HTTP API in
+ * front of the TestApi container service on Amazon ECS.
+ *
+ * The HTTP API is the only public entry point, and every route carries the
+ * API's authorizer. It reaches the service through a VPC link and an internal
+ * load balancer, so neither the load balancer nor the tasks are reachable from
+ * the internet.
+ *
+ * @template TIntegrations - Map of operation names to their integrations
+ */
+export class TestApi<
+  TIntegrations extends ApiIntegrations<Operations, HttpApiIntegration>,
+> extends HttpApi<Operations, TIntegrations> {
+  /**
+   * Creates the API's container service, the internal load balancer and VPC
+   * link that API Gateway reaches it through, and a single integration which
+   * every operation is routed to.
+   *
+   * @param scope - The CDK construct scope
+   * @param props - The VPC the service runs in
+   * @returns An IntegrationBuilder with the load-balancer integration
+   */
+  public static defaultIntegrations = (
+    scope: Construct,
+    props: TestApiBackendProps,
+  ) => {
+    return IntegrationBuilder.http({
+      pattern: 'shared',
+      operations: routerToOperations(appRouter),
+      defaultIntegrationOptions: props,
+      buildDefaultIntegration: (_op, options: TestApiBackendProps) => {
+        const backend = TestApi.createBackend(scope, options);
+        return {
+          ...backend,
+          integration: new HttpAlbIntegration(
+            'TestApiAlbIntegration',
+            backend.listener,
+            { vpcLink: backend.vpcLink },
+          ),
+        };
+      },
+    });
+  };
+
+  /**
+   * Creates the container service, the internal load balancer and the VPC
+   * link, and allows exactly the two connections the request path needs: the
+   * VPC link to the load balancer's listener, and the load balancer to the
+   * tasks' container port.
+   */
+  private static createBackend(
+    scope: Construct,
+    props: TestApiBackendProps,
+  ): TestApiBackend {
+    const parent = new Construct(scope, 'TestApiBackend');
+    const vpcSubnets = props.vpcSubnets ?? {
+      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+    };
+
+    // Named so the load balancer's only inbound rule can reference it.
+    const vpcLinkSecurityGroup = new SecurityGroup(
+      parent,
+      'VpcLinkSecurityGroup',
+      {
+        vpc: props.vpc,
+        description:
+          'API Gateway VPC link for TestApi. Reaches the internal load balancer only.',
+        allowAllOutbound: true,
+      },
+    );
+    const vpcLink = new VpcLink(parent, 'VpcLink', {
+      vpc: props.vpc,
+      subnets: vpcSubnets,
+      securityGroups: [vpcLinkSecurityGroup],
+    });
+
+    const loadBalancer = new ApplicationLoadBalancer(parent, 'LoadBalancer', {
+      vpc: props.vpc,
+      vpcSubnets,
+      // Only API Gateway reaches this load balancer, through the VPC link.
+      internetFacing: false,
+    });
+    const listener = loadBalancer.addListener('Listener', {
+      port: LISTENER_PORT,
+      protocol: ApplicationProtocol.HTTP,
+      // \`open\` defaults to true, which would allow 0.0.0.0/0 on the listener
+      // port. The VPC link's security group below is the only source allowed.
+      open: false,
+    });
+    listener.connections.allowDefaultPortFrom(
+      vpcLinkSecurityGroup,
+      'API Gateway VPC link to the load balancer',
+    );
+
+    const service = new TestApiContainer(parent, 'Service', {
+      // ECS replaces a task whose health check fails. Without a grace period
+      // it can do so while the task is still starting up.
+      healthCheckGracePeriod: Duration.minutes(2),
+      ...props.service,
+      vpc: props.vpc,
+      vpcSubnets,
+    });
+
+    // Registering the service as a target adds the tasks' only inbound rule:
+    // the load balancer's security group on the container port.
+    const targetGroup = listener.addTargets('Targets', {
+      port: CONTAINER_PORT,
+      protocol: ApplicationProtocol.HTTP,
+      targets: [service.service],
+      healthCheck: {
+        path: '/health',
+        healthyHttpCodes: '200',
+        interval: Duration.seconds(15),
+        timeout: Duration.seconds(5),
+        healthyThresholdCount: 2,
+        unhealthyThresholdCount: 3,
+      },
+      deregistrationDelay: Duration.seconds(30),
+    });
+
+    return { service, loadBalancer, listener, targetGroup, vpcLink };
+  }
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props: TestApiProps<TIntegrations>,
+  ) {
+    const authorizerFunction = new Function(
+      scope,
+      'TestApiAuthorizerFunction',
+      {
+        runtime: Runtime.NODEJS_24_X,
+        handler: 'index.handler',
+        code: Code.fromAsset(
+          url.fileURLToPath(
+            new URL(
+              '../../../../../../dist/apps/test-api/bundle/authorizer',
+              import.meta.url,
+            ),
+          ),
+        ),
+        timeout: Duration.seconds(10),
+        tracing: Tracing.ACTIVE,
+      },
+    );
+
+    super(scope, id, {
+      apiName: 'TestApi',
+      corsPreflight: {
+        allowOrigins: ['*'],
+        allowMethods: [CorsHttpMethod.ANY],
+        allowHeaders: [
+          'authorization',
+          'content-type',
+          'x-amz-content-sha256',
+          'x-amz-date',
+          'x-amz-security-token',
+        ],
+      },
+      defaultAuthorizer: new HttpLambdaAuthorizer(
+        'TestApiLambdaAuthorizer',
+        authorizerFunction,
+        {
+          responseTypes: [HttpLambdaResponseType.SIMPLE],
+        },
+      ),
+      operations: routerToOperations(appRouter),
+      ...props,
+    });
+  }
+
+  /**
+   * Restricts CORS to the provided origins
+   *
+   * Configures the provided CloudFront distribution domains or origin strings
+   * as the only permitted CORS origins in the API gateway.
+   * Any custom domain names (aliases) configured on a CloudFront distribution are
+   * included automatically alongside its default \`*.cloudfront.net\` domain.
+   *
+   * @param origins - The origin strings, CloudFront distributions, or objects containing a CloudFront distribution to grant CORS from
+   */
+  public restrictCorsTo(
+    ...origins: (
+      | string
+      | Distribution
+      | { cloudFrontDistribution: Distribution }
+    )[]
+  ) {
+    const allowedOrigins = origins.flatMap((origin) =>
+      typeof origin === 'string'
+        ? [origin]
+        : findCloudFrontDomainNames(
+            'cloudFrontDistribution' in origin
+              ? origin.cloudFrontDistribution
+              : origin,
+          ).map((domain) => \`https://\${domain}\`),
+    );
+
+    const cfnApi = this.api.node.defaultChild;
+    if (!(cfnApi instanceof CfnApi)) {
+      throw new Error(
+        'Unable to configure CORS: API default child is not a CfnApi instance',
+      );
+    }
+
+    cfnApi.corsConfiguration = {
+      allowOrigins: allowedOrigins,
+      allowMethods: [CorsHttpMethod.ANY],
+      allowHeaders: [
+        'authorization',
+        'content-type',
+        'x-amz-content-sha256',
+        'x-amz-date',
+        'x-amz-security-token',
+      ],
+    };
+  }
+}
+"
+`;
+
+exports[`trpc backend generator > infra=http-ecs > should vend the HTTP API and the container service for iam auth > test-api.ts-iam 1`] = `
+"import { Construct } from 'constructs';
+import { Duration } from 'aws-cdk-lib';
+import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
+import {
+  IVpc,
+  SecurityGroup,
+  SubnetSelection,
+  SubnetType,
+} from 'aws-cdk-lib/aws-ec2';
+import {
+  ApplicationListener,
+  ApplicationLoadBalancer,
+  ApplicationProtocol,
+  ApplicationTargetGroup,
+} from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import { CfnApi, CorsHttpMethod, VpcLink } from 'aws-cdk-lib/aws-apigatewayv2';
+import { HttpIamAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import { HttpAlbIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import { Grant, IGrantable } from 'aws-cdk-lib/aws-iam';
+import {
+  ApiIntegrations,
+  HttpApiIntegration,
+  IntegrationBuilder,
+} from '../../core/api/utils.js';
+import { findCloudFrontDomainNames } from '../../core/cloudfront.js';
+import { HttpApi } from '../../core/api/http-api.js';
+import {
+  TestApiContainer,
+  TestApiContainerProps,
+} from '../services/test-api-container.js';
+import { Procedures, routerToOperations } from '../../core/api/trpc-utils.js';
+import { AppRouter, appRouter } from '@proj/test-api';
+
+// String union type for all API operation names
+type Operations = Procedures<AppRouter>;
+
+/** Port the container listens on, which the target group sends requests to. */
+const CONTAINER_PORT = 8080;
+/** Port the internal load balancer's listener accepts requests on. */
+const LISTENER_PORT = 80;
+
+/**
+ * Where the API's container service runs. The construct never creates a VPC;
+ * you create or import one in your stack and pass it in.
+ */
+export interface TestApiBackendProps {
+  /**
+   * VPC holding the load balancer and the container service.
+   */
+  readonly vpc: IVpc;
+  /**
+   * Subnets for the load balancer, the VPC link and the tasks. They must be
+   * private: nothing in this API is reachable from the internet except the
+   * API Gateway HTTP API.
+   *
+   * @default { subnetType: SubnetType.PRIVATE_WITH_EGRESS }
+   */
+  readonly vpcSubnets?: SubnetSelection;
+  /**
+   * Overrides for the container service, for example \`cpu\`, \`memoryLimitMiB\`,
+   * \`desiredCount\`, \`environment\` or \`grantTaskRole\`.
+   *
+   * @default a health check grace period of two minutes, and the service's own
+   * defaults otherwise
+   */
+  readonly service?: Omit<TestApiContainerProps, 'vpc' | 'vpcSubnets'>;
+}
+
+/**
+ * The container service behind the API, and the load balancer and VPC link that
+ * API Gateway reaches it through.
+ */
+export interface TestApiBackend {
+  /** The ECS service running the API. */
+  readonly service: TestApiContainer;
+  /** The internal load balancer in front of the service. */
+  readonly loadBalancer: ApplicationLoadBalancer;
+  /** The load balancer's listener, which the HTTP API integrates with. */
+  readonly listener: ApplicationListener;
+  /** The target group holding the service's tasks. */
+  readonly targetGroup: ApplicationTargetGroup;
+  /** API Gateway's path into the VPC. */
+  readonly vpcLink: VpcLink;
+}
+
+/**
+ * Properties for creating a TestApi construct
+ *
+ * @template TIntegrations - Map of operation names to their integrations
+ */
+export interface TestApiProps<
+  TIntegrations extends ApiIntegrations<Operations, HttpApiIntegration>,
+> {
+  /**
+   * Map of operation names to their API Gateway integrations
+   */
+  integrations: TIntegrations;
+}
+
+/**
+ * A CDK construct that creates and configures an AWS API Gateway HTTP API in
+ * front of the TestApi container service on Amazon ECS.
+ *
+ * The HTTP API is the only public entry point, and every route carries the
+ * API's authorizer. It reaches the service through a VPC link and an internal
+ * load balancer, so neither the load balancer nor the tasks are reachable from
+ * the internet.
+ *
+ * @template TIntegrations - Map of operation names to their integrations
+ */
+export class TestApi<
+  TIntegrations extends ApiIntegrations<Operations, HttpApiIntegration>,
+> extends HttpApi<Operations, TIntegrations> {
+  /**
+   * Creates the API's container service, the internal load balancer and VPC
+   * link that API Gateway reaches it through, and a single integration which
+   * every operation is routed to.
+   *
+   * @param scope - The CDK construct scope
+   * @param props - The VPC the service runs in
+   * @returns An IntegrationBuilder with the load-balancer integration
+   */
+  public static defaultIntegrations = (
+    scope: Construct,
+    props: TestApiBackendProps,
+  ) => {
+    return IntegrationBuilder.http({
+      pattern: 'shared',
+      operations: routerToOperations(appRouter),
+      defaultIntegrationOptions: props,
+      buildDefaultIntegration: (_op, options: TestApiBackendProps) => {
+        const backend = TestApi.createBackend(scope, options);
+        return {
+          ...backend,
+          integration: new HttpAlbIntegration(
+            'TestApiAlbIntegration',
+            backend.listener,
+            { vpcLink: backend.vpcLink },
+          ),
+        };
+      },
+    });
+  };
+
+  /**
+   * Creates the container service, the internal load balancer and the VPC
+   * link, and allows exactly the two connections the request path needs: the
+   * VPC link to the load balancer's listener, and the load balancer to the
+   * tasks' container port.
+   */
+  private static createBackend(
+    scope: Construct,
+    props: TestApiBackendProps,
+  ): TestApiBackend {
+    const parent = new Construct(scope, 'TestApiBackend');
+    const vpcSubnets = props.vpcSubnets ?? {
+      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+    };
+
+    // Named so the load balancer's only inbound rule can reference it.
+    const vpcLinkSecurityGroup = new SecurityGroup(
+      parent,
+      'VpcLinkSecurityGroup',
+      {
+        vpc: props.vpc,
+        description:
+          'API Gateway VPC link for TestApi. Reaches the internal load balancer only.',
+        allowAllOutbound: true,
+      },
+    );
+    const vpcLink = new VpcLink(parent, 'VpcLink', {
+      vpc: props.vpc,
+      subnets: vpcSubnets,
+      securityGroups: [vpcLinkSecurityGroup],
+    });
+
+    const loadBalancer = new ApplicationLoadBalancer(parent, 'LoadBalancer', {
+      vpc: props.vpc,
+      vpcSubnets,
+      // Only API Gateway reaches this load balancer, through the VPC link.
+      internetFacing: false,
+    });
+    const listener = loadBalancer.addListener('Listener', {
+      port: LISTENER_PORT,
+      protocol: ApplicationProtocol.HTTP,
+      // \`open\` defaults to true, which would allow 0.0.0.0/0 on the listener
+      // port. The VPC link's security group below is the only source allowed.
+      open: false,
+    });
+    listener.connections.allowDefaultPortFrom(
+      vpcLinkSecurityGroup,
+      'API Gateway VPC link to the load balancer',
+    );
+
+    const service = new TestApiContainer(parent, 'Service', {
+      // ECS replaces a task whose health check fails. Without a grace period
+      // it can do so while the task is still starting up.
+      healthCheckGracePeriod: Duration.minutes(2),
+      ...props.service,
+      vpc: props.vpc,
+      vpcSubnets,
+    });
+
+    // Registering the service as a target adds the tasks' only inbound rule:
+    // the load balancer's security group on the container port.
+    const targetGroup = listener.addTargets('Targets', {
+      port: CONTAINER_PORT,
+      protocol: ApplicationProtocol.HTTP,
+      targets: [service.service],
+      healthCheck: {
+        path: '/health',
+        healthyHttpCodes: '200',
+        interval: Duration.seconds(15),
+        timeout: Duration.seconds(5),
+        healthyThresholdCount: 2,
+        unhealthyThresholdCount: 3,
+      },
+      deregistrationDelay: Duration.seconds(30),
+    });
+
+    return { service, loadBalancer, listener, targetGroup, vpcLink };
+  }
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props: TestApiProps<TIntegrations>,
+  ) {
+    super(scope, id, {
+      apiName: 'TestApi',
+      corsPreflight: {
+        allowOrigins: ['*'],
+        allowMethods: [CorsHttpMethod.ANY],
+        allowHeaders: [
+          'authorization',
+          'content-type',
+          'x-amz-content-sha256',
+          'x-amz-date',
+          'x-amz-security-token',
+        ],
+      },
+      defaultAuthorizer: new HttpIamAuthorizer(),
+      operations: routerToOperations(appRouter),
+      ...props,
+    });
+  }
+
+  /**
+   * Restricts CORS to the provided origins
+   *
+   * Configures the provided CloudFront distribution domains or origin strings
+   * as the only permitted CORS origins in the API gateway.
+   * Any custom domain names (aliases) configured on a CloudFront distribution are
+   * included automatically alongside its default \`*.cloudfront.net\` domain.
+   *
+   * @param origins - The origin strings, CloudFront distributions, or objects containing a CloudFront distribution to grant CORS from
+   */
+  public restrictCorsTo(
+    ...origins: (
+      | string
+      | Distribution
+      | { cloudFrontDistribution: Distribution }
+    )[]
+  ) {
+    const allowedOrigins = origins.flatMap((origin) =>
+      typeof origin === 'string'
+        ? [origin]
+        : findCloudFrontDomainNames(
+            'cloudFrontDistribution' in origin
+              ? origin.cloudFrontDistribution
+              : origin,
+          ).map((domain) => \`https://\${domain}\`),
+    );
+
+    const cfnApi = this.api.node.defaultChild;
+    if (!(cfnApi instanceof CfnApi)) {
+      throw new Error(
+        'Unable to configure CORS: API default child is not a CfnApi instance',
+      );
+    }
+
+    cfnApi.corsConfiguration = {
+      allowOrigins: allowedOrigins,
+      allowMethods: [CorsHttpMethod.ANY],
+      allowHeaders: [
+        'authorization',
+        'content-type',
+        'x-amz-content-sha256',
+        'x-amz-date',
+        'x-amz-security-token',
+      ],
+    };
+  }
+
+  /**
+   * Grants IAM permissions to invoke any method on this API.
+   *
+   * @param grantee - The IAM principal to grant permissions to
+   */
+  public grantInvokeAccess(grantee: IGrantable) {
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['execute-api:Invoke'],
+      resourceArns: [this.api.arnForExecuteApi('*', '/*', '*')],
+    });
+  }
+}
+"
+`;
+
 exports[`trpc backend generator > should generate the project > apps/test-api/src/client/index.ts 1`] = `
 "import { createTRPCClient, httpLink, HTTPLinkOptions } from '@trpc/client';
 import { AwsClient } from 'aws4fetch';

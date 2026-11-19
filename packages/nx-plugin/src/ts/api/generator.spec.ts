@@ -101,4 +101,41 @@ describe('ts#api generator', () => {
       }),
     ).rejects.toThrow(/Unsupported infra 'http-lambda' for Smithy/);
   });
+
+  it('should reject smithy framework with http-ecs infra', async () => {
+    await expect(
+      tsApiGenerator(tree, {
+        name: 'TestApi',
+        framework: 'smithy',
+        directory: 'packages',
+        infra: 'http-ecs',
+        integrationPattern: 'shared',
+        auth: 'iam',
+        iac: 'cdk',
+      }),
+    ).rejects.toThrow(
+      /infra 'http-ecs' is not implemented for the smithy framework/,
+    );
+  });
+
+  it('should delegate http-ecs to ts#trpc-api', async () => {
+    await tsApiGenerator(tree, {
+      name: 'TestApi',
+      framework: 'trpc',
+      directory: 'packages',
+      infra: 'http-ecs',
+      integrationPattern: 'shared',
+      auth: 'iam',
+      iac: 'cdk',
+    });
+
+    expect(
+      tree.exists('packages/test-api/src/test-api-container/index.ts'),
+    ).toBeTruthy();
+    expect(
+      tree.exists(
+        'packages/common/constructs/src/app/services/test-api-container.ts',
+      ),
+    ).toBeTruthy();
+  });
 });

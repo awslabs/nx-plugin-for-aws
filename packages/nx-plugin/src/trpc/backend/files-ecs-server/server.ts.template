@@ -1,0 +1,38 @@
+import { createServer as createHttpServer, Server } from 'node:http';
+import { createHTTPHandler } from '@trpc/server/adapters/standalone';
+import { appRouter } from '../router<% if (esm) { %>.js<% } %>';
+
+/**
+ * Path the load balancer's target group and the container health check call.
+ * Changing it means changing the health check in your API CDK construct too.
+ */
+export const HEALTH_CHECK_PATH = '<%- healthCheckPath %>';
+
+/**
+ * Serves the tRPC router over HTTP. There is no API Gateway event here, so the
+ * procedure context carries empty placeholders in the fields a Lambda handler
+ * would fill in. Request identity comes from the HTTP API's authorizer, which
+ * does not reach the container unless you map it to a request header.
+ */
+const handleTrpcRequest = createHTTPHandler({
+  router: appRouter,
+  createContext() {
+    return {
+      event: {} as any,
+      context: {} as any,
+      info: {} as any,
+    };
+  },
+});
+
+export const createServer = (): Server =>
+  createHttpServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+
+    if (req.method === 'GET' && url.pathname === HEALTH_CHECK_PATH) {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ status: 'ok' }));
+    }
+
+    return handleTrpcRequest(req, res);
+  });

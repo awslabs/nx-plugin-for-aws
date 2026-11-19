@@ -1411,4 +1411,192 @@ export const echo = publicProcedure.query(() => ({ message: 'hi' }));
       "export { appRouter } from './router",
     );
   });
+
+  describe('infra=http-ecs', () => {
+    const ecsOptions = (
+      auth: TsTrpcApiGeneratorSchema['auth'],
+    ): TsTrpcApiGeneratorSchema => ({
+      name: 'TestApi',
+      directory: 'apps',
+      infra: 'http-ecs',
+      integrationPattern: 'shared',
+      auth,
+      iac: 'cdk',
+    });
+
+    it.each<TsTrpcApiGeneratorSchema['auth']>(['iam', 'cognito', 'custom'])(
+      'should vend the HTTP API and the container service for %s auth',
+      async (auth) => {
+        await tsTrpcApiGenerator(tree, ecsOptions(auth));
+
+        expect(
+          tree.read(
+            'packages/common/constructs/src/app/apis/test-api.ts',
+            'utf-8',
+          ),
+        ).toMatchSnapshot(`test-api.ts-${auth}`);
+        expect(
+          tree.exists(
+            'packages/common/constructs/src/app/services/test-api-container.ts',
+          ),
+        ).toBe(true);
+        expect(
+          tree.exists(
+            'packages/common/constructs/src/core/container/ecs-service.ts',
+          ),
+        ).toBe(true);
+        // The ECS variant fronts the service with the same core HTTP API
+        // construct as the Lambda variant, and never a REST API.
+        expect(
+          tree.exists('packages/common/constructs/src/core/api/http-api.ts'),
+        ).toBe(true);
+        expect(
+          tree.exists('packages/common/constructs/src/core/api/rest-api.ts'),
+        ).toBe(false);
+      },
+    );
+
+    it('should serve the tRPC router from the container entry point', async () => {
+      await tsTrpcApiGenerator(tree, ecsOptions('iam'));
+
+      expect(tree.exists('apps/test-api/src/test-api-container/index.ts')).toBe(
+        true,
+      );
+      snapshotTreeDir(tree, 'apps/test-api/src/test-api-container');
+
+      const server = tree.read(
+        'apps/test-api/src/test-api-container/server.ts',
+        'utf-8',
+      );
+      expect(server).toContain(
+        "import { createHTTPHandler } from '@trpc/server/adapters/standalone'",
+      );
+      expect(server).toContain("from '../router.js'");
+      expect(server).toContain("export const HEALTH_CHECK_PATH = '/health'");
+    });
+
+    it('should bind the container entry point to loopback unless HOST is set', async () => {
+      await tsTrpcApiGenerator(tree, ecsOptions('iam'));
+
+      const entry = tree.read(
+        'apps/test-api/src/test-api-container/index.ts',
+        'utf-8',
+      );
+      expect(entry).toContain("const HOST = process.env.HOST || '127.0.0.1'");
+      expect(entry).toContain('server.listen(PORT, HOST');
+    });
+
+    it('should drop the Lambda handler and the separate local server', async () => {
+      await tsTrpcApiGenerator(tree, ecsOptions('iam'));
+
+      expect(tree.exists('apps/test-api/src/handler.ts')).toBe(false);
+      expect(tree.exists('apps/test-api/src/local-server.ts')).toBe(false);
+      // The router, procedures and middleware are untouched.
+      expect(tree.exists('apps/test-api/src/router.ts')).toBe(true);
+      expect(tree.exists('apps/test-api/src/procedures/echo.ts')).toBe(true);
+    });
+
+    it('should keep the custom authorizer handler and its bundle', async () => {
+      await tsTrpcApiGenerator(tree, ecsOptions('custom'));
+
+      expect(tree.exists('apps/test-api/src/authorizer.ts')).toBe(true);
+      const rolldownConfig = tree.read(
+        'apps/test-api/rolldown.config.ts',
+        'utf-8',
+      );
+      expect(rolldownConfig).toContain("input: 'src/authorizer.ts'");
+      expect(rolldownConfig).not.toContain("input: 'src/handler.ts'");
+    });
+
+    it('should run the container entry point from a single serve target', async () => {
+      await tsTrpcApiGenerator(tree, ecsOptions('iam'));
+
+      const projectConfig = readProjectConfiguration(tree, '@proj/test-api');
+      expect(projectConfig.targets.serve.options.commands).toEqual([
+        'tsx --watch src/test-api-container/index.ts',
+      ]);
+      expect(projectConfig.targets.serve.options.env).toEqual({ PORT: '2022' });
+      expect(projectConfig.targets.dev.options.env).toEqual({
+        PORT: '2022',
+        LOCAL_DEV: 'true',
+      });
+      // ts#container's own serve target would start a second copy of the same
+      // server, so only the project's serve target is kept.
+      expect(projectConfig.targets['test-api-container-serve']).toBeUndefined();
+      expect(projectConfig.targets.dev.dependsOn).toBeUndefined();
+      // The image build targets ts#container vends are kept.
+      expect(projectConfig.targets['test-api-container-docker']).toBeDefined();
+      expect(projectConfig.targets['test-api-container-trivy']).toBeDefined();
+    });
+
+    it('should bundle the container entry point rather than a Lambda handler', async () => {
+      await tsTrpcApiGenerator(tree, ecsOptions('iam'));
+
+      const rolldownConfig = tree.read(
+        'apps/test-api/rolldown.config.ts',
+        'utf-8',
+      );
+      expect(rolldownConfig).toContain(
+        "input: 'src/test-api-container/index.ts'",
+      );
+      expect(rolldownConfig).not.toContain("input: 'src/handler.ts'");
+    });
+
+    it('should record the infra on the project', async () => {
+      await tsTrpcApiGenerator(tree, ecsOptions('iam'));
+
+      const projectConfig = readProjectConfiguration(tree, '@proj/test-api');
+      expect((projectConfig.metadata as Record<string, unknown>).infra).toBe(
+        'http-ecs',
+      );
+      expect(
+        (projectConfig.metadata as Record<string, unknown>).integrationPattern,
+      ).toBe('shared');
+    });
+
+    it('should reject the isolated integration pattern', async () => {
+      await expect(
+        tsTrpcApiGenerator(tree, {
+          ...ecsOptions('iam'),
+          integrationPattern: 'isolated',
+        }),
+      ).rejects.toThrow(/http-ecs needs integrationPattern 'shared'/);
+    });
+
+    it('should reject terraform', async () => {
+      await expect(
+        tsTrpcApiGenerator(tree, { ...ecsOptions('iam'), iac: 'terraform' }),
+      ).rejects.toThrow(/only implemented for the cdk IaC provider/);
+    });
+
+    it('should be idempotent when re-run with same options', async () => {
+      await tsTrpcApiGenerator(tree, ecsOptions('iam'));
+      const first = tree.read('apps/test-api/project.json', 'utf-8');
+      const firstRolldown = tree.read(
+        'apps/test-api/rolldown.config.ts',
+        'utf-8',
+      );
+
+      await tsTrpcApiGenerator(tree, ecsOptions('iam'));
+
+      expect(tree.read('apps/test-api/project.json', 'utf-8')).toEqual(first);
+      expect(tree.read('apps/test-api/rolldown.config.ts', 'utf-8')).toEqual(
+        firstRolldown,
+      );
+    });
+
+    it('should preserve a user edit to the container server on re-run', async () => {
+      await tsTrpcApiGenerator(tree, ecsOptions('iam'));
+      tree.write(
+        'apps/test-api/src/test-api-container/server.ts',
+        '// MY CUSTOM SERVER\n',
+      );
+
+      await tsTrpcApiGenerator(tree, ecsOptions('iam'));
+
+      expect(
+        tree.read('apps/test-api/src/test-api-container/server.ts', 'utf-8'),
+      ).toBe('// MY CUSTOM SERVER\n');
+    });
+  });
 });
