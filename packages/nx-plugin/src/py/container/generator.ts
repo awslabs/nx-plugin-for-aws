@@ -37,6 +37,7 @@ import { kebabCase, toClassName, toSnakeCase } from '../../utils/names.js';
 import { getNpmScope } from '../../utils/npm-scope.js';
 import {
   addArtifactDependencyToTargets,
+  addComponentDevTarget,
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
@@ -207,6 +208,11 @@ export const pyContainerGenerator = async (
       env: { PORT: `${port}`, LOCAL_DEV: 'true' },
     },
   };
+
+  // Aggregate the serve target under the project-level `dev` target, so
+  // `nx dev <project>` starts this service alongside the project's other
+  // components.
+  addComponentDevTarget(project.targets, `${targetPrefix}-serve`);
 
   // Written before the metadata calls, which re-read the project, so the port
   // assignPort reserved in metadata.ports is kept.

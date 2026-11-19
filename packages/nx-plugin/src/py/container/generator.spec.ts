@@ -184,7 +184,7 @@ describe('py#container generator', () => {
     expect(tree.exists(`${SRC}/container/.dockerignore`)).toBe(true);
   });
 
-  it('should add the serve, bundle, docker and trivy targets', async () => {
+  it('should add the serve, bundle, docker, trivy and dev targets', async () => {
     await pyContainerGenerator(tree, { project: PROJECT, iac: 'cdk' });
     const { targets } = readProject(tree);
 
@@ -221,6 +221,33 @@ describe('py#container generator', () => {
     expect(targets['container-trivy'].cache).toBe(false);
     expect(targets['container-trivy'].dependsOn).toEqual(['container-docker']);
     expect(targets.trivy.dependsOn).toContain('container-trivy');
+
+    expect(targets.dev).toEqual({
+      continuous: true,
+      dependsOn: ['container-serve'],
+    });
+  });
+
+  // `nx dev <project>` must start the container service, as it does for every
+  // other component generator that vends a continuous runner.
+  it('should aggregate the serve target under the project dev target', async () => {
+    await pyContainerGenerator(tree, {
+      project: PROJECT,
+      name: 'orders',
+      iac: 'cdk',
+    });
+    expect(readProject(tree).targets.dev).toEqual({
+      continuous: true,
+      dependsOn: ['orders-serve'],
+    });
+
+    // A re-run must not duplicate the entry.
+    await pyContainerGenerator(tree, {
+      project: PROJECT,
+      name: 'orders',
+      iac: 'cdk',
+    });
+    expect(readProject(tree).targets.dev.dependsOn).toEqual(['orders-serve']);
   });
 
   // The clients the connection generators vend branch on LOCAL_DEV, so
