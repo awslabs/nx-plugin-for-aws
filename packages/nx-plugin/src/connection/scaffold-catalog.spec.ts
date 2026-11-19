@@ -150,6 +150,26 @@ describe('scaffold catalog', () => {
           snakeCaseName: true,
         },
       },
+      'ts#container': {
+        label: 'Container',
+        generator: 'ts#container',
+        kind: 'component',
+        host: {
+          generator: 'ts#project',
+          options: {},
+          snakeCaseName: false,
+        },
+      },
+      'py#container': {
+        label: 'Container',
+        generator: 'py#container',
+        kind: 'component',
+        host: {
+          generator: 'py#project',
+          options: { type: 'application' },
+          snakeCaseName: true,
+        },
+      },
     });
   });
 

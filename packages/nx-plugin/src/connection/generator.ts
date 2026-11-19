@@ -17,11 +17,13 @@ import pyAgentGatewayConnectionGenerator from '../py/agent/gateway-connection/ge
 import pyAgentMcpConnectionGenerator from '../py/agent/mcp-connection/generator.js';
 import pyAgentReactConnectionGenerator from '../py/agent/react-connection/generator.js';
 import pyDynamoDBAgentConnectionGenerator from '../py/dynamodb/agent-connection/generator.js';
+import pyDynamoDBContainerConnectionGenerator from '../py/dynamodb/container-connection/generator.js';
 import pyDynamoDBFastApiConnectionGenerator from '../py/dynamodb/fast-api-connection/generator.js';
 import { PY_DYNAMODB_GENERATOR_INFO } from '../py/dynamodb/generator.js';
 import pyDynamoDBMcpServerConnectionGenerator from '../py/dynamodb/mcp-server-connection/generator.js';
 import fastApiReactGenerator from '../py/fast-api/react/generator.js';
 import pyRdbAgentConnectionGenerator from '../py/rdb/agent-connection/generator.js';
+import pyRdbContainerConnectionGenerator from '../py/rdb/container-connection/generator.js';
 import pyRdbFastApiConnectionGenerator from '../py/rdb/fast-api-connection/generator.js';
 import { PY_RDB_GENERATOR_INFO } from '../py/rdb/generator.js';
 import pyRdbMcpServerConnectionGenerator from '../py/rdb/mcp-server-connection/generator.js';
@@ -34,11 +36,13 @@ import tsAgentGatewayConnectionGenerator from '../ts/agent/gateway-connection/ge
 import tsAgentMcpConnectionGenerator from '../ts/agent/mcp-connection/generator.js';
 import tsAgentReactConnectionGenerator from '../ts/agent/react-connection/generator.js';
 import tsDynamoDBAgentConnectionGenerator from '../ts/dynamodb/agent-connection/generator.js';
+import tsDynamoDBContainerConnectionGenerator from '../ts/dynamodb/container-connection/generator.js';
 import { TS_DYNAMODB_GENERATOR_INFO } from '../ts/dynamodb/generator.js';
 import tsDynamoDBMcpServerConnectionGenerator from '../ts/dynamodb/mcp-server-connection/generator.js';
 import tsDynamoDBSmithyConnectionGenerator from '../ts/dynamodb/smithy-connection/generator.js';
 import tsDynamoDBTrpcConnectionGenerator from '../ts/dynamodb/trpc-connection/generator.js';
 import tsRdbAgentConnectionGenerator from '../ts/rdb/agent-connection/generator.js';
+import tsRdbContainerConnectionGenerator from '../ts/rdb/container-connection/generator.js';
 import { TS_RDB_GENERATOR_INFO } from '../ts/rdb/generator.js';
 import tsRdbMcpServerConnectionGenerator from '../ts/rdb/mcp-server-connection/generator.js';
 import tsRdbSmithyConnectionGenerator from '../ts/rdb/smithy-connection/generator.js';
@@ -175,6 +179,15 @@ const CONNECTION_GENERATORS = {
     pyRdbAgentConnectionGenerator(tree, options),
   'py#mcp-server -> py#rdb': (tree, options) =>
     pyRdbMcpServerConnectionGenerator(tree, options),
+  // Container services (ts#container / py#container)
+  'ts#container -> ts#rdb': (tree, options) =>
+    tsRdbContainerConnectionGenerator(tree, options),
+  'py#container -> py#rdb': (tree, options) =>
+    pyRdbContainerConnectionGenerator(tree, options),
+  'ts#container -> ts#dynamodb': (tree, options) =>
+    tsDynamoDBContainerConnectionGenerator(tree, options),
+  'py#container -> py#dynamodb': (tree, options) =>
+    pyDynamoDBContainerConnectionGenerator(tree, options),
 } satisfies Record<
   ConnectionKey,
   (tree: Tree, options: ResolvedConnectionOptions) => Promise<any>
@@ -283,6 +296,14 @@ const validateComponent = (
 
 /**
  * Narrow candidates based on the user's specified component reference.
+ *
+ * A named component never resolves to a different component of the same
+ * project. If its generator has a connection on this side, only that component
+ * is kept. If not, the named component and the project itself are kept, so a
+ * project-level connection can still match (for example a tRPC API named by
+ * one of its handlers), and otherwise the caller reports an unsupported
+ * connection. Keeping every candidate would, for example, connect a website to
+ * an agent in the same project when the user named a container service.
  */
 const filterConnectionCandidatesForComponentReference = (
   componentRef: string | undefined,
@@ -300,7 +321,9 @@ const filterConnectionCandidatesForComponentReference = (
   const isConnectionParticipant = supportedConnections.some(
     (c) => c[side] === component.generator,
   );
-  if (!isConnectionParticipant) return candidates;
+  if (!isConnectionParticipant) {
+    return candidates.filter((c) => !c.component || c.component === component);
+  }
   // Filter to the specific matched component, not all components with the same generator
   return candidates.filter((c) => c.component === component);
 };

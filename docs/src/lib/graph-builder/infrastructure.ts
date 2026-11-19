@@ -219,6 +219,7 @@ const BLUEPRINTS: Readonly<Record<string, Blueprint>> = {
 
   ...dynamodbBlueprints('ts#dynamodb', 'py#dynamodb'),
   ...rdbBlueprints('ts#rdb', 'py#rdb'),
+  ...containerServiceBlueprints('ts#container', 'py#container'),
 
   // Generators with no node type of their own: they add to a project rather than
   // taking part in a connection, so they are named here.
@@ -561,6 +562,49 @@ function rdbBlueprints(...types: string[]): Record<string, Blueprint> {
       { from: 'migrations', to: 'aurora-mysql' },
     ],
     caller: { label: 'Application', detail: 'Lambda, agent, …' },
+  };
+  return Object.fromEntries(types.map((type) => [type, blueprint]));
+}
+
+/**
+ * The container service blueprint: an ECS service on Fargate in your VPC, with
+ * no load balancer or API.
+ */
+function containerServiceBlueprints(
+  ...types: string[]
+): Record<string, Blueprint> {
+  const blueprint: Blueprint = {
+    resources: [
+      {
+        id: 'ecs',
+        label: 'ECS',
+        detail: 'Fargate service',
+        icon: 'ecs',
+        column: 0,
+        row: 0,
+        when: { infra: 'ecs' },
+      },
+      {
+        id: 'ecr',
+        label: 'ECR',
+        detail: 'Container image',
+        icon: 'ecr',
+        column: 0,
+        row: 1,
+        when: { infra: 'ecs' },
+      },
+      {
+        id: 'local',
+        label: 'Service',
+        detail: 'local process',
+        column: 0,
+        row: 0,
+        when: { infra: 'none' },
+      },
+    ],
+    path: ['ecs', 'local'],
+    links: [{ from: 'ecr', to: 'ecs' }],
+    caller: { label: 'Client' },
   };
   return Object.fromEntries(types.map((type) => [type, blueprint]));
 }

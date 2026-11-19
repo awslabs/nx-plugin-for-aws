@@ -6,8 +6,20 @@
 import type { Tree } from '@nx/devkit';
 import { agentcoreGatewayGenerator } from '../sdk/agentcore-gateway';
 import { connectionGenerator } from '../sdk/connection';
-import { pyAgentGenerator, pyProjectGenerator } from '../sdk/py';
-import { tsAgentGenerator, tsProjectGenerator } from '../sdk/ts';
+import {
+  pyAgentGenerator,
+  pyContainerGenerator,
+  pyDynamoDBGenerator,
+  pyProjectGenerator,
+  pyRdbGenerator,
+} from '../sdk/py';
+import {
+  tsAgentGenerator,
+  tsContainerGenerator,
+  tsDynamoDBGenerator,
+  tsProjectGenerator,
+  tsRdbGenerator,
+} from '../sdk/ts';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
@@ -256,5 +268,134 @@ describe('catalog guard parity', () => {
         }),
       ).resolves.toBeDefined();
     });
+  });
+
+  // Container services: each connection guard reads its catalog entry, and
+  // these cases run the generators to show every constraint fires.
+  const containerProjects = async (tree: Tree) => {
+    await tsProjectGenerator(tree, {
+      name: 'ts-svc',
+      directory: 'packages',
+      preferInstallDependencies: false,
+    });
+    await pyProjectGenerator(tree, {
+      name: 'py-svc',
+      directory: 'packages',
+      type: 'application',
+      preferInstallDependencies: false,
+    });
+  };
+
+  const container = (
+    tree: Tree,
+    kind: 'ts' | 'py',
+    name: string,
+    options: { infra?: string },
+  ) =>
+    (kind === 'ts' ? tsContainerGenerator : pyContainerGenerator)(tree, {
+      project: kind === 'ts' ? 'ts-svc' : 'py_svc',
+      name,
+      infra: options.infra as never,
+      iac: 'inherit',
+      preferInstallDependencies: false,
+    });
+
+  const reasonOf = (key: string, option: string) =>
+    constraintsFor(key).find((c) => c.option === option)?.reason as string;
+
+  describe('container data stores', () => {
+    const DATA_STORES = [
+      ['ts#container -> ts#rdb', 'ts', 'db'],
+      ['py#container -> py#rdb', 'py', 'pydb'],
+      ['ts#container -> ts#dynamodb', 'ts', 'table'],
+      ['py#container -> py#dynamodb', 'py', 'pytable'],
+    ] as const;
+
+    const dataStore = (tree: Tree, name: string) => {
+      const common = {
+        name,
+        directory: 'packages',
+        iac: 'inherit',
+        preferInstallDependencies: false,
+      } as const;
+      switch (name) {
+        case 'db':
+          return tsRdbGenerator(tree, {
+            ...common,
+            infra: 'aurora',
+            engine: 'postgres',
+            framework: 'prisma',
+          });
+        case 'pydb':
+          return pyRdbGenerator(tree, {
+            ...common,
+            infra: 'aurora',
+            engine: 'postgres',
+            framework: 'sqlmodel',
+          });
+        case 'table':
+          return tsDynamoDBGenerator(tree, {
+            ...common,
+            infra: 'dynamodb',
+            framework: 'electrodb',
+          });
+        default:
+          return pyDynamoDBGenerator(tree, {
+            ...common,
+            infra: 'dynamodb',
+            framework: 'pynamodb',
+          });
+      }
+    };
+
+    const dataSetup = async (
+      kind: 'ts' | 'py',
+      name: string,
+      infra: string,
+    ) => {
+      const tree = await setup();
+      await containerProjects(tree);
+      await container(tree, kind, 'orders', { infra });
+      await dataStore(tree, name);
+      return tree;
+    };
+
+    const connectFrom = (tree: Tree, kind: 'ts' | 'py', name: string) =>
+      connectionGenerator(tree, {
+        sourceProject: kind === 'ts' ? 'ts-svc' : 'py_svc',
+        sourceComponent: 'orders',
+        targetProject: name,
+        preferInstallDependencies: false,
+      });
+
+    it.each(DATA_STORES)('declares source infra ecs for %s', (key) => {
+      expect(constraintsFor(key)).toEqual([
+        expect.objectContaining({
+          side: 'source',
+          option: 'infra',
+          equals: 'ecs',
+        }),
+      ]);
+    });
+
+    it.each(DATA_STORES)(
+      'connects an ecs service for %s',
+      async (_key, kind, name) => {
+        const tree = await dataSetup(kind, name, 'ecs');
+
+        await expect(connectFrom(tree, kind, name)).resolves.toBeDefined();
+      },
+    );
+
+    it.each(DATA_STORES)(
+      'rejects a service with no infrastructure for %s',
+      async (key, kind, name) => {
+        const tree = await dataSetup(kind, name, 'none');
+
+        await expect(connectFrom(tree, kind, name)).rejects.toThrow(
+          reasonOf(key, 'infra'),
+        );
+      },
+    );
   });
 });

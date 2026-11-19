@@ -575,6 +575,8 @@ export default defineConfig({
                     },
                   ],
                 },
+                { label: 'ts#container', link: '/guides/ts-container' },
+                { label: 'py#container', link: '/guides/py-container' },
               ],
             },
             {

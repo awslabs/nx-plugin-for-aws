@@ -18,6 +18,9 @@ export type { TsApiGeneratorSchema } from '../ts/api/schema';
 // Astro Documentation Site Generator
 export { tsAstroDocsGenerator } from '../ts/astro-docs/generator.js';
 export type { TsAstroDocsGeneratorSchema } from '../ts/astro-docs/schema';
+// TypeScript Container Generator
+export { tsContainerGenerator } from '../ts/container/generator.js';
+export type { TsContainerGeneratorSchema } from '../ts/container/schema';
 // TypeScript DCR Proxy Generator
 export { tsDcrProxyGenerator } from '../ts/dcr-proxy/generator.js';
 export type { TsDcrProxyGeneratorSchema } from '../ts/dcr-proxy/schema';

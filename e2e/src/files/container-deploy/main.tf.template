@@ -1,0 +1,440 @@
+#
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+
+# Wiring for the container-deploy smoke test. Provisions a minimal VPC with
+# one NAT gateway, plus one ts#container and one py#container service running
+# privately in its private subnets, with no inbound rule. It also deploys the
+# far ends of the four container data connections (a DynamoDB table per
+# language and one Aurora PostgreSQL cluster) with the grants the connection
+# generators print.
+
+# A random value per test run. Each service logs it with the result of its
+# startup checks, so a log line from an earlier run cannot pass the test.
+variable "e2e_check_token" {
+  type    = string
+  default = "<% E2E_CHECK_TOKEN %>"
+}
+
+# Shared asset registry, which hosts both services' images and the
+# database's migration image.
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
+
+  repository_name_prefix = "e2e-container-<% TEST_RUN_ID %>"
+}
+
+# Shared runtime-config AppConfig application.
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "e2e-container-runtime-config-<% TEST_RUN_ID %>"
+}
+
+# Shared asset bucket, which stages the database's create-db-user Lambda zip.
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+
+  bucket_name_prefix = "e2e-container-<% TEST_RUN_ID %>"
+}
+
+# ---------------------------------------------------------------------------
+# VPC (shared by both services)
+# ---------------------------------------------------------------------------
+
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
+resource "aws_vpc" "container" {
+  #checkov:skip=CKV2_AWS_11:Flow logs are not required for ephemeral e2e test infrastructure
+  #checkov:skip=CKV2_AWS_12:Default security group restrictions are not required for ephemeral e2e test infrastructure
+  cidr_block           = "10.0.0.0/16"
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+  tags                 = { Name = "e2e-container-<% TEST_RUN_ID %>" }
+}
+
+resource "aws_subnet" "container_private_a" {
+  vpc_id            = aws_vpc.container.id
+  cidr_block        = "10.0.0.0/24"
+  availability_zone = data.aws_availability_zones.available.names[0]
+  tags              = { Name = "e2e-container-private-a-<% TEST_RUN_ID %>" }
+}
+
+resource "aws_subnet" "container_private_b" {
+  vpc_id            = aws_vpc.container.id
+  cidr_block        = "10.0.1.0/24"
+  availability_zone = data.aws_availability_zones.available.names[1]
+  tags              = { Name = "e2e-container-private-b-<% TEST_RUN_ID %>" }
+}
+
+resource "aws_internet_gateway" "container" {
+  vpc_id = aws_vpc.container.id
+  tags   = { Name = "e2e-container-igw-<% TEST_RUN_ID %>" }
+}
+
+resource "aws_subnet" "container_public_a" {
+  vpc_id            = aws_vpc.container.id
+  cidr_block        = "10.0.2.0/24"
+  availability_zone = data.aws_availability_zones.available.names[0]
+  tags              = { Name = "e2e-container-public-a-<% TEST_RUN_ID %>" }
+}
+
+# The NAT gateway reaches the internet through this route, so tasks in the
+# private subnets can pull images and send logs.
+resource "aws_route_table" "container_public" {
+  vpc_id = aws_vpc.container.id
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.container.id
+  }
+  tags = { Name = "e2e-container-public-rt-<% TEST_RUN_ID %>" }
+}
+
+resource "aws_route_table_association" "container_public_a" {
+  subnet_id      = aws_subnet.container_public_a.id
+  route_table_id = aws_route_table.container_public.id
+}
+
+resource "aws_eip" "container_nat" {
+  domain = "vpc"
+  tags   = { Name = "e2e-container-nat-eip-<% TEST_RUN_ID %>" }
+}
+
+resource "aws_nat_gateway" "container" {
+  allocation_id = aws_eip.container_nat.id
+  subnet_id     = aws_subnet.container_public_a.id
+  tags          = { Name = "e2e-container-nat-<% TEST_RUN_ID %>" }
+  depends_on    = [aws_internet_gateway.container]
+}
+
+resource "aws_route_table" "container_private" {
+  vpc_id = aws_vpc.container.id
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.container.id
+  }
+  tags = { Name = "e2e-container-private-rt-<% TEST_RUN_ID %>" }
+}
+
+resource "aws_route_table_association" "container_private_a" {
+  subnet_id      = aws_subnet.container_private_a.id
+  route_table_id = aws_route_table.container_private.id
+}
+
+resource "aws_route_table_association" "container_private_b" {
+  subnet_id      = aws_subnet.container_private_b.id
+  route_table_id = aws_route_table.container_private.id
+}
+
+# ---------------------------------------------------------------------------
+# Container services (TypeScript and Python)
+# ---------------------------------------------------------------------------
+
+module "ts_service" {
+  source = "../../common/terraform/src/app/services/ts-service"
+
+  vpc_id     = aws_vpc.container.id
+  subnet_ids = [aws_subnet.container_private_a.id, aws_subnet.container_private_b.id]
+
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+  asset_ecr_repository_arn = module.asset_ecr.repository_arn
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  environment = { E2E_CHECK_TOKEN = var.e2e_check_token }
+}
+
+module "py_service" {
+  source = "../../common/terraform/src/app/services/py-service"
+
+  vpc_id     = aws_vpc.container.id
+  subnet_ids = [aws_subnet.container_private_a.id, aws_subnet.container_private_b.id]
+
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+  asset_ecr_repository_arn = module.asset_ecr.repository_arn
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  environment = { E2E_CHECK_TOKEN = var.e2e_check_token }
+}
+
+# ---------------------------------------------------------------------------
+# Connections the services check, with the grants their generators print
+# ---------------------------------------------------------------------------
+
+# ts_service -> my_table and py_service -> my_py_table: each service writes
+# and reads its language's table.
+module "my_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-table"
+
+  deletion_protection_enabled = false
+}
+
+resource "aws_iam_role_policy" "ts_service_my_table_access" {
+  name = "ts-service-my-table-access"
+  role = module.ts_service.task_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:Scan",
+          "dynamodb:BatchGetItem", "dynamodb:BatchWriteItem",
+        ]
+        Resource = [
+          module.my_table.table_arn,
+          "${module.my_table.table_arn}/index/*",
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey",
+        ]
+        Resource = [module.my_table.kms_key_arn]
+      },
+    ]
+  })
+}
+
+module "my_py_table" {
+  source = "../../common/terraform/src/app/dynamodb/my-py-table"
+
+  deletion_protection_enabled = false
+}
+
+resource "aws_iam_role_policy" "py_service_my_py_table_access" {
+  name = "py-service-my-py-table-access"
+  role = module.py_service.task_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:Scan",
+          "dynamodb:BatchGetItem", "dynamodb:BatchWriteItem",
+        ]
+        Resource = [
+          module.my_py_table.table_arn,
+          "${module.my_py_table.table_arn}/index/*",
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey",
+        ]
+        Resource = [module.my_py_table.kms_key_arn]
+      },
+    ]
+  })
+}
+
+# ts_service -> postgres_db and py_service -> py_postgres_db: one Aurora
+# cluster serves both, to keep the run's create and delete time to one
+# cluster. The ts#rdb module deploys it (its migration creates the tables both
+# services use); the py#rdb module is not deployed here, and the
+# py_postgres_db_runtime_config entry below gives the Python client the same
+# cluster's settings under its own key. The rdb deploy tests deploy both
+# modules. Settings as in terraform-deploy-rdb (no RDS Proxy, no backup), to
+# save cost and time.
+module "postgres_db" {
+  source = "../../common/terraform/src/app/dbs/postgres-db"
+
+  vpc_id              = aws_vpc.container.id
+  database_subnet_ids = [aws_subnet.container_private_a.id, aws_subnet.container_private_b.id]
+  lambda_subnet_ids   = [aws_subnet.container_private_a.id, aws_subnet.container_private_b.id]
+  asset_bucket_name   = module.asset_bucket.bucket_name
+
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+
+  deletion_protection = false
+  skip_final_snapshot = true
+  enable_rds_proxy    = false
+  enable_backup       = false
+}
+
+# The values the postgres_db module writes under its own key (PostgresDb),
+# except the database and admin user names: the postgres-db module has no
+# database_name or admin_user output (only its inner aurora module does), so
+# they are the ts#rdb generator's defaults for postgres-db.
+module "py_postgres_db_runtime_config" {
+  source = "../../common/terraform/src/core/runtime-config/entry"
+
+  namespace = "database"
+  key       = "PyPostgresDb"
+  value = {
+    hostname  = module.postgres_db.cluster_endpoint
+    port      = module.postgres_db.cluster_port
+    database  = "postgres_db"
+    adminUser = "dbadmin"
+    dbUser    = module.postgres_db.database_runtime_user
+    region    = data.aws_region.current.region
+  }
+}
+
+resource "aws_iam_role_policy" "ts_service_postgres_db_connect" {
+  name = "ts-service-postgres-db-connect"
+  role = module.ts_service.task_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["rds-db:connect"]
+        Resource = ["arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.postgres_db.connect_resource_id}/${module.postgres_db.database_runtime_user}"]
+      },
+    ]
+  })
+}
+
+resource "aws_vpc_security_group_ingress_rule" "ts_service_to_postgres_db" {
+  description                  = "Allow the ts-service container service to connect to the database"
+  security_group_id            = module.postgres_db.security_group_id
+  referenced_security_group_id = module.ts_service.security_group_id
+  from_port                    = module.postgres_db.cluster_port
+  to_port                      = module.postgres_db.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "ts_service_to_postgres_db" {
+  description                  = "Allow the ts-service container service to reach the database"
+  security_group_id            = module.ts_service.security_group_id
+  referenced_security_group_id = module.postgres_db.security_group_id
+  from_port                    = module.postgres_db.cluster_port
+  to_port                      = module.postgres_db.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_iam_role_policy" "py_service_postgres_db_connect" {
+  name = "py-service-postgres-db-connect"
+  role = module.py_service.task_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["rds-db:connect"]
+        Resource = ["arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.postgres_db.connect_resource_id}/${module.postgres_db.database_runtime_user}"]
+      },
+    ]
+  })
+}
+
+resource "aws_vpc_security_group_ingress_rule" "py_service_to_postgres_db" {
+  description                  = "Allow the py-service container service to connect to the database"
+  security_group_id            = module.postgres_db.security_group_id
+  referenced_security_group_id = module.py_service.security_group_id
+  from_port                    = module.postgres_db.cluster_port
+  to_port                      = module.postgres_db.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "py_service_to_postgres_db" {
+  description                  = "Allow the py-service container service to reach the database"
+  security_group_id            = module.py_service.security_group_id
+  referenced_security_group_id = module.postgres_db.security_group_id
+  from_port                    = module.postgres_db.cluster_port
+  to_port                      = module.postgres_db.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+# Deploys the runtime configuration every module above contributes: the
+# table names and the database settings, read by the services.
+module "runtime_config_appconfig_deployment" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig-deployment"
+
+  application_id            = module.runtime_config_appconfig.application_id
+  environment_id            = module.runtime_config_appconfig.environment_id
+  deployment_strategy_id    = module.runtime_config_appconfig.deployment_strategy_id
+  configuration_profile_ids = module.runtime_config_appconfig.configuration_profile_ids
+  namespaces                = module.runtime_config_appconfig.namespaces
+
+  depends_on = [
+    module.ts_service,
+    module.py_service,
+    module.my_table,
+    module.my_py_table,
+    module.postgres_db,
+    module.py_postgres_db_runtime_config,
+  ]
+}
+
+# What the test reads to check each service.
+output "ts_service_cluster_arn" {
+  value = module.ts_service.cluster_arn
+}
+
+output "ts_service_name" {
+  value = module.ts_service.service_name
+}
+
+output "ts_service_security_group_id" {
+  value = module.ts_service.security_group_id
+}
+
+output "ts_service_log_group_name" {
+  value = module.ts_service.log_group_name
+}
+
+output "py_service_cluster_arn" {
+  value = module.py_service.cluster_arn
+}
+
+output "py_service_name" {
+  value = module.py_service.service_name
+}
+
+output "py_service_security_group_id" {
+  value = module.py_service.security_group_id
+}
+
+output "py_service_log_group_name" {
+  value = module.py_service.log_group_name
+}
+
+# Ids the test's leftover check confirms are deleted after destroy.
+output "my_table_name" {
+  value = module.my_table.table_name
+}
+
+output "my_py_table_name" {
+  value = module.my_py_table.table_name
+}
+
+output "postgres_db_cluster_arn" {
+  value = module.postgres_db.cluster_arn
+}
+
+output "postgres_db_secret_arn" {
+  value = module.postgres_db.secret_arn
+}
+
+output "asset_bucket_name" {
+  value = module.asset_bucket.bucket_name
+}
+
+output "runtime_config_application_id" {
+  value = module.runtime_config_appconfig.application_id
+}

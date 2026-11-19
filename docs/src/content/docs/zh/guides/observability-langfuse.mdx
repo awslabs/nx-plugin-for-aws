@@ -1,0 +1,146 @@
+---
+title: Langfuse 可观测性
+description: 将现有 Python Strands 代理的应用程序跟踪导出到 Langfuse
+generator: observability#langfuse
+---
+
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Link from '@components/link.astro';
+
+为现有的 `py#agent` 添加 Langfuse 跟踪查看功能，支持本地开发和部署后使用。此实验性组件生成器支持 **Python Strands、HTTP、AgentCore zip 部署（`infra: agentcore`）、CDK 和 IAM 身份验证**。它保留代理的模型、工具和配置的会话存储。
+
+其他语言、框架、协议、MCP 服务器、容器、Terraform 和 `infra: none` 会被拒绝。Langfuse 导出选择 AgentCore 平台 V1，并在 V2 的 CDK 验证中失败：凭证和导出器连接不得在未限定的启动快照中捕获。生成器不会部署 Langfuse 或创建密钥。
+
+现有代理继续使用其生成的跟踪设置，除非您运行此生成器。Langfuse 在下次本地 `dev` 运行时启动；已部署的代理在您重新构建和重新部署后切换。作为实验性生成器，其输出可能会在没有升级迁移的情况下更改；用户必须自行审查和协调这些更改。
+
+## CloudWatch 影响
+
+:::caution[应用程序跟踪移至 Langfuse]
+对于已部署的代理，启用 Langfuse 会禁用 ADOT 并更改 zip 入口点。**来自代理、模型调用和工具的新应用程序跨度将发送到 Langfuse 而不是 CloudWatch。** 它们将从 CloudWatch GenAI Observability 和 Transaction Search 中消失。**不支持双重导出。** 本地调用也会导出到 Langfuse；它们的 stdout/stderr 仍保留在本地终端中。
+:::
+
+| 信号或功能 | 启用 Langfuse 后的效果 |
+| --- | --- |
+| 代理/模型/工具应用程序跨度 | 导出到 Langfuse。这些跨度不再传递到 `aws/spans` 或运行时的应用程序跨度流。 |
+| 运行时服务指标 | Invocations、Latency、UserErrors 和 SystemErrors 仍在 CloudWatch 中可用。 |
+| 代理 stdout/stderr | Uvicorn 日志和应用程序输出仍会发送到运行时的 CloudWatch 日志组。因此，您的应用打印的提示或工具结果也可以保留在 AWS 日志中。 |
+| ADOT 结构化遥测日志 | 随 ADOT 一起禁用。普通应用程序日志继续独立运行。恢复 ADOT 会恢复其结构化遥测日志。 |
+| 单独传递的 AgentCore 服务跨度 | 不会被此应用程序导出器重定向。检查 Memory、Gateway、Identity 和内置工具的单独传递配置；此集成不配置或保证它们的传递。 |
+| AgentCore Evaluations | 基于 CloudWatch 的在线/批量评估和 `CloudWatchAgentSpanCollector` 会丢失此代理的新应用程序跨度。按需 Evaluate API 可以接受调用者提供的跨度，但此生成器不提供替代收集器。 |
+| 应用程序测试、仪表板和评估作业 | 生成的应用程序测试不需要 CloudWatch 跟踪。任何从 CloudWatch 读取应用程序跨度的仪表板、警报或评估作业都会丢失这些新跨度。在启用 Langfuse 之前，检查每个集成使用的跟踪源。 |
+
+有关服务传递和评估要求，请参阅 AWS 的[支持的评估遥测](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/supported-frameworks-telemetry.html)和[可观测性配置](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html)。
+
+### 数据驻留和成本
+
+来自**本地和已部署调用**的提示、完成、模型使用情况以及工具输入/输出会发送到配置的 Langfuse 端点。使用 Langfuse Cloud 时，此数据会离开您的笔记本电脑或 AWS 环境，发送到第三方服务。使用自托管 Langfuse 时，它会发送到您选择的主机。在启用导出之前，请根据您的数据处理要求检查该端点、区域、保留期和访问控制。此生成器不会编辑跟踪内容。
+
+与关闭的应用程序跟踪相关的 CloudWatch/X-Ray 使用费用会减少；运行时指标和日志费用保持不变。Langfuse 有自己的计划或托管成本，Secrets Manager 和出站传输可能会增加费用。此版本中没有双重导出成本。
+
+导出器批处理跨度，并在每次调用的最终响应帧之前尝试刷新，刷新超时为 8 秒，保护时间为 10 秒。这可能会在最终响应帧之前增加最多 10 秒的延迟。导出失败或进程中断仍可能丢失遥测数据；跟踪不是持久的审计日志。
+
+## 使用方法
+
+在运行此生成器之前，提交您现有的工作区更改。单独审查和提交 Langfuse 更改（包括依赖项安装），以便您以后可以还原集成。
+
+### 选择现有代理
+
+<RunGenerator generator="observability#langfuse" />
+
+使用 `project.json` 中记录的项目名称。如果它包含多个代理，还要使用 `--agent` 传递代理组件的名称。
+
+<GeneratorParameters generator="observability#langfuse" />
+
+### 准备密钥和端点
+
+在选择保存跟踪数据的位置时，我们建议[在 AWS 上自托管 Langfuse](https://langfuse.com/self-hosting)。使用现有的、安全的 HTTPS 安装；此生成器不会配置一个。当您明确选择其端点时，也支持 Langfuse Cloud。
+
+在代理的 AWS 账户和区域中创建 Secrets Manager 密钥。其 JSON 必须包含字符串字段 `LANGFUSE_PUBLIC_KEY` 和 `LANGFUSE_SECRET_KEY`，其中包含您的 Langfuse 项目的密钥。使用 Secrets Manager 控制台或经批准的密钥管理流程；不要将密钥放在生成器标志、源文件、shell 历史记录或运行时环境变量中。
+
+对于此第一个版本，请使用 AWS 托管的 Secrets Manager 加密密钥。使用客户托管的 KMS 密钥加密的密钥需要额外的、明确范围的解密授权，而此生成器不会创建该授权。
+
+传递密钥的**完整 ARN**（包括其六字符后缀）以及现有 Langfuse 部署的 HTTPS 基础 URL，例如您已在 AWS 上托管的 URL。该端点必须可从**您的开发机器和已部署的代理**访问。**没有默认目标；首次使用时需要 `--host`。** 此实验性生成器接受 `aws`、`aws-us-gov` 和 `aws-cn` 分区中的 ARN；不支持 ISO 分区。
+
+```sh
+pnpm nx g @aws/nx-plugin:observability#langfuse \
+  --project=my_agent \
+  --secretArn="$LANGFUSE_SECRET_ARN" \
+  --host=https://langfuse.example.com
+```
+
+这里 `LANGFUSE_SECRET_ARN` 仅包含 ARN，而不是密钥。CDK 在该 ARN 上授予 `secretsmanager:GetSecretValue`。应用程序在进程启动时加载两个密钥一次，并在内存中构造基本身份验证。在轮换密钥时安排运行时重启；未更改的 CDK 部署不会刷新正在运行的进程。
+
+CDK 助手将主机和密钥 ARN 写入 AppConfig 的 `agentcore.langfuse.<AgentClass>`，保留其他代理的条目。已部署的启动通过 `get_agentcore_runtime_config()` 读取此条目，使用代理现有的 AppConfig 读取授权。生成的运行时设置 `DISABLE_ADOT_OBSERVABILITY=true`，以便 AgentCore 的托管 ADOT 管道将跟踪留给应用程序；主机和密钥 ARN 不是运行时环境变量。
+
+将 `https://langfuse.example.com` 替换为您现有的端点。要使用 Langfuse Cloud，请明确传递其区域基础 URL，例如欧盟的 `https://cloud.langfuse.com` 或美国的 `https://us.cloud.langfuse.com`。支持路径前缀。提供基础 URL，不带 `/api/public/otel`；URL 中的凭证、查询参数和片段会被拒绝。重复运行会保留先前的主机和密钥，除非您提供替换；将任一输入留空会保留其保存的值。
+
+导出器使用带有 `x-langfuse-ingestion-version: 4` 的 OTLP/HTTP。自托管安装必须支持该摄取合约。在选择端点时，请参阅 Langfuse 的 [OpenTelemetry 集成](https://langfuse.com/integrations/native/opentelemetry)和 [v4 迁移指南](https://langfuse.com/integrations/native/opentelemetry/migration-to-v4)。
+
+### 本地运行
+
+使用您的正常 AWS 开发凭证，例如使用 `AWS_PROFILE` 选择的经过身份验证的 AWS 配置文件。该身份需要对所选密钥具有 `secretsmanager:GetSecretValue` 权限，以及您的代理通常需要的模型和工具权限。生成的执行角色授权涵盖已部署的代理；它不会向您的开发者身份授予权限。
+
+```sh
+pnpm nx run my_agent:dev
+```
+
+代理的 `dev` 和 `serve` 目标通过 Uvicorn 运行 `langfuse_dev.py`，并启用自动重新加载。它仅存储主机和密钥 ARN，从 Secrets Manager 读取密钥，并在导入代理之前初始化跟踪。**启动本地跟踪不需要已部署的 AppConfig 应用程序。** 分配的本地端口会被保留。密钥永远不会从本地 `.env` 文件或 Langfuse 环境变量中读取。
+
+**本地开发可以在没有 Langfuse 密钥访问权限的情况下运行。** 如果无法加载其配置或凭证，启动会记录警告，本地代理会继续运行而不导出 Langfuse。请求不会重试密钥查找。修复您的 AWS 凭证、密钥读取权限或配置，然后重启 `dev`/`serve` 以启用跟踪。您的代理仍需要其正常的模型和工具权限。当无法加载 Langfuse 凭证时，已部署的代理会继续启动失败。
+
+使用其生成的聊天客户端或 HTTP 端点调用本地代理。本地和已部署的调用使用相同的 Langfuse 目标和会话映射。代理的本地 HTTP 服务器保持其正常行为；HTTPS 要求适用于 Langfuse 目标。不支持仅限笔记本电脑的 Langfuse 端点，例如 `http://localhost:3000`。
+
+构建、OpenAPI 生成和生成的测试不会获取 Langfuse 密钥。生成的离线 Python 测试使用合成凭证和内存导出器检查本地配置和 AppConfig 配置。
+
+### 构建、部署和检查跟踪
+
+按照 <Link path="guides/py-agent">Python 代理指南</Link>中的描述构建您的工作区。生成器更改部署文件；它不会部署它们。
+
+:::caution[对配置更改使用启用回滚的部署]
+在现有堆栈上启用 Langfuse、更改其主机或密钥 ARN 或还原集成会替换不可变的 AppConfig 配置版本。生成的 `deploy-sandbox` 目标默认使用禁用回滚的快速模式，这会拒绝资源替换，并可能使堆栈处于 `UPDATE_FAILED` 状态。
+
+对这些更改使用启用回滚的标准部署。将 `my_infra` 替换为您的基础设施项目名称：
+
+```sh
+pnpm nx run my_infra:deploy-sandbox --no-express --rollback
+```
+
+对于其他阶段，使用带有显式阶段或堆栈选择器并启用回滚的 `deploy` 目标，如 <Link path="guides/typescript-infrastructure">基础设施指南</Link>中所述。
+
+如果较早的部署已使堆栈处于 `UPDATE_FAILED` 状态，请在切换部署模式之前恢复它。CloudFormation 可能要求后续操作使用相同的快速配置，直到堆栈达到完整状态。遵循 AWS 的[失败堆栈恢复指南](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/stack-failure-options.html)；仅更改部署标志不会恢复失败的堆栈。
+:::
+
+使用调用工具的提示调用本地或已部署的代理。在 Langfuse UI 中打开其跟踪详细信息视图，并验证调用根、代理/模型/工具子项及其输入/输出内容。选择模型（生成）观察以检查其令牌使用情况。打开跟踪的会话以确认 AgentCore 会话 ID，然后在该会话中重复一个简短请求以检查刷新和分组。
+
+应用程序根保留上游 AWS 跟踪和父 ID；Langfuse SDK 将其标记为逻辑应用程序根，即使 AWS 服务父项未导出到 Langfuse。
+
+33 到 200 个字符之间的会话 ID 在 Langfuse 中显示不变。较长的 ID 使用其 64 字符 SHA-256 十六进制摘要作为 Langfuse 会话 ID，因此重复请求仍显示在同一会话中。此映射仅更改 Langfuse 分组；发送到应用程序的 AgentCore 会话 ID 不变。缺失的 ID 或短于 33 个字符的 ID 会为该调用获取新的 UUID。生成的客户端使用这些限制内的 UUID。
+
+## 生成的文件和重复运行
+
+生成器在代理旁边添加 `langfuse_telemetry.py` 和 `langfuse_dev.py`，一个单独的 `package/<agent>/langfuse_main.py` 入口点，以及一个 Python 导出器测试。它将现有的 CDK 构造连接到 `langfuse-observability.ts`，将部署入口点复制到 zip 中，并声明其依赖项。标准 ADOT 启动器仍然打包。
+
+Langfuse 入口点在导入代理之前创建一个提供程序。FastAPI 的重叠跟踪仅在该进程中禁用；原生 Strands 跨度使用相同的提供程序。Langfuse SDK 的公共观察 API 提供应用程序根和会话属性。调用输入/输出捕获限制为每个 1 MiB；当超过该限制时，根记录 `content_truncated`。
+
+依赖项集使用 Langfuse 4.18.0 和 ADOT 0.22.0。提供的 OpenTelemetry 固定版本与 ADOT 的要求匹配，包括 API/SDK/HTTP 导出器 1.45.1，并保持以保留该兼容性。ADOT 和 Langfuse 仍有资格进行存储库的常规依赖项更新；在升级时检查它们的兼容性并调整 OpenTelemetry 固定版本。Starlette 遵循 FastAPI 的依赖项要求。
+
+使用相同输入重复生成器不会重复连接或覆盖您的运行时编辑。它仍然遵守您的依赖项安装首选项，因此您可以重新运行它以重试失败或延迟的安装。更改主机或密钥会更新本地入口点和 CDK 配置；重启本地开发，重新构建，并使用[启用回滚的部署命令](#build-deploy-and-check-a-trace)在两个环境中应用更改。如果您编辑任一配置或自定义本地启动命令，生成器会要求您在更改选项之前协调它们。这可以防止选项更改静默替换自定义连接。
+
+必须还原并使用更新的生成器重新生成没有 `langfuse_dev.py` 的早期实验性设置。单独保留并重新应用任何自定义。
+
+## 切换回 CloudWatch
+
+还原包含 Langfuse 生成器更改的专用提交：
+
+```sh
+git revert <langfuse-setup-commit>
+```
+
+审查还原是否与后续代理更改存在冲突。其他生成器可能已将使用指标标签添加到 `packages/common/constructs/src/core/app.ts` 中的同一数组；在解决冲突时保留这些标签。仅当没有其他代理仍使用 Langfuse 时才删除 Langfuse 标签（`g79`），并保留其余集成所需的共享依赖项。
+
+重新安装工作区依赖项，重新构建，然后使用[启用回滚的部署命令](#build-deploy-and-check-a-trace)重新部署。删除 AppConfig 条目也需要资源替换；不要在此步骤中使用默认的快速命令。还原完整设置会恢复标准 ADOT 入口点和本地启动命令，并删除 Langfuse 连接、文件、依赖项添加、运行时设置和密钥读取授权。重启任何正在运行的本地 `dev` 进程。使用新会话调用已部署的代理，并在 CloudWatch 中验证新的应用程序跟踪。
+
+生成器没有回滚标志。将不相关的更改排除在设置提交之外，以便还原它不会删除它们。
+
+现有密钥仍由您管理。还原集成不会在后端之间复制、删除或移动历史跟踪。要再次启用 Langfuse，请使用主机和密钥 ARN 运行生成器。

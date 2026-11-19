@@ -12,6 +12,7 @@ import { connectionGenerator } from '../sdk/connection.js';
 import {
   pyAgentGenerator,
   pyApiGenerator,
+  pyContainerGenerator,
   pyDynamoDBGenerator,
   pyMcpServerGenerator,
   pyProjectGenerator,
@@ -20,6 +21,7 @@ import {
 import {
   tsAgentGenerator,
   tsApiGenerator,
+  tsContainerGenerator,
   tsDynamoDBGenerator,
   tsMcpServerGenerator,
   tsProjectGenerator,
@@ -209,6 +211,22 @@ describe('scaffold catalog integration', () => {
     'py#mcp-server': async (tree, name, options) =>
       pyMcpServerGenerator(tree, {
         ...schemaDefaults('py#mcp-server'),
+        project: await ensurePyHost(tree, 'py-host'),
+        name,
+        ...defaults,
+        ...options,
+      } as any),
+    'ts#container': async (tree, name, options) =>
+      tsContainerGenerator(tree, {
+        ...schemaDefaults('ts#container'),
+        project: await ensureTsHost(tree, 'ts-host'),
+        name,
+        ...defaults,
+        ...options,
+      } as any),
+    'py#container': async (tree, name, options) =>
+      pyContainerGenerator(tree, {
+        ...schemaDefaults('py#container'),
         project: await ensurePyHost(tree, 'py-host'),
         name,
         ...defaults,

@@ -240,6 +240,16 @@ export const runGeneratorMatrix = async (
     `generate @aws/nx-plugin:ts#agent#guardrails --project=ts-project --agent=agent --no-interactive`,
     opts,
   );
+  // Container services on ECS, one per language. Each is the source of its
+  // language's data connections.
+  await runCLI(
+    `generate @aws/nx-plugin:ts#container --project=ts-project --name=my-ts-container --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:py#container --project=py_project --name=my-py-container --no-interactive${deferFlag}`,
+    opts,
+  );
   await runCLI(
     `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-agui-agent --protocol=ag-ui --infra=agentcore --no-interactive${deferFlag}`,
     opts,
@@ -547,6 +557,25 @@ export const runGeneratorMatrix = async (
   );
   await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-mcp-server --targetProject=py_postgres_db --no-interactive${deferFlag}`,
+    opts,
+  );
+
+  // Container service connections: each service -> its language's rdb and
+  // DynamoDB project.
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=ts-project --sourceComponent=my-ts-container --targetProject=postgres-db --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-container --targetProject=py_postgres_db --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=ts-project --sourceComponent=my-ts-container --targetProject=@e2e-test/my-table --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-container --targetProject=my_py_table --no-interactive${deferFlag}`,
     opts,
   );
 

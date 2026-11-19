@@ -1,0 +1,120 @@
+---
+title: Servizio Container Python a DynamoDB
+description: Connetti un servizio container Python a un progetto Python DynamoDB
+when:
+  sourceType: py#container
+  targetType: py#dynamodb
+---
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Il generatore `connection` consente a un <Link path="guides/py-container">servizio container Python</Link> di utilizzare un progetto <Link path="guides/py-dynamodb">Python DynamoDB</Link>. Aggiunge il pacchetto DynamoDB come dipendenza del progetto del servizio, configura lo sviluppo locale in modo che il servizio e DynamoDB Local si avviino insieme e stampa le autorizzazioni di cui il servizio ha bisogno.
+
+## Come funziona
+
+Un servizio container con `infra=ecs` viene eseguito come task su Amazon ECS (Elastic Container Service). Ogni task viene eseguito con il task role del servizio, un ruolo IAM che può solo leggere la configurazione di runtime finché non concedi ulteriori autorizzazioni. Per leggere e scrivere nella tabella, il task role necessita delle azioni DynamoDB sulla tabella e sui suoi indici, e dell'uso della chiave di crittografia AWS KMS della tabella.
+
+Il generatore rifiuta un servizio con `infra=none`, perché tale servizio non ha un task role a cui concedere l'accesso.
+
+## Prerequisiti
+
+Prima di utilizzare questo generatore, assicurati di avere:
+
+1. Un servizio container con `infra=ecs` (generato utilizzando il generatore <Link path="guides/py-container">`py#container`</Link>)
+2. Un progetto <Link path="guides/py-dynamodb">`py#dynamodb`</Link>
+
+## Utilizzo
+
+### Esegui il Generatore
+
+<RunGenerator generator="connection" />
+
+Seleziona il progetto contenente il tuo servizio container come sorgente e il tuo progetto DynamoDB come destinazione. Se il progetto sorgente contiene diversi componenti, imposta `sourceComponent` sul nome del servizio.
+
+### Opzioni
+
+<GeneratorParameters generator="connection" />
+
+## Output del Generatore
+
+Il generatore aggiunge il pacchetto DynamoDB al `pyproject.toml` del progetto del servizio come dipendenza del workspace e aggiorna il target `<service-name>-serve` del servizio in `project.json` per dipendere dal target `dev` del progetto DynamoDB.
+
+## Utilizzo di DynamoDB nel Servizio
+
+Importa le classi entity dal pacchetto DynamoDB e usale dove gestisci una richiesta:
+
+```python title="packages/my_project/my_project/my_service/examples.py"
+from my_scope_my_table.entities.example import ExampleModel
+
+
+def list_examples() -> list[dict]:
+    return [item.attribute_values for item in ExampleModel.scan()]
+```
+
+## Infrastruttura
+
+Il generatore non modifica il tuo stack o il modulo Terraform root. Invece stampa il codice da aggiungere, che è mostrato di seguito per un servizio denominato `my-service` e una tabella denominata `my-table`. Finché non lo aggiungi, le richieste del servizio alla tabella vengono negate.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+Nell'esempio, `myService` è il tuo costrutto `MyService` e `myTable` è il tuo costrutto `MyTable`:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myTable.grantReadWriteData(myService.taskRole);
+```
+
+`grantReadWriteData` concede sia le autorizzazioni DynamoDB che quelle KMS al task role del servizio.
+
+</Fragment>
+<Fragment slot="terraform">
+
+Nell'esempio, `module "my_service"` distribuisce il servizio e `module "my_table"` distribuisce la tabella:
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_role_policy" "my_service_my_table_access" {
+  name = "my-service-my-table-access"
+  role = module.my_service.task_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:Scan",
+          "dynamodb:BatchGetItem", "dynamodb:BatchWriteItem",
+        ]
+        Resource = [
+          module.my_table.table_arn,
+          "${module.my_table.table_arn}/index/*",
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey",
+        ]
+        Resource = [module.my_table.kms_key_arn]
+      },
+    ]
+  })
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+## Sviluppo Locale
+
+<NxCommands commands={["<service-name>-serve <project-name>"]} />
+
+Questo avvia il servizio e DynamoDB Local. Con `LOCAL_DEV=true` impostato, `is_local()` restituisce `True` e le tue entità PynamoDB si connettono a DynamoDB Local invece che ad AWS.

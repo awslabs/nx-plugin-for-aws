@@ -1,0 +1,188 @@
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "<%- awsProviderVersion %>"
+    }
+    external = {
+      source  = "hashicorp/external"
+      version = "<%- externalProviderVersion %>"
+    }
+    null = {
+      source  = "hashicorp/null"
+      version = "<%- nullProviderVersion %>"
+    }
+  }
+}
+
+variable "vpc_id" {
+  description = "VPC the service runs in."
+  type        = string
+}
+
+variable "subnet_ids" {
+  description = "Private subnets with egress for the tasks."
+  type        = list(string)
+}
+
+variable "asset_ecr_repository_url" {
+  description = "URL of the shared asset ECR repository the service's image is published to (module.asset_ecr.repository_url)."
+  type        = string
+}
+
+variable "asset_ecr_repository_arn" {
+  description = "ARN of the shared asset ECR repository the service's image is published to (module.asset_ecr.repository_arn)."
+  type        = string
+}
+
+variable "appconfig_application_id" {
+  description = "ID of the shared runtime-config AppConfig application (from `core/runtime-config/appconfig.application_id`). The service reads its runtime configuration from this application."
+  type        = string
+}
+
+variable "appconfig_application_arn" {
+  description = "ARN of the shared runtime-config AppConfig application (from `core/runtime-config/appconfig.application_arn`). Used to scope the IAM read permission granted to the task role."
+  type        = string
+}
+
+variable "cluster_arn" {
+  description = "ARN of an existing ECS cluster to run in. Null creates a cluster for this service."
+  type        = string
+  default     = null
+}
+
+variable "environment" {
+  description = "Plain environment variables. Never put secret values here; use secrets."
+  type        = map(string)
+  default     = {}
+}
+
+variable "secrets" {
+  description = "Environment variables read from Secrets Manager or SSM Parameter Store, as a map of variable name to secret or parameter ARN."
+  type        = map(string)
+  default     = {}
+}
+
+variable "task_role_policy_statements" {
+  description = "IAM policy statements added to the task role."
+  type        = list(any)
+  default     = []
+}
+
+variable "docker_image_tag" {
+  description = "Local image tag the service's docker target builds."
+  type        = string
+  default     = "<%= dockerImageTag %>"
+}
+
+variable "tags" {
+  description = "Tags to apply to all resources."
+  type        = map(string)
+  default     = {}
+}
+
+data "aws_region" "current" {}
+
+data "external" "docker_digest" {
+  program = ["sh", "-c", "echo '{\"digest\":\"'$(<%= containers %> inspect ${var.docker_image_tag} --format '{{.Id}}')'\"}' "]
+}
+
+locals {
+  image_tag = "service-<%= nameKebabCase.slice(0, 40) %>-${replace(data.external.docker_digest.result.digest, "sha256:", "")}"
+}
+
+resource "null_resource" "docker_publish" {
+  triggers = {
+    docker_digest    = data.external.docker_digest.result.digest
+    repository_url   = var.asset_ecr_repository_url
+    docker_image_tag = var.docker_image_tag
+    image_tag        = local.image_tag
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws ecr get-login-password --region "$AWS_REGION" | <%= containers %> login --username AWS --password-stdin "$REPOSITORY_URL"
+      <%= containers %> tag "$DOCKER_IMAGE_TAG" "$REPOSITORY_URL:$IMAGE_TAG"
+      <%= containers %> push "$REPOSITORY_URL:$IMAGE_TAG"
+    EOT
+    environment = {
+      AWS_REGION       = data.aws_region.current.region
+      REPOSITORY_URL   = self.triggers.repository_url
+      DOCKER_IMAGE_TAG = self.triggers.docker_image_tag
+      IMAGE_TAG        = self.triggers.image_tag
+    }
+  }
+}
+
+locals {
+  # The service reads its runtime configuration from this AppConfig application
+  environment = merge({
+    RUNTIME_CONFIG_APP_ID = var.appconfig_application_id
+  }, var.environment)
+
+  # Grant read access to the runtime-config AppConfig application
+  task_role_policy_statements = concat([
+    {
+      Effect = "Allow"
+      Action = [
+        "appconfig:StartConfigurationSession",
+        "appconfig:GetLatestConfiguration"
+      ]
+      Resource = ["${var.appconfig_application_arn}/*"]
+    }
+  ], var.task_role_policy_statements)
+}
+
+module "ecs_service" {
+  source = "../../../core/container/ecs-service"
+
+  service_name                = "<%= nameClassName %>"
+  vpc_id                      = var.vpc_id
+  subnet_ids                  = var.subnet_ids
+  cluster_arn                 = var.cluster_arn
+  image_uri                   = "${null_resource.docker_publish.triggers.repository_url}:${null_resource.docker_publish.triggers.image_tag}"
+  image_repository_arn        = var.asset_ecr_repository_arn
+  container_port              = <%= containerPort %>
+  health_check_command        = [<%- healthCheckCommand.map((part) => JSON.stringify(part)).join(', ') %>]
+  environment                 = local.environment
+  secrets                     = var.secrets
+  task_role_policy_statements = local.task_role_policy_statements
+  tags                        = var.tags
+}
+
+output "cluster_arn" {
+  description = "ARN of the cluster the service runs in."
+  value       = module.ecs_service.cluster_arn
+}
+
+output "service_name" {
+  description = "Name of the ECS service."
+  value       = module.ecs_service.service_name
+}
+
+output "service_arn" {
+  description = "ARN of the ECS service."
+  value       = module.ecs_service.service_arn
+}
+
+output "task_role_arn" {
+  description = "ARN of the role the container's code runs as."
+  value       = module.ecs_service.task_role_arn
+}
+
+output "task_role_name" {
+  description = "Name of the task role, for aws_iam_role_policy attachments from connections."
+  value       = module.ecs_service.task_role_name
+}
+
+output "security_group_id" {
+  description = "Security group of the tasks, for database and other ingress rules."
+  value       = module.ecs_service.security_group_id
+}
+
+output "log_group_name" {
+  description = "Name of the log group the container writes its output to."
+  value       = module.ecs_service.log_group_name
+}

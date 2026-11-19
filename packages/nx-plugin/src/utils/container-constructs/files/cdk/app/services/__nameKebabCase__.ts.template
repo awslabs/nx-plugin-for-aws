@@ -1,0 +1,63 @@
+import * as path from 'path';
+import * as url from 'url';
+import { Duration } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+<%_ /* Alias the core imports only when this service's name would shadow them. */ _%>
+<%_ const collides = ['EcsService', 'EcsServiceImage', 'EcsServiceProps'].includes(nameClassName); _%>
+<%_ const coreService = collides ? 'CoreEcsService' : 'EcsService'; _%>
+<%_ const coreImage = collides ? 'CoreEcsServiceImage' : 'EcsServiceImage'; _%>
+<%_ const coreProps = collides ? 'CoreEcsServiceProps' : 'EcsServiceProps'; _%>
+import {
+  EcsService<% if (collides) { %> as <%= coreService %><% } %>,
+  EcsServiceImage<% if (collides) { %> as <%= coreImage %><% } %>,
+  EcsServiceProps<% if (collides) { %> as <%= coreProps %><% } %>,
+} from '../../core/container/ecs-service<% if (esm) { %>.js<% } %>';
+import { RuntimeConfig } from '../../core/runtime-config<% if (esm) { %>.js<% } %>';
+import { findWorkspaceRoot } from '../../core/workspace<% if (esm) { %>.js<% } %>';
+
+const dockerBuildContextDir = path.join(
+  findWorkspaceRoot(url.fileURLToPath(new URL(<% if (esm) { %>import.meta.url<% } else { %>require('url').pathToFileURL(__filename).href<% } %>))),
+  '<%- dockerBuildContextDir %>',
+);
+
+export type <%= nameClassName %>Props = Omit<
+  <%= coreProps %>,
+  'serviceName' | 'image'
+> & {
+  /**
+   * The image to run.
+   *
+   * @default the image built from <%- dockerBuildContextDir %>
+   */
+  readonly image?: <%= coreImage %>;
+};
+
+/**
+ * The <%= nameClassName %> container service on Amazon ECS. The container runs a
+ * health check on `/health`, gets `RUNTIME_CONFIG_APP_ID`, and its task role may
+ * read runtime configuration from AWS AppConfig.
+ */
+export class <%= nameClassName %> extends <%= coreService %> {
+  constructor(scope: Construct, id: string, props: <%= nameClassName %>Props) {
+    const rc = RuntimeConfig.ensure(scope);
+    super(scope, id, {
+      containerPort: <%= containerPort %>,
+      healthCheck: {
+        command: <%- JSON.stringify(healthCheckCommand) %>,
+        interval: Duration.seconds(30),
+        timeout: Duration.seconds(5),
+        retries: 3,
+        startPeriod: Duration.seconds(30),
+      },
+      ...props,
+      serviceName: '<%= nameClassName %>',
+      image: props.image ?? { directory: dockerBuildContextDir },
+      environment: {
+        RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
+        ...props.environment,
+      },
+    });
+
+    rc.grantReadAppConfig(this.taskRole);
+  }
+}

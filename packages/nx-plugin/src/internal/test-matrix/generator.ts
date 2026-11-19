@@ -19,6 +19,7 @@ import {
   pyAgentGenerator,
   pyAgentGuardrailsGenerator,
   pyApiGenerator,
+  pyContainerGenerator,
   pyDynamoDBGenerator,
   pyLambdaFunctionGenerator,
   pyMcpServerGenerator,
@@ -35,6 +36,7 @@ import {
   tsAgentGenerator,
   tsAgentGuardrailsGenerator,
   tsApiGenerator,
+  tsContainerGenerator,
   tsDcrProxyGenerator,
   tsDocsGenerator,
   tsDynamoDBGenerator,
@@ -501,6 +503,20 @@ export const internalTestMatrixGenerator = async (
     infra: 'agentcore',
     iac: 'inherit',
     ...projectDefaults,
+  });
+
+  // Container services on ECS, one per language.
+  await tsContainerGenerator(tree, {
+    project: 'ts-project',
+    name: 'my-ts-container',
+    iac: 'inherit',
+    ...defaults,
+  });
+  await pyContainerGenerator(tree, {
+    project: 'py_project',
+    name: 'my-py-container',
+    iac: 'inherit',
+    ...defaults,
   });
 
   // Databases — DynamoDB, plus Aurora across both engines and ORMs.

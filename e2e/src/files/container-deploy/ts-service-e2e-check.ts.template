@@ -1,0 +1,126 @@
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+import { createExampleEntity } from '@e2e-test/my-table';
+import { getPostgresDb } from './postgres-db<% JS %>';
+
+// Startup checks for the container-deploy smoke test, which reads the
+// E2E_CHECK lines from the service's log group.
+
+const seconds = (name: string, fallback: number) =>
+  Number(process.env[name] ?? fallback) * 1000;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// A diagnostic code is a short upper-case name or a small number: Node
+// 'ECONNREFUSED', Prisma 'P1001', PostgreSQL '28P01'. Any other value is left
+// out of the log.
+const DIAGNOSTIC_CODE = /^[0-9A-Z][0-9A-Z_]{0,31}$/;
+
+// A failure is logged as its class and diagnostic code, never as its message.
+// The message of a Prisma, pg or AWS SDK error can carry an RDS IAM auth token
+// or another credential, and these lines go to a public CI log.
+export const describeError = (error: unknown): string => {
+  if (!(error instanceof Error)) {
+    return typeof error;
+  }
+  const { code } = error as { code?: unknown };
+  return typeof code === 'string' && DIAGNOSTIC_CODE.test(code)
+    ? `${error.name} ${code}`
+    : error.name;
+};
+
+// A failure a check raises itself, classified by name so its message, which
+// can hold row data, is never logged.
+class CheckError extends Error {
+  constructor(classification: string) {
+    super(classification);
+    this.name = classification;
+  }
+}
+
+const log = (line: Record<string, unknown>) =>
+  console.log(`E2E_CHECK ${JSON.stringify(line)}`);
+
+const putAndGetItem = async (token: string) => {
+  const entity = await createExampleEntity();
+  await entity.put({ id: token }).go();
+  const { data } = await entity.get({ id: token }).go();
+  if (data?.id !== token) {
+    throw new CheckError('ReadBackMismatch');
+  }
+};
+
+// getPostgresDb() keeps a failed runtime-config read for the life of the
+// process, so wait until the configuration is deployed before the first call.
+const waitForDatabaseConfig = async () => {
+  const config = await getAppConfig<Record<string, unknown>>('database', {
+    application: process.env.RUNTIME_CONFIG_APP_ID ?? '',
+    environment: 'default',
+    transform: 'json',
+    forceFetch: true,
+  });
+  if (!config?.PostgresDb) {
+    throw new CheckError('DatabaseConfigMissing');
+  }
+};
+
+let databaseConfigFound = false;
+
+const insertAndSelectRow = async (token: string) => {
+  if (!databaseConfigFound) {
+    await waitForDatabaseConfig();
+    databaseConfigFound = true;
+  }
+  const prisma = await getPostgresDb();
+  const { id } = await prisma.exampleTable.create({
+    data: { column1: token, column2: 'container-deploy' },
+  });
+  const row = await prisma.exampleTable.findUniqueOrThrow({ where: { id } });
+  if (row.column1 !== token) {
+    throw new CheckError('ReadBackMismatch');
+  }
+};
+
+const runCheck = async (
+  check: string,
+  token: string,
+  run: (token: string) => Promise<void>,
+) => {
+  // The default stays below the test's 10 minute wait for the final line.
+  const deadline = Date.now() + seconds('E2E_CHECK_TIMEOUT_SECONDS', 480);
+  const interval = seconds('E2E_CHECK_INTERVAL_SECONDS', 15);
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await run(token);
+      log({ check, token, ok: true, final: true });
+      return;
+    } catch (error) {
+      const failure = describeError(error);
+      if (Date.now() + interval > deadline) {
+        log({
+          check,
+          token,
+          ok: false,
+          final: true,
+          attempt,
+          detail: failure,
+          error: failure,
+        });
+        return;
+      }
+      // A non-final line, so the test can show the latest error if it times out.
+      log({ check, token, ok: false, final: false, attempt, error: failure });
+      await sleep(interval);
+    }
+  }
+};
+
+export const runE2eChecks = async (): Promise<void> => {
+  const token = process.env.E2E_CHECK_TOKEN;
+  if (!token) {
+    return;
+  }
+  await Promise.all([
+    runCheck('ts-service-my-table', token, putAndGetItem),
+    runCheck('ts-service-postgres-db', token, insertAndSelectRow),
+  ]);
+};

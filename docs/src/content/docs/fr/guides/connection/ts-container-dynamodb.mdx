@@ -1,0 +1,122 @@
+---
+title: Service conteneur TypeScript vers DynamoDB
+description: Connecter un service conteneur TypeScript à un projet TypeScript DynamoDB
+when:
+  sourceType: ts#container
+  targetType: ts#dynamodb
+---
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Le générateur `connection` permet à un <Link path="guides/ts-container">service conteneur TypeScript</Link> d'utiliser un projet <Link path="guides/ts-dynamodb">TypeScript DynamoDB</Link>. Il configure le développement local pour que le service et DynamoDB Local démarrent ensemble, et affiche les autorisations dont le service a besoin.
+
+## Comment cela fonctionne
+
+Un service conteneur avec `infra=ecs` s'exécute en tant que tâches sur Amazon ECS (Elastic Container Service). Chaque tâche s'exécute avec le rôle de tâche du service, un rôle IAM qui ne peut lire que la configuration d'exécution jusqu'à ce que vous accordiez davantage de permissions. Pour lire et écrire dans la table, le rôle de tâche a besoin des actions DynamoDB sur la table et ses index, ainsi que l'utilisation de la clé de chiffrement AWS KMS de la table.
+
+Le générateur rejette un service avec `infra=none`, car un tel service n'a pas de rôle de tâche auquel accorder l'accès.
+
+## Prérequis
+
+Avant d'utiliser ce générateur, assurez-vous d'avoir :
+
+1. Un service conteneur avec `infra=ecs` (généré à l'aide du générateur <Link path="guides/ts-container">`ts#container`</Link>)
+2. Un projet <Link path="guides/ts-dynamodb">`ts#dynamodb`</Link>
+
+## Utilisation
+
+### Exécuter le générateur
+
+<RunGenerator generator="connection" />
+
+Sélectionnez le projet contenant votre service conteneur comme source et votre projet DynamoDB comme cible. Si le projet source contient plusieurs composants, définissez `sourceComponent` sur le nom du service.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Sortie du générateur
+
+Le générateur met à jour la cible `<service-name>-serve` du service dans `project.json` pour qu'elle dépende de la cible `dev` du projet DynamoDB. Aucun fichier source n'est modifié.
+
+## Utiliser DynamoDB dans le service
+
+Importez les fabriques d'entités depuis le package DynamoDB et utilisez-les là où vous traitez une requête :
+
+```ts title="packages/my-project/src/my-service/examples.ts"
+import { createExampleEntity } from '@my-scope/my-table';
+
+export const listExamples = async () => {
+  const entity = await createExampleEntity();
+  const result = await entity.scan.go();
+  return result.data;
+};
+```
+
+## Infrastructure
+
+Le générateur ne modifie pas votre stack ou module Terraform racine. Au lieu de cela, il affiche le code à ajouter, qui est montré ci-dessous pour un service nommé `my-service` et une table nommée `my-table`. Jusqu'à ce que vous l'ajoutiez, les requêtes du service vers la table sont refusées.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+Dans l'exemple, `myService` est votre construct `MyService` et `myTable` est votre construct `MyTable` :
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myTable.grantReadWriteData(myService.taskRole);
+```
+
+`grantReadWriteData` accorde à la fois les permissions DynamoDB et KMS au rôle de tâche du service.
+
+</Fragment>
+<Fragment slot="terraform">
+
+Dans l'exemple, `module "my_service"` déploie le service et `module "my_table"` déploie la table :
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_role_policy" "my_service_my_table_access" {
+  name = "my-service-my-table-access"
+  role = module.my_service.task_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:Scan",
+          "dynamodb:BatchGetItem", "dynamodb:BatchWriteItem",
+        ]
+        Resource = [
+          module.my_table.table_arn,
+          "${module.my_table.table_arn}/index/*",
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey",
+        ]
+        Resource = [module.my_table.kms_key_arn]
+      },
+    ]
+  })
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+## Développement local
+
+<NxCommands commands={["<service-name>-serve <project-name>"]} />
+
+Cela démarre le service et DynamoDB Local. Avec `LOCAL_DEV=true` défini, `getDynamoDBClient()` et `resolveTableName()` se connectent à DynamoDB Local au lieu d'AWS.

@@ -401,6 +401,18 @@ const GATEWAY_TO_AGENT: readonly ConnectionConstraint[] = [
   },
 ];
 
+// The grants and security group rules a container service needs are attached
+// to its ECS task role and task security group, which exist only with ecs.
+const CONTAINER_TO_DATA: readonly ConnectionConstraint[] = [
+  {
+    side: 'source',
+    option: 'infra',
+    equals: 'ecs',
+    reason:
+      "Access is granted to the container service's ECS task role, which only infra ecs creates.",
+  },
+];
+
 /**
  * The option-level requirements each connection places on its endpoints.
  *
@@ -465,6 +477,11 @@ export const CONNECTION_CONSTRAINTS = {
         'The source gateway signs its request with IAM, so the target gateway must accept IAM.',
     },
   ],
+  // Container services (ts#container / py#container)
+  'ts#container -> ts#rdb': CONTAINER_TO_DATA,
+  'py#container -> py#rdb': CONTAINER_TO_DATA,
+  'ts#container -> ts#dynamodb': CONTAINER_TO_DATA,
+  'py#container -> py#dynamodb': CONTAINER_TO_DATA,
 } as const satisfies Partial<
   Record<ConnectionKey, readonly ConnectionConstraint[]>
 >;

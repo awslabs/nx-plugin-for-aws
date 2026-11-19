@@ -1,0 +1,124 @@
+"""Startup checks for the container-deploy smoke test, which reads the E2E_CHECK log lines."""
+
+import asyncio
+import contextlib
+import json
+import os
+import re
+import time
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from <% RDB_MODULE %>.connection import session_context
+from <% RDB_MODULE %>.models.example import ExampleModel as ExampleRow
+from <% TABLE_MODULE %>.entities.example import ExampleModel as ExampleItem
+
+
+def _seconds(name: str, default: float) -> float:
+    return float(os.environ.get(name, default))
+
+
+def _log(check: str, token: str, ok: bool, **fields: object) -> None:
+    print("E2E_CHECK " + json.dumps({"check": check, "token": token, "ok": ok, **fields}), flush=True)
+
+
+# A diagnostic code is a short upper-case name or a small number: PostgreSQL
+# '28P01', an errno name like 'ECONNREFUSED', an HTTP status. Any other value is
+# left out of the log.
+_DIAGNOSTIC_CODE = re.compile(r"^[0-9A-Z][0-9A-Z_]{0,31}$")
+
+
+def _describe(error: BaseException) -> str:
+    """The failure's exception class and diagnostic code, never its message.
+
+    The message of an asyncpg, SQLAlchemy or botocore error can carry an RDS IAM
+    auth token or another credential, and these lines go to a public CI log.
+    """
+    name = type(error).__name__
+    code = getattr(error, "sqlstate", None) or getattr(error, "code", None)
+    return f"{name} {code}" if isinstance(code, str) and _DIAGNOSTIC_CODE.match(code) else name
+
+
+class ReadBackMismatch(RuntimeError):
+    """The item or row read back does not match what the check wrote.
+
+    Raised with no message, so the values read back are not logged.
+    """
+
+
+def _put_and_get_item(token: str) -> None:
+    ExampleItem.create(id=token, name=token, category="container-deploy")
+    name = ExampleItem.get_by_id(token).name
+    if name != token:
+        raise ReadBackMismatch
+
+
+async def _check_item(token: str) -> None:
+    await asyncio.to_thread(_put_and_get_item, token)
+
+
+async def _check_row(token: str) -> None:
+    async with session_context() as session:
+        row = ExampleRow(name=token, description="container-deploy")
+        session.add(row)
+        await session.commit()
+        await session.refresh(row)
+        row_id = row.id
+    # A new session, so the row is read from the database, not the session.
+    async with session_context() as session:
+        fetched = await session.get(ExampleRow, row_id)
+    if fetched is None or fetched.name != token:
+        raise ReadBackMismatch
+
+
+async def _run_check(check: str, token: str, run: Callable[[str], Awaitable[None]]) -> None:
+    # The default stays below the test's 10 minute wait for the final line.
+    deadline = time.monotonic() + _seconds("E2E_CHECK_TIMEOUT_SECONDS", 480)
+    interval = _seconds("E2E_CHECK_INTERVAL_SECONDS", 15)
+    attempt = 1
+    while True:
+        try:
+            await run(token)
+            _log(check, token, True, final=True)
+            return
+        except Exception as error:
+            failure = _describe(error)
+            if time.monotonic() + interval > deadline:
+                _log(check, token, False, final=True, attempt=attempt, detail=failure, error=failure)
+                return
+            # A non-final line, so the test can show the latest error if it times out.
+            _log(check, token, False, final=False, attempt=attempt, error=failure)
+        attempt += 1
+        await asyncio.sleep(interval)
+
+
+async def _wait_until_listening() -> None:
+    port = int(os.environ.get("PORT", "8080"))
+    while True:
+        try:
+            _, writer = await asyncio.open_connection("127.0.0.1", port)
+            writer.close()
+            await writer.wait_closed()
+            return
+        except OSError:
+            await asyncio.sleep(1)
+
+
+async def run_e2e_checks(token: str) -> None:
+    await _wait_until_listening()
+    await asyncio.gather(
+        _run_check("py-service-my-py-table", token, _check_item),
+        _run_check("py-service-py-postgres-db", token, _check_row),
+    )
+
+
+@asynccontextmanager
+async def e2e_check_lifespan(_app: FastAPI) -> AsyncGenerator[None]:
+    token = os.environ.get("E2E_CHECK_TOKEN")
+    task = asyncio.create_task(run_e2e_checks(token)) if token else None
+    yield
+    if task is not None:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task

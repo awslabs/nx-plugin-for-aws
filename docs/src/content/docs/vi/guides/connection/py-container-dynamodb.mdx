@@ -1,0 +1,120 @@
+---
+title: Dịch vụ Container Python đến DynamoDB
+description: Kết nối dịch vụ container Python với dự án DynamoDB Python
+when:
+  sourceType: py#container
+  targetType: py#dynamodb
+---
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Trình tạo `connection` cho phép <Link path="guides/py-container">dịch vụ container Python</Link> sử dụng dự án <Link path="guides/py-dynamodb">Python DynamoDB</Link>. Nó thêm gói DynamoDB làm phụ thuộc của dự án dịch vụ, cấu hình phát triển cục bộ để dịch vụ và DynamoDB Local khởi động cùng nhau, và in ra các quyền mà dịch vụ cần.
+
+## Cách hoạt động
+
+Dịch vụ container với `infra=ecs` chạy dưới dạng các tác vụ trên Amazon ECS (Elastic Container Service). Mỗi tác vụ chạy với vai trò tác vụ của dịch vụ, một vai trò IAM chỉ có thể đọc cấu hình thời gian chạy cho đến khi bạn cấp thêm quyền. Để đọc và ghi bảng, vai trò tác vụ cần các hành động DynamoDB trên bảng và các chỉ mục của nó, và sử dụng khóa mã hóa AWS KMS của bảng.
+
+Trình tạo từ chối dịch vụ với `infra=none`, vì dịch vụ như vậy không có vai trò tác vụ để cấp quyền truy cập.
+
+## Điều kiện tiên quyết
+
+Trước khi sử dụng trình tạo này, hãy đảm bảo bạn có:
+
+1. Dịch vụ container với `infra=ecs` (được tạo bằng trình tạo <Link path="guides/py-container">`py#container`</Link>)
+2. Dự án <Link path="guides/py-dynamodb">`py#dynamodb`</Link>
+
+## Cách sử dụng
+
+### Chạy trình tạo
+
+<RunGenerator generator="connection" />
+
+Chọn dự án chứa dịch vụ container của bạn làm nguồn và dự án DynamoDB của bạn làm đích. Nếu dự án nguồn chứa nhiều thành phần, hãy đặt `sourceComponent` thành tên của dịch vụ.
+
+### Tùy chọn
+
+<GeneratorParameters generator="connection" />
+
+## Kết quả của trình tạo
+
+Trình tạo thêm gói DynamoDB vào `pyproject.toml` của dự án dịch vụ dưới dạng phụ thuộc workspace, và cập nhật target `<service-name>-serve` của dịch vụ trong `project.json` để phụ thuộc vào target `dev` của dự án DynamoDB.
+
+## Sử dụng DynamoDB trong dịch vụ
+
+Import các lớp thực thể từ gói DynamoDB và sử dụng chúng ở nơi bạn xử lý yêu cầu:
+
+```python title="packages/my_project/my_project/my_service/examples.py"
+from my_scope_my_table.entities.example import ExampleModel
+
+
+def list_examples() -> list[dict]:
+    return [item.attribute_values for item in ExampleModel.scan()]
+```
+
+## Cơ sở hạ tầng
+
+Trình tạo không thay đổi stack hoặc mô-đun Terraform gốc của bạn. Thay vào đó, nó in ra mã cần thêm, được hiển thị bên dưới cho dịch vụ có tên `my-service` và bảng có tên `my-table`. Cho đến khi bạn thêm nó, các yêu cầu của dịch vụ đến bảng sẽ bị từ chối.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+Trong ví dụ, `myService` là construct `MyService` của bạn và `myTable` là construct `MyTable` của bạn:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myTable.grantReadWriteData(myService.taskRole);
+```
+
+`grantReadWriteData` cấp cả quyền DynamoDB và KMS cho vai trò tác vụ của dịch vụ.
+
+</Fragment>
+<Fragment slot="terraform">
+
+Trong ví dụ, `module "my_service"` triển khai dịch vụ và `module "my_table"` triển khai bảng:
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_role_policy" "my_service_my_table_access" {
+  name = "my-service-my-table-access"
+  role = module.my_service.task_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:Scan",
+          "dynamodb:BatchGetItem", "dynamodb:BatchWriteItem",
+        ]
+        Resource = [
+          module.my_table.table_arn,
+          "${module.my_table.table_arn}/index/*",
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey",
+        ]
+        Resource = [module.my_table.kms_key_arn]
+      },
+    ]
+  })
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+## Phát triển cục bộ
+
+<NxCommands commands={["<service-name>-serve <project-name>"]} />
+
+Lệnh này khởi động dịch vụ và DynamoDB Local. Với `LOCAL_DEV=true` được đặt, `is_local()` trả về `True` và các thực thể PynamoDB của bạn kết nối với DynamoDB Local thay vì AWS.

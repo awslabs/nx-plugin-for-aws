@@ -208,6 +208,8 @@ const PRESENTATION: Record<string, { category: string; logo: string }> = {
   'ts#trpc-api': { category: 'API', logo: 'trpc' },
   'ts#smithy-api': { category: 'API', logo: 'smithy' },
   'py#fast-api': { category: 'API', logo: 'fastapi' },
+  'ts#container': { category: 'API', logo: 'typescript' },
+  'py#container': { category: 'API', logo: 'python' },
   'ts#react-website': { category: 'Frontend', logo: 'react' },
   'ts#agent': { category: 'Agentic', logo: 'strands' },
   'py#agent': { category: 'Agentic', logo: 'strands' },

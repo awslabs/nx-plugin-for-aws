@@ -1,0 +1,76 @@
+import * as cdk from 'aws-cdk-lib';
+import { Vpc } from 'aws-cdk-lib/aws-ec2';
+import { Construct } from 'constructs';
+import {
+  MyPyTable,
+  MyTable,
+  PostgresDb,
+  PyService,
+  RuntimeConfig,
+  TsService,
+} from '@e2e-test/common-constructs';
+
+export class ApplicationStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    // One NAT gateway keeps the run under the default per-region EIP quota
+    // while the rdb deploy jobs run in parallel.
+    const vpc = new Vpc(this, 'Vpc', { natGateways: 1 });
+
+    // Per-service constructs vended by ts#container and py#container, private
+    // with no inbound rule. Each service is the source of its language's data
+    // connections and checks them at startup when E2E_CHECK_TOKEN is set.
+    // Expanded so the line stays within the formatter's width once the token
+    // is substituted.
+    const environment = {
+      E2E_CHECK_TOKEN: '<% E2E_CHECK_TOKEN %>',
+    };
+    const tsService = new TsService(this, 'TsService', { vpc, environment });
+    const pyService = new PyService(this, 'PyService', { vpc, environment });
+
+    // The grants the connection generators print, for the four connections.
+    const myTable = new MyTable(this, 'MyTable');
+    myTable.grantReadWriteData(tsService.taskRole);
+    const myPyTable = new MyPyTable(this, 'MyPyTable');
+    myPyTable.grantReadWriteData(pyService.taskRole);
+
+    // One Aurora cluster serves both rdb connections, to keep the run's
+    // create and delete time to one cluster. The ts#rdb construct deploys it
+    // (its migration creates the tables both services use); the py#rdb
+    // construct is not deployed here, and the Python client reads the same
+    // cluster's settings under its own runtime-config key. The rdb deploy
+    // tests deploy both constructs. No RDS Proxy, as in terraform-deploy-rdb,
+    // to save its cost and create time. The database's security group admits
+    // each service's security group.
+    const postgresDb = new PostgresDb(this, 'PostgresDb', {
+      vpc,
+      enableRdsProxy: false,
+    });
+    for (const service of [tsService, pyService]) {
+      postgresDb.allowDefaultPortFrom(service);
+      postgresDb.grantConnect(service.taskRole);
+    }
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('database', 'PyPostgresDb', rc.get('database').PostgresDb);
+
+    // What the test reads to check each service.
+    for (const [name, service] of [
+      ['TsService', tsService],
+      ['PyService', pyService],
+    ] as const) {
+      new cdk.CfnOutput(this, `${name}ClusterArn`, {
+        value: service.cluster.clusterArn,
+      });
+      new cdk.CfnOutput(this, `${name}Name`, {
+        value: service.service.serviceName,
+      });
+      new cdk.CfnOutput(this, `${name}SecurityGroupId`, {
+        value: service.securityGroup.securityGroupId,
+      });
+      new cdk.CfnOutput(this, `${name}LogGroupName`, {
+        value: service.logGroup.logGroupName,
+      });
+    }
+  }
+}

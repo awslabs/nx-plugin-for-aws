@@ -1,0 +1,457 @@
+---
+title: Python Container Service
+description: Add a containerised service to a Python project and run it privately on Amazon ECS
+generator: py#container
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import ArchitectureDiagram from '@components/architecture-diagram.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import OptionFilter from '@components/option-filter.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Snippet from '@components/snippet.astro';
+
+This generator adds a containerised HTTP service to an existing Python project. You get a small [FastAPI](https://fastapi.tiangolo.com/) server, run by the [uvicorn](https://www.uvicorn.org/) web server, with a `GET /health` route and a sample `GET /echo` route, a Dockerfile, and targets to run the server locally, build its image and scan the image. You also get CDK or Terraform code that runs the image on [Amazon Elastic Container Service (Amazon ECS)](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html), the AWS service that runs and scales containers.
+
+## How This Works
+
+The service runs on [AWS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html), which runs each container without servers for you to manage. Each running copy of your container is an ECS task. The tasks run in your own VPC (virtual private cloud, an isolated network in your AWS account). A security group (a set of firewall rules attached to the tasks) controls which network traffic may reach them and leave them.
+
+The service is private. It has no load balancer, no API and no public IP address. Its security group has no inbound rule, so nothing can open a connection to the service until you allow a caller. The service can still make outbound calls, for example to a database or to other AWS services.
+
+:::note[Reaching Your Service Over HTTP]
+The generated service is private and has no HTTP endpoint you can reach from outside the VPC. To serve HTTP clients, for example a website, an agent or a caller outside AWS, put an API in front of the service. Running the API generators (tRPC, FastAPI and Smithy) on Amazon ECS is planned as a follow-up. Until then, you can let a caller inside the VPC connect with `connections.allowFrom` in CDK or an ingress rule in Terraform, as "Letting a Caller Reach Your Service" below shows.
+:::
+
+## Usage
+
+### Add a Container Service
+
+You can add a container service to a Python project in two ways:
+
+<RunGenerator generator="py#container" />
+
+:::tip[Project Prerequisite]
+First use the <Link path="/guides/python-project">`py#project`</Link> generator to create a project to add your service to.
+:::
+
+### Options
+
+<GeneratorParameters generator="py#container" />
+
+With `infra` set to `none` the generator vends no infrastructure, and the service runs only locally.
+
+## Generator Output
+
+The generator adds the following files to your project. The source folder is named after the `name` option in snake_case (for example `my_container` for `--name=my-container`), or `container` if you leave it out:
+
+<FileTree>
+  - your-project/
+    - your_module/
+      - container/ (or the name you chose)
+        - \_\_init\_\_.py Python package initialization
+        - main.py FastAPI app with `GET /health` and the sample route `GET /echo`, served by uvicorn on `PORT`
+        - Dockerfile Container image definition
+        - .dockerignore Files left out of the image build context
+    - pyproject.toml Updated with FastAPI and uvicorn dependencies
+    - project.json Updated with the `bundle-arm` and `bundle` targets and the `<name>-serve`, `<name>-docker` and `<name>-trivy` targets for your service
+</FileTree>
+
+Target names start with the `name` option, or with `container` if you leave it out. For example, the targets are `container-serve`, `container-docker` and `container-trivy` without a name, and `orders-serve`, `orders-docker` and `orders-trivy` for `--name=orders`. The `bundle-arm` and `bundle` targets are shared by everything the project bundles.
+
+<OptionFilter when={{ infra: 'ecs' }} description="ECS service infrastructure">
+### Infrastructure
+
+<Snippet name="shared-constructs" />
+
+For deploying your service, the following files are generated. `<name>` is your service name in kebab-case: the `name` option, or the last part of your project name followed by `-container` when you leave the option out. Project `orders` with no `name` option gives `orders-container`, and `--name=api` gives `api`:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<FileTree>
+  - packages/common/constructs/src
+    - app
+      - services
+        - \<name>.ts CDK construct for your service, with its image
+    - core
+      - container
+        - ecs-service.ts Generic construct for an ECS service on Fargate
+</FileTree>
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - app
+      - services
+        - \<name>
+          - \<name>.tf Module for your service, which publishes its image
+    - core
+      - container
+        - ecs-service
+          - ecs-service.tf Generic module for an ECS service on Fargate
+          - variables.tf Inputs of the generic module
+          - outputs.tf Outputs of the generic module
+</FileTree>
+</Fragment>
+</Infrastructure>
+
+The construct and the module create an ECS cluster with Container Insights (CloudWatch metrics for the cluster's containers), a task definition, the service, a task role and an execution role, a log group encrypted with an AWS Key Management Service (AWS KMS) key, CPU-based autoscaling and the service's security group.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'none' }} description="No infrastructure is vended for infra=none">
+If you set `infra` to `none`, no CDK constructs or Terraform modules are generated, and the service runs only locally.
+</OptionFilter>
+
+#### Architecture
+
+<ArchitectureDiagram />
+
+## Running Your Service Locally
+
+The `<name>-serve` target runs the server on your machine, without a container:
+
+<NxCommands commands={['run your-project:container-serve']} />
+
+The server listens on the port in the `PORT` environment variable. The `<name>-serve` target sets it to a port the generator assigns, starting at 8081 and skipping ports other projects in your workspace already use. Inside the container the server listens on port 8080.
+
+The server listens on the address in the `HOST` environment variable, which defaults to `127.0.0.1`, so the `<name>-serve` target accepts connections only from your own machine. The image sets `HOST=0.0.0.0`, so inside a task the server listens on the task's own network interface. The task's security group still decides who may connect.
+
+Check that the server is up with its health route, which returns status 200 and `{"status":"ok"}`:
+
+```bash
+curl http://localhost:<port>/health
+```
+
+The server also has a sample route that you replace with your own routes. `GET /echo?message=<x>` returns `{"message":"<x>"}`. The `message` parameter is required and may be at most 1024 characters long. A request without it, or with a longer value, gets status 422.
+
+## Building and Scanning the Image
+
+The `<name>-docker` target builds a linux/arm64 image of your service. It runs the `bundle-arm` target first, which writes your code and its linux/arm64 dependencies to `dist/<project root>/bundle-arm`. The aggregate `bundle` target depends on `bundle-arm`. The `<name>-docker` target then copies that folder, the `Dockerfile` and the `.dockerignore` into `dist/<project root>/docker/<name>`, and builds the image with that folder as the build context (the files the image build can read). It uses the container engine your workspace is set up with, `docker` or [Finch](https://runfinch.com/). The target runs as part of the aggregate `docker` target, which builds every image in the project.
+
+<NxCommands commands={['run your-project:container-docker']} />
+
+On ECS, a health check command runs inside the container and calls `GET /health` on the container port. It needs no inbound access. ECS replaces a task whose health check keeps failing. ECS ignores a `HEALTHCHECK` instruction in the Dockerfile. For more on how images are built and published, see <Link path="/guides/docker-bundling">Docker Bundling</Link>.
+
+### Image Scanning
+
+<Snippet name="trivy-image-scan" parentHeading="Image Scanning" />
+
+<OptionFilter when={{ infra: 'ecs' }} description="Deploying the ECS service">
+## Deploying Your Service
+
+### Adding the Service to Your Infrastructure
+
+The construct and the module never create a VPC. You create or import one in your stack or root module and pass it in. The tasks run in private subnets with egress, which reach AWS services through a NAT gateway (a managed gateway that lets private subnets make outbound connections) or through VPC endpoints (private connections from your VPC to AWS services).
+
+<Infrastructure>
+<Fragment slot="cdk">
+The CDK construct is created in `common/constructs`. Its class name is `<name>` in PascalCase, so project `orders` with no `name` option gives the class `OrdersContainer` in `packages/common/constructs/src/app/services/orders-container.ts`, and `--name=api` gives `Api` in `api.ts`. `MyService` below is a placeholder for your own class, which your `@<scope>/common-constructs` package exports under that name. The package exports no construct called `Service`, so if your editor offers one it is `Service` from `aws-cdk-lib/aws-servicediscovery`.
+
+Example usage with a new VPC:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyService } from '@my-scope/common-constructs';
+import { Stack, StackProps } from 'aws-cdk-lib';
+import { SubnetType, Vpc } from 'aws-cdk-lib/aws-ec2';
+import { Construct } from 'constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const vpc = new Vpc(this, 'Vpc', { natGateways: 1 });
+
+    new MyService(this, 'MyService', {
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    });
+  }
+}
+```
+
+To use an existing VPC, look it up with `Vpc.fromLookup(this, 'Vpc', { vpcId: '<vpc-id>' })` and pass it as `vpc`.
+</Fragment>
+<Fragment slot="terraform">
+The Terraform module is created in `common/terraform`, in `app/services/<name>/<name>.tf`. Project `orders` with no `name` option gives `packages/common/terraform/src/app/services/orders-container/orders-container.tf`, and `my-service` below is a placeholder for your own module folder. The service's image is published to the shared asset repository, so instantiate the `core/asset-ecr` module once per deployment and pass its outputs to every service module. Also pass the outputs of the shared `runtime_config_appconfig` module, which hold the AWS AppConfig application the service reads its <Link path="/guides/runtime-config">runtime configuration</Link> from:
+
+```hcl title="packages/infra/src/main.tf"
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
+}
+
+module "my_service" {
+  source = "../../common/terraform/src/app/services/my-service"
+
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = aws_subnet.private[*].id
+
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+  asset_ecr_repository_arn = module.asset_ecr.repository_arn
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Running Without a NAT Gateway
+
+When your tasks start, ECS pulls the image and sends logs on their behalf. Your server code may also call AWS services. In private subnets with no NAT gateway, each of these calls needs a VPC endpoint. Without the right endpoints, tasks fail to start or time out when they call AWS.
+
+Create these endpoints in the VPC, replacing `<region>` with your AWS Region:
+
+| Endpoint | Type | What uses it |
+| --- | --- | --- |
+| `com.amazonaws.<region>.ecr.api` | Interface | ECS, to authenticate with Amazon ECR and look up the image |
+| `com.amazonaws.<region>.ecr.dkr` | Interface | ECS, to pull the image from Amazon ECR |
+| `com.amazonaws.<region>.s3` | Gateway | ECS, to download image layers, which Amazon ECR stores in Amazon S3 |
+| `com.amazonaws.<region>.logs` | Interface | The container's log output, sent to Amazon CloudWatch Logs |
+| `com.amazonaws.<region>.secretsmanager` | Interface | ECS, to read the secrets you pass to the container when a task starts |
+| `com.amazonaws.<region>.appconfigdata` | Interface | Your code, to read <Link path="/guides/runtime-config">runtime configuration</Link> from AWS AppConfig |
+| `com.amazonaws.<region>.sts` | Interface | Your code, when it requests temporary credentials from AWS STS (for example to assume another role) |
+
+Interface endpoints need a security group that allows HTTPS (port 443) from the tasks. For details on the Amazon ECR endpoints, see [Amazon ECR interface VPC endpoints](https://docs.aws.amazon.com/AmazonECR/latest/userguide/vpc-endpoints.html).
+
+### Security Defaults
+
+The generated infrastructure applies these settings by default:
+
+- The service's security group has no inbound rule. No caller inside or outside the VPC can connect to the tasks until you add a rule.
+- Tasks run in private subnets and never get a public IP address.
+- The generator creates no load balancer and no API in front of the service.
+- Tasks may send outbound traffic only on port 443. Connections to databases add the database port.
+- The task role (the role your server code runs as) may only read runtime configuration from AWS AppConfig until you or a connection grant more.
+- The execution role (the role ECS uses to start your task) may only pull the service's image, write to its log group and read the secrets you list.
+- Secrets reach the container only as references to AWS Secrets Manager or AWS Systems Manager Parameter Store, never as plain environment values.
+- The container has a read-only root file system with a writable `/tmp` folder, and runs as uid 1000, a non-root user. ECS Exec (shell access into a running task) is off.
+- A deployment that fails its health checks stops and rolls back to the previous version.
+- The log group is encrypted with an AWS KMS key, and logs are kept for one year.
+
+### Letting a Caller Reach Your Service
+
+This section is about callers inside the VPC. An HTTP client outside the VPC needs an API in front of the service, as the note at the top of this guide explains.
+
+Nothing can call the service as generated. If another workload in the VPC needs to call it, for example a Lambda function or another ECS service, you add an inbound rule to the service's security group yourself. The generator adds no inbound rule. Allow one named caller by its security group, on the container port, and never allow an address range.
+
+<Infrastructure>
+<Fragment slot="cdk">
+The construct implements `IConnectable`, so allow the caller's security group through its `connections`:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { Port } from 'aws-cdk-lib/aws-ec2';
+
+const svc = new MyService(this, 'MyService', { vpc });
+svc.connections.allowFrom(callerSecurityGroup, Port.tcp(8080));
+```
+
+If the caller's security group is defined in your CDK app and limits outbound traffic, `allowFrom` also adds the matching outbound rule to it.
+</Fragment>
+<Fragment slot="terraform">
+Add an inbound rule to the service's security group, which your service's module outputs as `security_group_id`, with the caller's security group as the source:
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_vpc_security_group_ingress_rule" "caller_to_my_service" {
+  security_group_id            = module.my_service.security_group_id
+  referenced_security_group_id = aws_security_group.caller.id
+  from_port                    = 8080
+  to_port                      = 8080
+  ip_protocol                  = "tcp"
+}
+```
+
+If the caller's security group limits outbound traffic, also add an `aws_vpc_security_group_egress_rule` on the caller's group to the service's security group.
+</Fragment>
+</Infrastructure>
+
+The caller connects to a task's private IP address. The generator sets up no service discovery, and a task's address changes when ECS replaces the task. To give callers a stable name, set up service discovery yourself, for example with [Amazon ECS Service Connect](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-connect.html).
+
+### Advanced Configuration
+
+The generated service sets its name and image for you. The examples below use the generic `EcsService` construct and `ecs-service` module directly, for settings the generated service does not pass.
+
+In CDK, your `common-constructs` package exports `EcsService` next to your service's construct, so you import it the same way: `import { EcsService } from '@my-scope/common-constructs'`. The generated construct extends `EcsService` and passes every other prop through, for example `cluster`, `environment`, `secrets` and `grantTaskRole`. Its optional `image` prop replaces the image built from your project.
+
+In Terraform, your service's module lets you set only some of the `ecs-service` module's variables: `vpc_id`, `subnet_ids`, `cluster_arn`, `environment`, `secrets`, `task_role_policy_statements` and `tags`. To set any other variable, edit the `module "ecs_service"` block in your service's module.
+
+#### Prebuilt Image
+
+To run an image that is already built, for example from a public registry, pass its URI. Nothing is built locally. For an image in a private Amazon ECR repository, CDK grants the execution role pull access on that repository. Terraform grants pull access only when you also pass the repository's ARN as `image_repository_arn`.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+new EcsService(this, 'Prebuilt', {
+  serviceName: 'Prebuilt',
+  vpc,
+  image: { imageUri: 'public.ecr.aws/my-org/my-image@sha256:<digest>' },
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl
+module "prebuilt" {
+  source = "../../common/terraform/src/core/container/ecs-service"
+
+  service_name = "Prebuilt"
+  vpc_id       = aws_vpc.main.id
+  subnet_ids   = aws_subnet.private[*].id
+  image_uri    = "public.ecr.aws/my-org/my-image@sha256:<digest>"
+  # For an image in a private Amazon ECR repository, also pass:
+  # image_repository_arn = aws_ecr_repository.my_image.arn
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+#### Several Services in One Stack
+
+Each service creates its own ECS cluster unless you pass one in. To run several services in one cluster, pass the same cluster to each.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+const cluster = new Cluster(this, 'Cluster', { vpc });
+
+new MyService(this, 'MyService', { vpc, cluster });
+new MyOtherService(this, 'MyOtherService', { vpc, cluster });
+```
+
+</Fragment>
+<Fragment slot="terraform">
+Pass the same `cluster_arn` to each `ecs-service` module. The `cluster_arn` output of the first service gives you one:
+
+```hcl
+cluster_arn = module.my_service.cluster_arn
+```
+
+</Fragment>
+</Infrastructure>
+
+#### Environment Variables and Secrets
+
+Plain settings go in `environment`. Never put secret values there, because anyone who can read the task definition can read them. Pass secrets as references instead. The execution role may read only the secrets you list.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+new EcsService(this, 'MyService', {
+  // ...
+  environment: { LOG_LEVEL: 'info' },
+  secrets: { API_KEY: Secret.fromSecretsManager(apiKeySecret) },
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl
+environment = { LOG_LEVEL = "info" }
+secrets     = { API_KEY = aws_secretsmanager_secret.api_key.arn }
+```
+
+</Fragment>
+</Infrastructure>
+
+#### Sizing and Scaling
+
+Each task gets 256 CPU units (a quarter of a vCPU) and 512 MiB of memory by default. The service starts one task, and autoscaling keeps between one and two tasks running, adding tasks when average CPU use goes above 70%.
+
+| Setting | CDK prop | Terraform variable | Default |
+| --- | --- | --- | --- |
+| CPU units per task | `cpu` | `cpu` | 256 |
+| Memory per task (MiB) | `memoryLimitMiB` | `memory` | 512 |
+| Tasks at start | `desiredCount` | `desired_count` | 1 |
+| Fewest tasks | `minCapacity` | `min_capacity` | 1 |
+| Most tasks | `maxCapacity` | `max_capacity` | 2 |
+| Target average CPU (%) | `targetCpuUtilizationPercent` | `target_cpu_utilization` | 70 |
+
+#### Task Role Permissions
+
+The task role of your service's construct or module starts with read access to runtime configuration only. Add the permissions your code needs:
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+new EcsService(this, 'MyService', {
+  // ...
+  grantTaskRole: (taskRole) => myTable.grantReadData(taskRole),
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl
+task_role_policy_statements = [{
+  Effect   = "Allow"
+  Action   = ["dynamodb:GetItem", "dynamodb:Query"]
+  Resource = [aws_dynamodb_table.my_table.arn]
+}]
+```
+
+</Fragment>
+</Infrastructure>
+
+#### Container User
+
+The task definition runs the container as uid 1000, a non-root user. The vended Dockerfile matches it: it creates a user `app` with uid and gid 1000 and sets `USER 1000:1000`. To run as another user, set the CDK `user` prop or the Terraform `container_user` variable. Terraform rejects `0` and `root`.
+
+| Setting | CDK prop | Terraform variable | Default |
+| --- | --- | --- | --- |
+| User the container runs as | `user` | `container_user` | `'1000'` (CDK), `"1000:1000"` (Terraform) |
+
+In Terraform, `container_user` is a variable of the `ecs-service` module. Your service's module does not pass it, so set it in its `module "ecs_service"` block.
+
+### Cost
+
+A container service bills while it is idle, unlike a Lambda function. These parts bill by the hour whether or not anyone calls the service:
+
+- Fargate tasks, per vCPU and per GB of memory. `desiredCount` and `minCapacity` keep at least one task running.
+- Interface VPC endpoints, per hour in each Availability Zone, or a NAT gateway, per hour and per GB of data it processes.
+- Log storage in CloudWatch Logs, and image storage in Amazon ECR.
+
+To estimate the cost for your Region and traffic, use the [AWS Pricing Calculator](https://calculator.aws/).
+
+### Destroying Your Service
+
+To remove the service, destroy the stack or the Terraform configuration that holds it:
+
+<Infrastructure>
+<Fragment slot="cdk">
+Run your infrastructure project's `destroy` target, which runs `cdk destroy`:
+
+<NxCommands commands={['run infra:destroy']} />
+</Fragment>
+<Fragment slot="terraform">
+Run your infrastructure project's `destroy` target:
+
+<NxCommands commands={['run infra:destroy']} />
+</Fragment>
+</Infrastructure>
+
+Then check in the AWS console or with the AWS CLI that the ECS service and cluster are gone. With both CDK and Terraform, destroy deletes the service's log groups and schedules its AWS KMS key for deletion. KMS waits 7 days before it deletes the key. Images stay in Amazon ECR, in the CDK assets repository or the shared `asset-ecr` repository. Delete them if you no longer need them. The VPC is yours, so destroying the service leaves it in place.
+</OptionFilter>
+
+## Connecting Your Service
+
+Use the <Link path="/guides/connection">`connection`</Link> generator to connect your service to other projects in your workspace:
+
+<RunGenerator generator="connection" />
+
+Your service can use a relational database or a DynamoDB table. Each connection has its own guide:
+
+- <Link path="guides/connection/py-container-rdb">Python Container Service to Relational Database</Link>
+- <Link path="guides/connection/py-container-dynamodb">Python Container Service to DynamoDB</Link>
+
+A connection needs a service with `infra` set to `ecs`.

@@ -1,0 +1,120 @@
+---
+title: Python Container Service에서 DynamoDB로
+description: Python 컨테이너 서비스를 Python DynamoDB 프로젝트에 연결
+when:
+  sourceType: py#container
+  targetType: py#dynamodb
+---
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 생성기는 <Link path="guides/py-container">Python 컨테이너 서비스</Link>가 <Link path="guides/py-dynamodb">Python DynamoDB</Link> 프로젝트를 사용할 수 있게 합니다. DynamoDB 패키지를 서비스 프로젝트의 의존성으로 추가하고, 서비스와 DynamoDB Local이 함께 시작되도록 로컬 개발을 구성하며, 서비스에 필요한 권한을 출력합니다.
+
+## 작동 방식
+
+`infra=ecs`를 사용하는 컨테이너 서비스는 Amazon ECS(Elastic Container Service)에서 태스크로 실행됩니다. 각 태스크는 서비스의 태스크 역할로 실행되며, 이는 추가 권한을 부여하기 전까지 런타임 구성만 읽을 수 있는 IAM 역할입니다. 테이블을 읽고 쓰려면 태스크 역할에 테이블과 인덱스에 대한 DynamoDB 작업 권한과 테이블의 AWS KMS 암호화 키 사용 권한이 필요합니다.
+
+생성기는 `infra=none`인 서비스를 거부합니다. 이러한 서비스에는 액세스 권한을 부여할 태스크 역할이 없기 때문입니다.
+
+## 사전 요구 사항
+
+이 생성기를 사용하기 전에 다음이 필요합니다:
+
+1. `infra=ecs`를 사용하는 컨테이너 서비스 (<Link path="guides/py-container">`py#container`</Link> 생성기를 사용하여 생성)
+2. <Link path="guides/py-dynamodb">`py#dynamodb`</Link> 프로젝트
+
+## 사용법
+
+### 생성기 실행
+
+<RunGenerator generator="connection" />
+
+컨테이너 서비스가 포함된 프로젝트를 소스로 선택하고 DynamoDB 프로젝트를 대상으로 선택합니다. 소스 프로젝트에 여러 컴포넌트가 있는 경우 `sourceComponent`를 서비스 이름으로 설정합니다.
+
+### 옵션
+
+<GeneratorParameters generator="connection" />
+
+## 생성기 출력
+
+생성기는 DynamoDB 패키지를 서비스 프로젝트의 `pyproject.toml`에 워크스페이스 의존성으로 추가하고, `project.json`의 서비스 `<service-name>-serve` 타겟이 DynamoDB 프로젝트의 `dev` 타겟에 의존하도록 업데이트합니다.
+
+## 서비스에서 DynamoDB 사용
+
+DynamoDB 패키지에서 엔티티 클래스를 가져와 요청을 처리하는 곳에서 사용합니다:
+
+```python title="packages/my_project/my_project/my_service/examples.py"
+from my_scope_my_table.entities.example import ExampleModel
+
+
+def list_examples() -> list[dict]:
+    return [item.attribute_values for item in ExampleModel.scan()]
+```
+
+## 인프라
+
+생성기는 스택이나 루트 Terraform 모듈을 변경하지 않습니다. 대신 추가할 코드를 출력하며, 아래는 `my-service`라는 서비스와 `my-table`이라는 테이블에 대한 예시입니다. 이를 추가하기 전까지 서비스의 테이블 요청은 거부됩니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+예시에서 `myService`는 `MyService` 구성이고 `myTable`은 `MyTable` 구성입니다:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+myTable.grantReadWriteData(myService.taskRole);
+```
+
+`grantReadWriteData`는 서비스의 태스크 역할에 DynamoDB와 KMS 권한을 모두 부여합니다.
+
+</Fragment>
+<Fragment slot="terraform">
+
+예시에서 `module "my_service"`는 서비스를 배포하고 `module "my_table"`은 테이블을 배포합니다:
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_role_policy" "my_service_my_table_access" {
+  name = "my-service-my-table-access"
+  role = module.my_service.task_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:Scan",
+          "dynamodb:BatchGetItem", "dynamodb:BatchWriteItem",
+        ]
+        Resource = [
+          module.my_table.table_arn,
+          "${module.my_table.table_arn}/index/*",
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey",
+        ]
+        Resource = [module.my_table.kms_key_arn]
+      },
+    ]
+  })
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+## 로컬 개발
+
+<NxCommands commands={["<service-name>-serve <project-name>"]} />
+
+이 명령은 서비스와 DynamoDB Local을 시작합니다. `LOCAL_DEV=true`가 설정되면 `is_local()`이 `True`를 반환하고 PynamoDB 엔티티는 AWS 대신 DynamoDB Local에 연결됩니다.

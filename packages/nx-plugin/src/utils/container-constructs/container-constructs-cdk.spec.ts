@@ -1,0 +1,964 @@
+/**
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { type Tree, updateJson } from '@nx/devkit';
+import ts from 'typescript';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { declareDependencies } from '../declared-dependencies.js';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../shared-constructs.js';
+import { createTreeUsingTsSolutionSetup } from '../test.js';
+import {
+  type AddContainerServiceInfraOptions,
+  type ContainerRuntime,
+  containerHealthCheckCommand,
+} from './container-constructs.js';
+import { addContainerServiceCdkConstructs } from './container-constructs-cdk.js';
+
+const sharedConstructsDeclaration = declareDependencies()({
+  ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
+});
+
+const CONSTRUCTS_SRC = 'packages/common/constructs/src';
+
+// Temp files sit next to this spec so `aws-cdk-lib` and `constructs` resolve
+// from the workspace root `node_modules`; `_tmp_*` is git-ignored.
+const TMP_DIR = join(
+  import.meta.dirname,
+  `_tmp_container-constructs-${process.pid}`,
+);
+
+const serviceOptions = (
+  overrides: Partial<AddContainerServiceInfraOptions> = {},
+): AddContainerServiceInfraOptions => ({
+  nameClassName: 'Orders',
+  nameKebabCase: 'orders',
+  projectName: '@proj/shop',
+  dockerImageTag: 'proj-orders:latest',
+  dockerBuildContextDir: 'dist/apps/shop/bundle/container/orders',
+  containerPort: 8080,
+  healthCheckCommand: containerHealthCheckCommand('node'),
+  containers: 'docker',
+  ...overrides,
+});
+
+const renderTree = async (
+  options: AddContainerServiceInfraOptions,
+  { commonjs = false }: { commonjs?: boolean } = {},
+): Promise<Tree> => {
+  const tree = createTreeUsingTsSolutionSetup();
+  if (commonjs) {
+    updateJson(tree, 'package.json', (json) => ({ ...json, type: 'commonjs' }));
+  }
+  await sharedConstructsGenerator(
+    tree,
+    { iac: 'cdk' },
+    sharedConstructsDeclaration,
+  );
+  await addContainerServiceCdkConstructs(tree, options);
+  return tree;
+};
+
+const readOrThrow = (tree: Tree, path: string): string => {
+  const content = tree.read(path, 'utf-8');
+  if (content === null) {
+    throw new Error(`Not rendered: ${path}`);
+  }
+  return content;
+};
+
+const listFiles = (tree: Tree, dir: string): string[] =>
+  tree.isFile(dir)
+    ? [dir]
+    : tree.children(dir).flatMap((child) => listFiles(tree, `${dir}/${child}`));
+
+const fileContents = (tree: Tree, dir: string): Record<string, string> =>
+  Object.fromEntries(
+    listFiles(tree, dir).map((path) => [path, readOrThrow(tree, path)]),
+  );
+
+describe('addContainerServiceCdkConstructs', () => {
+  it('should vend the core construct and the service subclass', async () => {
+    const tree = await renderTree(serviceOptions());
+
+    expect(tree.exists(`${CONSTRUCTS_SRC}/core/container/ecs-service.ts`)).toBe(
+      true,
+    );
+    expect(tree.exists(`${CONSTRUCTS_SRC}/app/services/orders.ts`)).toBe(true);
+    expect(readOrThrow(tree, `${CONSTRUCTS_SRC}/core/index.ts`)).toContain(
+      "export * from './container/ecs-service.js';",
+    );
+    expect(
+      readOrThrow(tree, `${CONSTRUCTS_SRC}/app/services/index.ts`),
+    ).toContain("export * from './orders.js';");
+    expect(readOrThrow(tree, `${CONSTRUCTS_SRC}/app/index.ts`)).toContain(
+      "export * from './services/index.js';",
+    );
+  });
+
+  it('should change nothing when run again', async () => {
+    const tree = await renderTree(serviceOptions());
+    const before = fileContents(tree, CONSTRUCTS_SRC);
+
+    await addContainerServiceCdkConstructs(tree, serviceOptions());
+
+    expect(fileContents(tree, CONSTRUCTS_SRC)).toEqual(before);
+  });
+
+  it('should keep a user edit to the service file on re-run', async () => {
+    const tree = await renderTree(serviceOptions());
+    const servicePath = `${CONSTRUCTS_SRC}/app/services/orders.ts`;
+    tree.write(servicePath, '// edited by the user\n');
+
+    await addContainerServiceCdkConstructs(tree, serviceOptions());
+
+    expect(readOrThrow(tree, servicePath)).toBe('// edited by the user\n');
+  });
+
+  it.each<ContainerRuntime>(['node', 'python'])(
+    'should match the vended files snapshot (%s)',
+    async (runtime) => {
+      const tree = await renderTree(
+        serviceOptions({
+          healthCheckCommand: containerHealthCheckCommand(runtime),
+        }),
+      );
+
+      expect(
+        readOrThrow(tree, `${CONSTRUCTS_SRC}/core/container/ecs-service.ts`),
+      ).toMatchSnapshot('ecs-service.ts');
+      expect(
+        readOrThrow(tree, `${CONSTRUCTS_SRC}/app/services/orders.ts`),
+      ).toMatchSnapshot('orders.ts');
+    },
+  );
+
+  it('should alias the core imports when the service name shadows them', async () => {
+    const tree = await renderTree(
+      serviceOptions({
+        nameClassName: 'EcsService',
+        nameKebabCase: 'ecs-service',
+      }),
+    );
+
+    const content = readOrThrow(
+      tree,
+      `${CONSTRUCTS_SRC}/app/services/ecs-service.ts`,
+    );
+    expect(content).toContain('EcsService as CoreEcsService');
+    expect(content).toContain('export class EcsService extends CoreEcsService');
+  });
+});
+
+describe('vended container constructs compile', () => {
+  const COMPILE_DIR = join(TMP_DIR, 'compile');
+
+  afterAll(() => {
+    rmSync(COMPILE_DIR, { recursive: true, force: true });
+  });
+
+  // One program per module format over every render keeps aws-cdk-lib's
+  // declarations loaded once.
+  const compile = async (format: 'esm' | 'cjs') => {
+    const renders: [string, AddContainerServiceInfraOptions][] = [
+      ['node', serviceOptions()],
+      [
+        'python',
+        serviceOptions({
+          healthCheckCommand: containerHealthCheckCommand('python'),
+        }),
+      ],
+    ];
+    const formatDir = join(COMPILE_DIR, format);
+    mkdirSync(formatDir, { recursive: true });
+    writeFileSync(
+      join(formatDir, 'package.json'),
+      JSON.stringify({ type: format === 'esm' ? 'module' : 'commonjs' }),
+    );
+    const rootNames: string[] = [];
+    for (const [name, options] of renders) {
+      const tree = await renderTree(options, { commonjs: format === 'cjs' });
+      for (const [path, content] of Object.entries(
+        fileContents(tree, CONSTRUCTS_SRC),
+      )) {
+        const target = join(formatDir, name, path);
+        mkdirSync(dirname(target), { recursive: true });
+        writeFileSync(target, content);
+        rootNames.push(target);
+      }
+    }
+    const program = ts.createProgram(rootNames, {
+      strict: true,
+      skipLibCheck: true,
+      noEmit: true,
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.NodeNext,
+      moduleResolution: ts.ModuleResolutionKind.NodeNext,
+      types: ['node'],
+    });
+    return ts
+      .getPreEmitDiagnostics(program)
+      .map(
+        (d) =>
+          `${d.file?.fileName ?? ''}: ${ts.flattenDiagnosticMessageText(d.messageText, '\n')}`,
+      );
+  };
+
+  it('should compile as ESM', async () => {
+    expect(await compile('esm')).toEqual([]);
+  }, 120_000);
+
+  it('should compile as CommonJS', async () => {
+    expect(await compile('cjs')).toEqual([]);
+  }, 120_000);
+});
+
+// Narrow shapes of the transpiled modules: the templates are not real `.ts`
+// files, so their types are not statically resolvable here.
+interface EcsServiceInstance {
+  readonly cluster: unknown;
+  readonly service: unknown;
+  readonly taskDefinition: unknown;
+  readonly taskRole: import('aws-cdk-lib/aws-iam').IRole;
+  readonly securityGroup: unknown;
+  readonly connections: unknown;
+  readonly logGroup: import('aws-cdk-lib/aws-logs').ILogGroup;
+}
+
+interface EcsServiceModuleShape {
+  readonly EcsService: new (
+    scope: import('constructs').Construct,
+    id: string,
+    props: Record<string, unknown>,
+  ) => EcsServiceInstance;
+}
+
+interface ServiceModuleShape {
+  readonly Orders: new (
+    scope: import('constructs').Construct,
+    id: string,
+    props: Record<string, unknown>,
+  ) => EcsServiceInstance;
+}
+
+interface RuntimeConfigModuleShape {
+  readonly RuntimeConfig: {
+    ensure: (scope: import('constructs').Construct) => {
+      get: (namespace: string) => Record<string, any>;
+      readonly appConfigApplicationId: string;
+    };
+  };
+}
+
+interface CfnResourceJson {
+  readonly Type: string;
+  readonly Properties: Record<string, any>;
+  readonly Metadata?: Record<string, any>;
+  readonly DependsOn?: string[];
+  readonly DeletionPolicy?: string;
+  readonly UpdateReplacePolicy?: string;
+}
+
+describe('EcsService synth', () => {
+  const MODULE_DIR = join(TMP_DIR, 'modules');
+  const IMAGE_DIR = join(TMP_DIR, 'image');
+  let cdkLib: typeof import('aws-cdk-lib');
+  let ec2: typeof import('aws-cdk-lib/aws-ec2');
+  let ecs: typeof import('aws-cdk-lib/aws-ecs');
+  let iam: typeof import('aws-cdk-lib/aws-iam');
+  let secretsmanager: typeof import('aws-cdk-lib/aws-secretsmanager');
+  let assertions: typeof import('aws-cdk-lib/assertions');
+  let EcsServiceModule: EcsServiceModuleShape;
+  let RuntimeConfigModule: RuntimeConfigModuleShape;
+  let ServiceModule: ServiceModuleShape;
+  let appCount = 0;
+
+  beforeAll(async () => {
+    const tree = await renderTree(serviceOptions());
+    mkdirSync(MODULE_DIR, { recursive: true });
+    const modulePath = (name: string) => join(MODULE_DIR, `${name}.mjs`);
+    const transpile = (path: string) =>
+      ts.transpileModule(readOrThrow(tree, `${CONSTRUCTS_SRC}/${path}`), {
+        compilerOptions: {
+          module: ts.ModuleKind.ESNext,
+          target: ts.ScriptTarget.ES2022,
+        },
+      }).outputText;
+    writeFileSync(modulePath('checkov'), transpile('core/checkov.ts'));
+    writeFileSync(
+      modulePath('runtime-config'),
+      transpile('core/runtime-config.ts'),
+    );
+    writeFileSync(
+      modulePath('ecs-service'),
+      transpile('core/container/ecs-service.ts')
+        .split('../runtime-config.js')
+        .join(pathToFileURL(modulePath('runtime-config')).href)
+        .split('../checkov.js')
+        .join(pathToFileURL(modulePath('checkov')).href),
+    );
+    writeFileSync(modulePath('workspace'), transpile('core/workspace.ts'));
+    // The per-service subclass, with its core imports pointed at the
+    // transpiled modules above.
+    writeFileSync(
+      modulePath('orders'),
+      transpile('app/services/orders.ts')
+        .split('../../core/container/ecs-service.js')
+        .join(pathToFileURL(modulePath('ecs-service')).href)
+        .split('../../core/runtime-config.js')
+        .join(pathToFileURL(modulePath('runtime-config')).href)
+        .split('../../core/workspace.js')
+        .join(pathToFileURL(modulePath('workspace')).href),
+    );
+    mkdirSync(IMAGE_DIR, { recursive: true });
+    writeFileSync(join(IMAGE_DIR, 'Dockerfile'), 'FROM scratch\n');
+
+    cdkLib = await import('aws-cdk-lib');
+    ec2 = await import('aws-cdk-lib/aws-ec2');
+    ecs = await import('aws-cdk-lib/aws-ecs');
+    iam = await import('aws-cdk-lib/aws-iam');
+    secretsmanager = await import('aws-cdk-lib/aws-secretsmanager');
+    assertions = await import('aws-cdk-lib/assertions');
+    EcsServiceModule = await import(
+      pathToFileURL(modulePath('ecs-service')).href
+    );
+    RuntimeConfigModule = await import(
+      pathToFileURL(modulePath('runtime-config')).href
+    );
+    ServiceModule = await import(pathToFileURL(modulePath('orders')).href);
+  });
+
+  afterAll(() => {
+    rmSync(TMP_DIR, { recursive: true, force: true });
+  });
+
+  const newStack = () => {
+    const app = new cdkLib.App({
+      outdir: join(TMP_DIR, `cdk.out-${appCount++}`),
+    });
+    const stack = new cdkLib.Stack(app, 'Test');
+    const vpc = new ec2.Vpc(stack, 'Vpc', { maxAzs: 2 });
+    return { app, stack, vpc };
+  };
+
+  const newService = (
+    props: Record<string, unknown> = {},
+    existing?: ReturnType<typeof newStack>,
+  ) => {
+    const env = existing ?? newStack();
+    const service = new EcsServiceModule.EcsService(env.stack, 'Orders', {
+      serviceName: 'Orders',
+      vpc: env.vpc,
+      image: { directory: IMAGE_DIR },
+      ...props,
+    });
+    return { ...env, service };
+  };
+
+  const synth = (stack: import('aws-cdk-lib').Stack) => {
+    const template = assertions.Template.fromStack(stack);
+    const resources = template.toJSON().Resources as Record<
+      string,
+      CfnResourceJson
+    >;
+    const ofType = (type: string) =>
+      Object.entries(resources).filter(([, r]) => r.Type === type);
+    return { template, resources, ofType };
+  };
+
+  const policyStatementsForRole = (
+    resources: Record<string, CfnResourceJson>,
+    roleLogicalId: string,
+  ): any[] =>
+    Object.values(resources)
+      .filter(
+        (r) =>
+          r.Type === 'AWS::IAM::Policy' &&
+          (r.Properties.Roles ?? []).some(
+            (role: any) => role.Ref === roleLogicalId,
+          ),
+      )
+      .flatMap((r) => r.Properties.PolicyDocument.Statement);
+
+  const asArray = <T>(value: T | T[]): T[] =>
+    Array.isArray(value) ? value : [value];
+
+  const taskDefinitionOf = (resources: Record<string, CfnResourceJson>) => {
+    const taskDefinitions = Object.values(resources).filter(
+      (r) => r.Type === 'AWS::ECS::TaskDefinition',
+    );
+    expect(taskDefinitions).toHaveLength(1);
+    return taskDefinitions[0].Properties;
+  };
+
+  describe('defaults', () => {
+    let env: ReturnType<typeof newService>;
+    let out: ReturnType<typeof synth>;
+
+    beforeAll(() => {
+      env = newService();
+      // Creates the AppConfig resources the runtime config is delivered by.
+      void RuntimeConfigModule.RuntimeConfig.ensure(env.stack)
+        .appConfigApplicationId;
+      out = synth(env.stack);
+    });
+
+    it('should give the read-only container a writable /tmp', () => {
+      const taskDefinition = taskDefinitionOf(out.resources);
+      expect(taskDefinition.Volumes).toEqual([{ Name: 'tmp' }]);
+      const [container] = taskDefinition.ContainerDefinitions;
+      expect(container.MountPoints).toEqual([
+        { SourceVolume: 'tmp', ContainerPath: '/tmp', ReadOnly: false },
+      ]);
+    });
+
+    it('should run an arm64 Fargate task with a read-only root and a non-root user', () => {
+      const taskDefinition = taskDefinitionOf(out.resources);
+      expect(taskDefinition.RuntimePlatform).toEqual({
+        CpuArchitecture: 'ARM64',
+        OperatingSystemFamily: 'LINUX',
+      });
+      expect(taskDefinition.Cpu).toBe('256');
+      expect(taskDefinition.Memory).toBe('512');
+      const [container] = taskDefinition.ContainerDefinitions;
+      expect(container.ReadonlyRootFilesystem).toBe(true);
+      expect(container.User).toBe('1000');
+      expect(container.PortMappings[0].ContainerPort).toBe(8080);
+      expect(container.Environment).toContainEqual({
+        Name: 'PORT',
+        Value: '8080',
+      });
+    });
+
+    it('should run the service without a public IP, with rollback and without ECS Exec', () => {
+      const [[, service]] = out.ofType('AWS::ECS::Service');
+      expect(
+        service.Properties.NetworkConfiguration.AwsvpcConfiguration
+          .AssignPublicIp,
+      ).toBe('DISABLED');
+      expect(
+        service.Properties.DeploymentConfiguration.DeploymentCircuitBreaker,
+      ).toEqual({ Enable: true, Rollback: true });
+      expect(service.Properties.EnableExecuteCommand ?? false).toBe(false);
+      expect(service.Properties.PlatformVersion).toBe('LATEST');
+      expect(service.Properties.DesiredCount).toBe(1);
+    });
+
+    it('should create a cluster with Container Insights on', () => {
+      const clusters = out.ofType('AWS::ECS::Cluster');
+      expect(clusters).toHaveLength(1);
+      expect(clusters[0][1].Properties.ClusterSettings).toEqual([
+        { Name: 'containerInsights', Value: 'enabled' },
+      ]);
+    });
+
+    it('should manage the Container Insights log group so destroy removes it', () => {
+      const [[, cluster]] = out.ofType('AWS::ECS::Cluster');
+      const clusterName = cluster.Properties.ClusterName;
+      expect(typeof clusterName).toBe('string');
+      expect(clusterName).toMatch(/^[A-Za-z0-9_-]{1,255}$/);
+
+      const insightsLogGroups = out
+        .ofType('AWS::Logs::LogGroup')
+        .filter(
+          ([, logGroup]) =>
+            logGroup.Properties.LogGroupName ===
+            `/aws/ecs/containerinsights/${clusterName}/performance`,
+        );
+      expect(insightsLogGroups).toHaveLength(1);
+      const [[logGroupId, logGroup]] = insightsLogGroups;
+      expect(logGroup.DeletionPolicy).toBe('Delete');
+      expect(logGroup.UpdateReplacePolicy).toBe('Delete');
+      expect(logGroup.Properties.RetentionInDays).toBe(365);
+      expect(logGroup.Properties.KmsKeyId).toBeDefined();
+      expect(cluster.DependsOn).toContain(logGroupId);
+    });
+
+    // Parity with the Terraform key policy, which scopes the same grant to
+    // the two log group ARNs.
+    it('should let CloudWatch Logs use the key for its own log groups only', () => {
+      const logGroupNames = out
+        .ofType('AWS::Logs::LogGroup')
+        .map(([, logGroup]) => String(logGroup.Properties.LogGroupName));
+      expect(logGroupNames).toHaveLength(2);
+
+      const [[, key]] = out.ofType('AWS::KMS::Key');
+      const conditioned = key.Properties.KeyPolicy.Statement.filter(
+        (statement: { Condition?: unknown }) => statement.Condition,
+      );
+      expect(conditioned).toHaveLength(1);
+      const context = JSON.stringify(
+        conditioned[0].Condition.ArnLike['kms:EncryptionContext:aws:logs:arn'],
+      );
+      for (const logGroupName of logGroupNames) {
+        expect(context).toContain(`log-group:${logGroupName}`);
+      }
+    });
+
+    it('should create no load balancer, API or inbound rule', () => {
+      expect(
+        Object.values(out.resources)
+          .map((r) => r.Type)
+          .filter(
+            (type) =>
+              type.startsWith('AWS::ElasticLoadBalancingV2::') ||
+              type.startsWith('AWS::ApiGatewayV2::'),
+          ),
+      ).toEqual([]);
+      expect(out.ofType('AWS::EC2::SecurityGroupIngress')).toEqual([]);
+      const serviceSgId = env.stack.resolve(
+        (
+          env.service
+            .securityGroup as import('aws-cdk-lib/aws-ec2').ISecurityGroup
+        ).securityGroupId,
+      )['Fn::GetAtt'][0];
+      expect(
+        out.resources[serviceSgId].Properties.SecurityGroupIngress,
+      ).toBeUndefined();
+    });
+
+    it('should write nothing to runtime config and add no output', () => {
+      expect(
+        RuntimeConfigModule.RuntimeConfig.ensure(env.stack).get('connection')
+          .services,
+      ).toBeUndefined();
+      expect(
+        Object.keys(out.template.toJSON().Outputs ?? {}).filter((key) =>
+          key.includes('Url'),
+        ),
+      ).toEqual([]);
+    });
+
+    it('should run no container health check unless one is passed', () => {
+      const [container] = taskDefinitionOf(out.resources).ContainerDefinitions;
+      expect(container.HealthCheck).toBeUndefined();
+    });
+
+    it('should expose the container log group', () => {
+      const [container] = taskDefinitionOf(out.resources).ContainerDefinitions;
+      expect(env.stack.resolve(env.service.logGroup.logGroupName)).toEqual(
+        container.LogConfiguration.Options['awslogs-group'],
+      );
+    });
+
+    it('should allow no ingress at all, egress 443 only, with a description on every rule', () => {
+      const ingress = [
+        ...out
+          .ofType('AWS::EC2::SecurityGroup')
+          .flatMap(([, sg]) => sg.Properties.SecurityGroupIngress ?? []),
+        ...out
+          .ofType('AWS::EC2::SecurityGroupIngress')
+          .map(([, rule]) => rule.Properties),
+      ];
+      expect(ingress).toEqual([]);
+      const egress = [
+        ...out
+          .ofType('AWS::EC2::SecurityGroup')
+          .flatMap(([, sg]) => sg.Properties.SecurityGroupEgress ?? []),
+        ...out
+          .ofType('AWS::EC2::SecurityGroupEgress')
+          .map(([, rule]) => rule.Properties),
+      ];
+      for (const rule of egress) {
+        expect(rule.Description).toBeTruthy();
+      }
+
+      const serviceSgId = env.stack.resolve(
+        (
+          env.service
+            .securityGroup as import('aws-cdk-lib/aws-ec2').ISecurityGroup
+        ).securityGroupId,
+      )['Fn::GetAtt'][0];
+      expect(out.resources[serviceSgId].Properties.SecurityGroupEgress).toEqual(
+        [
+          {
+            CidrIp: '0.0.0.0/0',
+            Description: 'HTTPS egress',
+            FromPort: 443,
+            IpProtocol: 'tcp',
+            ToPort: 443,
+          },
+        ],
+      );
+      expect(
+        out
+          .ofType('AWS::EC2::SecurityGroupEgress')
+          .filter(
+            ([, rule]) =>
+              rule.Properties.GroupId['Fn::GetAtt']?.[0] === serviceSgId,
+          ),
+      ).toEqual([]);
+    });
+
+    it('should give the task role no permissions', () => {
+      const taskRoleId = taskDefinitionOf(out.resources).TaskRoleArn[
+        'Fn::GetAtt'
+      ][0];
+      expect(policyStatementsForRole(out.resources, taskRoleId)).toEqual([]);
+    });
+
+    it('should scope the execution role to the image, the logs and nothing else', () => {
+      const executionRoleId = taskDefinitionOf(out.resources).ExecutionRoleArn[
+        'Fn::GetAtt'
+      ][0];
+      const statements = policyStatementsForRole(
+        out.resources,
+        executionRoleId,
+      );
+      const actions = statements.flatMap((s) => asArray(s.Action)).sort();
+      expect(actions).toEqual(
+        [
+          'ecr:BatchCheckLayerAvailability',
+          'ecr:BatchGetImage',
+          'ecr:GetAuthorizationToken',
+          'ecr:GetDownloadUrlForLayer',
+          'logs:CreateLogStream',
+          'logs:PutLogEvents',
+        ].sort(),
+      );
+      const pull = statements.find((s) =>
+        asArray(s.Action).includes('ecr:BatchGetImage'),
+      );
+      expect(asArray(pull.Resource)).toHaveLength(1);
+      expect(JSON.stringify(pull.Resource)).toContain(':repository/');
+      const token = statements.find((s) =>
+        asArray(s.Action).includes('ecr:GetAuthorizationToken'),
+      );
+      expect(token.Resource).toBe('*');
+      const logs = statements.find((s) =>
+        asArray(s.Action).includes('logs:PutLogEvents'),
+      );
+      expect(JSON.stringify(logs.Resource)).toContain('Fn::GetAtt');
+    });
+
+    it('should scale on CPU between 1 and 2 tasks', () => {
+      const [[, target]] = out.ofType(
+        'AWS::ApplicationAutoScaling::ScalableTarget',
+      );
+      expect(target.Properties.MinCapacity).toBe(1);
+      expect(target.Properties.MaxCapacity).toBe(2);
+      const [[, policy]] = out.ofType(
+        'AWS::ApplicationAutoScaling::ScalingPolicy',
+      );
+      expect(policy.Properties.PolicyType).toBe('TargetTrackingScaling');
+      const config = policy.Properties.TargetTrackingScalingPolicyConfiguration;
+      expect(config.PredefinedMetricSpecification.PredefinedMetricType).toBe(
+        'ECSServiceAverageCPUUtilization',
+      );
+      expect(config.TargetValue).toBe(70);
+    });
+
+    it('should keep logs for a year, encrypted with a rotated KMS key', () => {
+      const logGroups = out.ofType('AWS::Logs::LogGroup');
+      // Container logs and Container Insights logs.
+      expect(logGroups).toHaveLength(2);
+      for (const [, logGroup] of logGroups) {
+        expect(logGroup.Properties.RetentionInDays).toBe(365);
+        expect(logGroup.Properties.KmsKeyId).toBeDefined();
+      }
+      for (const [, key] of out.ofType('AWS::KMS::Key')) {
+        expect(key.Properties.EnableKeyRotation).toBe(true);
+      }
+    });
+
+    // Parity with the Terraform module, which schedules the key for deletion
+    // on a 7 day window. The key only encrypts the two log groups the stack
+    // also deletes, so retaining it would leave an orphaned customer-managed
+    // key per service, billed until its window elapses.
+    it('should destroy the logs KMS key with the stack after 7 days', () => {
+      const keys = out.ofType('AWS::KMS::Key');
+      expect(keys).toHaveLength(1);
+      const [[, key]] = keys;
+      expect(key.DeletionPolicy).toBe('Delete');
+      expect(key.UpdateReplacePolicy).toBe('Delete');
+      expect(key.Properties.PendingWindowInDays).toBe(7);
+    });
+  });
+
+  it('should pass the health check to the container', () => {
+    const { stack } = newService({
+      healthCheck: {
+        command: ['CMD', 'true'],
+        interval: cdkLib.Duration.seconds(10),
+        retries: 2,
+      },
+    });
+    const { resources } = synth(stack);
+
+    expect(
+      taskDefinitionOf(resources).ContainerDefinitions[0].HealthCheck,
+    ).toEqual({
+      Command: ['CMD', 'true'],
+      Interval: 10,
+      Retries: 2,
+      // CDK's default timeout.
+      Timeout: 5,
+    });
+  });
+
+  it('should use a public image URI as is, with no asset', () => {
+    const uri = 'public.ecr.aws/docker/library/nginx:latest';
+    const { stack, app } = newService({ image: { imageUri: uri } });
+    const { resources } = synth(stack);
+
+    expect(taskDefinitionOf(resources).ContainerDefinitions[0].Image).toBe(uri);
+    const assembly = app.synth();
+    expect(
+      assembly
+        .getStackByName('Test')
+        .assets.filter(
+          (asset) => 'imageTag' in asset || 'repositoryName' in asset,
+        ),
+    ).toEqual([]);
+    expect(JSON.stringify(resources)).not.toContain('container-assets');
+  });
+
+  it('should grant pull on exactly the given ECR repository', () => {
+    const { stack } = newService({
+      image: {
+        imageUri: '123456789012.dkr.ecr.us-east-1.amazonaws.com/repo:tag',
+      },
+    });
+    const { resources } = synth(stack);
+
+    const executionRoleId =
+      taskDefinitionOf(resources).ExecutionRoleArn['Fn::GetAtt'][0];
+    const pull = policyStatementsForRole(resources, executionRoleId).find((s) =>
+      asArray(s.Action).includes('ecr:BatchGetImage'),
+    );
+    expect(asArray(pull.Resource)).toHaveLength(1);
+    expect(JSON.stringify(pull.Resource)).toContain(
+      ':ecr:us-east-1:123456789012:repository/repo',
+    );
+    expect(JSON.stringify(resources)).not.toContain('container-assets');
+  });
+
+  it('should pass secrets by reference and let the execution role read only them', () => {
+    const env = newStack();
+    const secret = new secretsmanager.Secret(env.stack, 'DbSecret');
+    newService(
+      { secrets: { DB_PASSWORD: ecs.Secret.fromSecretsManager(secret) } },
+      env,
+    );
+    const { resources } = synth(env.stack);
+
+    const taskDefinition = taskDefinitionOf(resources);
+    const [container] = taskDefinition.ContainerDefinitions;
+    expect(container.Secrets).toEqual([
+      { Name: 'DB_PASSWORD', ValueFrom: env.stack.resolve(secret.secretArn) },
+    ]);
+    expect((container.Environment ?? []).map((e: any) => e.Name)).not.toContain(
+      'DB_PASSWORD',
+    );
+    const secretStatements = policyStatementsForRole(
+      resources,
+      taskDefinition.ExecutionRoleArn['Fn::GetAtt'][0],
+    ).filter((s) =>
+      asArray(s.Action).some((a: string) => a.startsWith('secretsmanager:')),
+    );
+    expect(secretStatements).toHaveLength(1);
+    expect(asArray(secretStatements[0].Action)).toContain(
+      'secretsmanager:GetSecretValue',
+    );
+    expect(secretStatements[0].Resource).toEqual(
+      env.stack.resolve(secret.secretArn),
+    );
+  });
+
+  it('should call grantTaskRole once with the task role', () => {
+    const grantTaskRole = vi.fn((role: import('aws-cdk-lib/aws-iam').IRole) => {
+      role.addToPrincipalPolicy(
+        new iam.PolicyStatement({
+          actions: ['s3:GetObject'],
+          resources: ['arn:aws:s3:::bucket/*'],
+        }),
+      );
+    });
+    const { stack, service } = newService({ grantTaskRole });
+    const { resources } = synth(stack);
+
+    expect(grantTaskRole).toHaveBeenCalledTimes(1);
+    expect(grantTaskRole).toHaveBeenCalledWith(service.taskRole);
+    const taskRoleId = taskDefinitionOf(resources).TaskRoleArn['Fn::GetAtt'][0];
+    expect(policyStatementsForRole(resources, taskRoleId)).toEqual([
+      expect.objectContaining({
+        Action: 's3:GetObject',
+        Resource: 'arn:aws:s3:::bucket/*',
+      }),
+    ]);
+  });
+
+  it('should give each new cluster its own name and Container Insights log group', () => {
+    const env = newStack();
+    newService({}, env);
+    new EcsServiceModule.EcsService(env.stack, 'Payments', {
+      serviceName: 'Payments',
+      vpc: env.vpc,
+      image: { directory: IMAGE_DIR },
+    });
+    const { ofType } = synth(env.stack);
+
+    const names = ofType('AWS::ECS::Cluster').map(
+      ([, cluster]) => cluster.Properties.ClusterName,
+    );
+    expect(names).toHaveLength(2);
+    expect(new Set(names).size).toBe(2);
+    const logGroupNames = ofType('AWS::Logs::LogGroup').map(
+      ([, logGroup]) => logGroup.Properties.LogGroupName,
+    );
+    for (const name of names) {
+      expect(logGroupNames).toContain(
+        `/aws/ecs/containerinsights/${name}/performance`,
+      );
+    }
+  });
+
+  it('should share a cluster that is passed in', () => {
+    const env = newStack();
+    const cluster = new ecs.Cluster(env.stack, 'Shared', { vpc: env.vpc });
+    new EcsServiceModule.EcsService(env.stack, 'One', {
+      serviceName: 'One',
+      vpc: env.vpc,
+      cluster,
+      image: { directory: IMAGE_DIR },
+    });
+    new EcsServiceModule.EcsService(env.stack, 'Two', {
+      serviceName: 'Two',
+      vpc: env.vpc,
+      cluster,
+      image: { directory: IMAGE_DIR },
+    });
+    const { ofType } = synth(env.stack);
+
+    expect(ofType('AWS::ECS::Cluster')).toHaveLength(1);
+    expect(ofType('AWS::ECS::Service')).toHaveLength(2);
+    // The caller owns a cluster that is passed in, and its log groups.
+    expect(
+      ofType('AWS::Logs::LogGroup').filter(([, logGroup]) =>
+        String(logGroup.Properties.LogGroupName ?? '').startsWith(
+          '/aws/ecs/containerinsights/',
+        ),
+      ),
+    ).toHaveLength(0);
+    expect(
+      RuntimeConfigModule.RuntimeConfig.ensure(env.stack).get('connection')
+        .services,
+    ).toBeUndefined();
+  });
+
+  describe('service construct', () => {
+    // Synthesizes the vended per-service subclass (`app/services/orders.ts`).
+    const newOrders = (props: Record<string, unknown> = {}) => {
+      const env = newStack();
+      const service = new ServiceModule.Orders(env.stack, 'Orders', {
+        vpc: env.vpc,
+        image: { directory: IMAGE_DIR },
+        ...props,
+      });
+      return { ...env, service, out: synth(env.stack) };
+    };
+
+    it('should run the vended node health check inside the container', () => {
+      const { out } = newOrders();
+
+      expect(
+        taskDefinitionOf(out.resources).ContainerDefinitions[0].HealthCheck,
+      ).toEqual({
+        Command: [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:'+(process.env.PORT||'8080')+'/health',{signal:AbortSignal.timeout(3000)}).then(r=>process.exit(r.ok?0:1),()=>process.exit(1))",
+        ],
+        Interval: 30,
+        Timeout: 5,
+        Retries: 3,
+        StartPeriod: 30,
+      });
+    });
+
+    it('should let a healthCheck prop replace the vended health check', () => {
+      const { out } = newOrders({ healthCheck: { command: ['CMD', 'true'] } });
+
+      expect(
+        taskDefinitionOf(out.resources).ContainerDefinitions[0].HealthCheck,
+      ).toEqual({
+        Command: ['CMD', 'true'],
+        // CDK's defaults; no StartPeriod, so nothing of the vended check is left.
+        Interval: 30,
+        Retries: 3,
+        Timeout: 5,
+      });
+    });
+
+    it('should pass RUNTIME_CONFIG_APP_ID to the container', () => {
+      const { stack, out } = newOrders({ environment: { FOO: 'bar' } });
+
+      const [container] = taskDefinitionOf(out.resources).ContainerDefinitions;
+      expect(container.Environment).toContainEqual({
+        Name: 'RUNTIME_CONFIG_APP_ID',
+        Value: stack.resolve(
+          RuntimeConfigModule.RuntimeConfig.ensure(stack)
+            .appConfigApplicationId,
+        ),
+      });
+      expect(container.Environment).toContainEqual({
+        Name: 'FOO',
+        Value: 'bar',
+      });
+      expect(container.Environment).toContainEqual({
+        Name: 'PORT',
+        Value: '8080',
+      });
+    });
+
+    it('should let the task role read runtime config from AppConfig, and keep grantTaskRole', () => {
+      const grantTaskRole = vi.fn(
+        (role: import('aws-cdk-lib/aws-iam').IRole) => {
+          role.addToPrincipalPolicy(
+            new iam.PolicyStatement({
+              actions: ['s3:GetObject'],
+              resources: ['arn:aws:s3:::bucket/*'],
+            }),
+          );
+        },
+      );
+      const { stack, service, out } = newOrders({ grantTaskRole });
+
+      expect(grantTaskRole).toHaveBeenCalledWith(service.taskRole);
+      const taskRoleId = taskDefinitionOf(out.resources).TaskRoleArn[
+        'Fn::GetAtt'
+      ][0];
+      const statements = policyStatementsForRole(out.resources, taskRoleId);
+      const appConfigRead = statements.filter((s) =>
+        asArray(s.Action).includes('appconfig:GetLatestConfiguration'),
+      );
+      expect(appConfigRead).toHaveLength(1);
+      expect(asArray(appConfigRead[0].Action).sort()).toEqual([
+        'appconfig:GetLatestConfiguration',
+        'appconfig:StartConfigurationSession',
+      ]);
+      const appRef = stack.resolve(
+        RuntimeConfigModule.RuntimeConfig.ensure(stack).appConfigApplicationId,
+      );
+      expect(JSON.stringify(appConfigRead[0].Resource)).toContain(
+        ':appconfig:',
+      );
+      expect(JSON.stringify(appConfigRead[0].Resource)).toContain(
+        JSON.stringify(appRef),
+      );
+      expect(statements).toContainEqual(
+        expect.objectContaining({
+          Action: 's3:GetObject',
+          Resource: 'arn:aws:s3:::bucket/*',
+        }),
+      );
+    });
+  });
+});

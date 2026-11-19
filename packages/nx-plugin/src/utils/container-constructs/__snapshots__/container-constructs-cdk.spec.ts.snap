@@ -1,0 +1,929 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`addContainerServiceCdkConstructs > should match the vended files snapshot (node) > ecs-service.ts 1`] = `
+"import { Duration, Names, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import {
+  Connections,
+  IConnectable,
+  ISecurityGroup,
+  IVpc,
+  Peer,
+  Port,
+  SecurityGroup,
+  SubnetSelection,
+  SubnetType,
+} from 'aws-cdk-lib/aws-ec2';
+import { Repository } from 'aws-cdk-lib/aws-ecr';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import {
+  Cluster,
+  ContainerImage,
+  ContainerInsights,
+  CpuArchitecture,
+  FargatePlatformVersion,
+  FargateService,
+  FargateTaskDefinition,
+  HealthCheck,
+  ICluster,
+  LogDrivers,
+  OperatingSystemFamily,
+  Secret,
+} from 'aws-cdk-lib/aws-ecs';
+import {
+  Effect,
+  IRole,
+  PolicyStatement,
+  ServicePrincipal,
+} from 'aws-cdk-lib/aws-iam';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { ILogGroup, LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { Construct } from 'constructs';
+
+/**
+ * Where the service's container image comes from.
+ */
+export type EcsServiceImage =
+  | {
+      /**
+       * Directory holding a Dockerfile, built as a linux/arm64 CDK image asset
+       * at deploy time.
+       */
+      readonly directory: string;
+    }
+  | {
+      /**
+       * Prebuilt image URI (a public registry or ECR). Nothing is built
+       * locally. For an ECR image the execution role is granted pull on it.
+       */
+      readonly imageUri: string;
+    };
+
+/**
+ * Properties for an ECS service on AWS Fargate (linux/arm64) in an existing VPC.
+ */
+export interface EcsServiceProps {
+  /**
+   * Name of the service, used as the log stream prefix.
+   */
+  readonly serviceName: string;
+  /**
+   * VPC the service runs in. The construct never creates a VPC.
+   */
+  readonly vpc: IVpc;
+  /**
+   * Subnets for the tasks. Tasks never get a public IP.
+   *
+   * @default { subnetType: SubnetType.PRIVATE_WITH_EGRESS }
+   */
+  readonly vpcSubnets?: SubnetSelection;
+  /**
+   * Cluster to run in. Pass the same cluster to several services to run them
+   * in one cluster.
+   *
+   * @default a new cluster with Container Insights on, and its Container
+   * Insights log group, which the stack deletes on destroy
+   */
+  readonly cluster?: ICluster;
+  /**
+   * The container image to run.
+   */
+  readonly image: EcsServiceImage;
+  /**
+   * Port the server listens on inside the container, passed as \`PORT\`.
+   *
+   * @default 8080
+   */
+  readonly containerPort?: number;
+  /**
+   * Task CPU units.
+   *
+   * @default 256
+   */
+  readonly cpu?: number;
+  /**
+   * Task memory in MiB.
+   *
+   * @default 512
+   */
+  readonly memoryLimitMiB?: number;
+  /**
+   * Number of tasks to start with.
+   *
+   * @default 1
+   */
+  readonly desiredCount?: number;
+  /**
+   * Fewest tasks autoscaling keeps.
+   *
+   * @default 1
+   */
+  readonly minCapacity?: number;
+  /**
+   * Most tasks autoscaling starts.
+   *
+   * @default 2
+   */
+  readonly maxCapacity?: number;
+  /**
+   * Average CPU utilisation autoscaling keeps the service at, in percent.
+   *
+   * @default 70
+   */
+  readonly targetCpuUtilizationPercent?: number;
+  /**
+   * Plain environment variables. Never put secret values here; use \`secrets\`.
+   *
+   * @default {}
+   */
+  readonly environment?: Record<string, string>;
+  /**
+   * Secrets passed to the container as environment variables, read from
+   * Secrets Manager or SSM Parameter Store (\`Secret.fromSecretsManager\`,
+   * \`Secret.fromSsmParameter\`). The execution role may read only these.
+   *
+   * @default {}
+   */
+  readonly secrets?: Record<string, Secret>;
+  /**
+   * Retention of the container log group.
+   *
+   * @default RetentionDays.ONE_YEAR
+   */
+  readonly logRetention?: RetentionDays;
+  /**
+   * Called once with the task role, to add grants the service needs. The task
+   * role has no permissions otherwise; connections add theirs here or through
+   * \`taskRole\`.
+   */
+  readonly grantTaskRole?: (taskRole: IRole) => void;
+  /**
+   * User the container runs as. The vended image's \`node\` user is uid 1000.
+   *
+   * @default '1000'
+   */
+  readonly user?: string;
+  /**
+   * Container health check that ECS runs inside the container.
+   *
+   * @default no health check
+   */
+  readonly healthCheck?: HealthCheck;
+}
+
+const ECR_IMAGE_URI =
+  /^(\\d{12})\\.dkr\\.ecr\\.([a-z0-9-]+)\\.amazonaws\\.com(?:\\.cn)?\\/([^:@]+)(?:[:@](.+))?$/;
+
+/**
+ * An ECS service on AWS Fargate (linux/arm64) in an existing VPC, with no load
+ * balancer and no inbound rule on its security group.
+ *
+ * Members other connections and stacks rely on: \`service\`, \`taskDefinition\`,
+ * \`taskRole\`, \`securityGroup\`, \`connections\` and \`logGroup\`.
+ */
+export class EcsService extends Construct implements IConnectable {
+  /** The cluster the service runs in. */
+  public readonly cluster: ICluster;
+  /** The Fargate service. */
+  public readonly service: FargateService;
+  /** The Fargate task definition (linux/arm64). */
+  public readonly taskDefinition: FargateTaskDefinition;
+  /** Role the container's code runs as. No permissions unless granted. */
+  public readonly taskRole: IRole;
+  /**
+   * Security group of the tasks. It has no inbound rule; add one with
+   * \`connections.allowFrom\` for a caller that needs it.
+   */
+  public readonly securityGroup: ISecurityGroup;
+  /** Connections of the tasks' security group, for database and other rules. */
+  public readonly connections: Connections;
+  /** Log group the container writes its output to. */
+  public readonly logGroup: ILogGroup;
+
+  constructor(scope: Construct, id: string, props: EcsServiceProps) {
+    super(scope, id);
+    const { serviceName, vpc } = props;
+
+    const containerPort = props.containerPort ?? 8080;
+    const vpcSubnets = props.vpcSubnets ?? {
+      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+    };
+    const logRetention = props.logRetention ?? RetentionDays.ONE_YEAR;
+
+    // Destroyed with the stack on a 7 day deletion window, matching the
+    // Terraform module: the key only encrypts the two log groups this stack
+    // also deletes, so there is no ciphertext left to recover afterwards.
+    const logsKey = new Key(this, 'LogsKey', {
+      enableKeyRotation: true,
+      removalPolicy: RemovalPolicy.DESTROY,
+      pendingWindow: Duration.days(7),
+    });
+    // The key policy names the log groups the key encrypts, so both names are
+    // resolved here: a policy that referenced a log group would make the key
+    // and the log group depend on each other.
+    const resourceName = Names.uniqueResourceName(this, {
+      maxLength: 255,
+      separator: '-',
+      allowedSpecialCharacters: '-_',
+    });
+    const logGroupName = \`/aws/ecs/\${resourceName}\`;
+    const insightsLogGroupName = \`/aws/ecs/containerinsights/\${resourceName}/performance\`;
+    const stack = Stack.of(this);
+    const logGroupArn = (name: string) =>
+      \`arn:\${stack.partition}:logs:\${stack.region}:\${stack.account}:log-group:\${name}\`;
+    logsKey.addToResourcePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        principals: [
+          new ServicePrincipal(\`logs.\${stack.region}.amazonaws.com\`),
+        ],
+        actions: [
+          'kms:Encrypt',
+          'kms:Decrypt',
+          'kms:ReEncrypt*',
+          'kms:GenerateDataKey*',
+          'kms:DescribeKey',
+        ],
+        resources: ['*'],
+        // CloudWatch Logs passes the log group's ARN as its encryption
+        // context, so the key is usable for these two log groups only.
+        conditions: {
+          ArnLike: {
+            'kms:EncryptionContext:aws:logs:arn': [
+              logGroupArn(logGroupName),
+              logGroupArn(insightsLogGroupName),
+            ],
+          },
+        },
+      }),
+    );
+
+    this.cluster =
+      props.cluster ??
+      this.createCluster(vpc, logsKey, logRetention, {
+        clusterName: resourceName,
+        insightsLogGroupName,
+      });
+
+    this.taskDefinition = new FargateTaskDefinition(this, 'TaskDefinition', {
+      cpu: props.cpu ?? 256,
+      memoryLimitMiB: props.memoryLimitMiB ?? 512,
+      runtimePlatform: {
+        cpuArchitecture: CpuArchitecture.ARM64,
+        operatingSystemFamily: OperatingSystemFamily.LINUX,
+      },
+    });
+    this.taskRole = this.taskDefinition.taskRole;
+    props.grantTaskRole?.(this.taskRole);
+
+    const logGroup = new LogGroup(this, 'Logs', {
+      logGroupName,
+      encryptionKey: logsKey,
+      retention: logRetention,
+      // Named, so it must go with the stack: a redeploy would otherwise fail
+      // on the log group that is already there. The Terraform module also
+      // deletes it.
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+    this.logGroup = logGroup;
+
+    const container = this.taskDefinition.addContainer('Container', {
+      image: this.containerImage(props.image),
+      readonlyRootFilesystem: true,
+      user: props.user ?? '1000',
+      environment: {
+        ...props.environment,
+        PORT: String(containerPort),
+      },
+      secrets: props.secrets,
+      portMappings: [{ containerPort }],
+      healthCheck: props.healthCheck,
+      logging: LogDrivers.awsLogs({ logGroup, streamPrefix: serviceName }),
+    });
+    // The root file system is read-only; give the server a writable /tmp on
+    // task storage, as the Terraform module does.
+    this.taskDefinition.addVolume({ name: 'tmp' });
+    container.addMountPoints({
+      sourceVolume: 'tmp',
+      containerPath: '/tmp',
+      readOnly: false,
+    });
+
+    this.securityGroup = new SecurityGroup(this, 'ServiceSecurityGroup', {
+      vpc,
+      allowAllOutbound: false,
+    });
+    this.securityGroup.addEgressRule(
+      Peer.anyIpv4(),
+      Port.tcp(443),
+      'HTTPS egress',
+    );
+
+    this.service = new FargateService(this, 'Service', {
+      cluster: this.cluster,
+      taskDefinition: this.taskDefinition,
+      vpcSubnets,
+      assignPublicIp: false,
+      securityGroups: [this.securityGroup],
+      circuitBreaker: { enable: true, rollback: true },
+      enableExecuteCommand: false,
+      platformVersion: FargatePlatformVersion.LATEST,
+      desiredCount: props.desiredCount ?? 1,
+      minHealthyPercent: 100,
+      maxHealthyPercent: 200,
+    });
+    this.connections = this.service.connections;
+
+    this.service
+      .autoScaleTaskCount({
+        minCapacity: props.minCapacity ?? 1,
+        maxCapacity: props.maxCapacity ?? 2,
+      })
+      .scaleOnCpuUtilization('CpuScaling', {
+        targetUtilizationPercent: props.targetCpuUtilizationPercent ?? 70,
+      });
+  }
+
+  /**
+   * Creates a cluster with Container Insights on, and the log group Container
+   * Insights writes to, so that destroying the stack removes it.
+   */
+  private createCluster(
+    vpc: IVpc,
+    logsKey: Key,
+    logRetention: RetentionDays,
+    names: { clusterName: string; insightsLogGroupName: string },
+  ): Cluster {
+    const insightsLogGroup = new LogGroup(this, 'ContainerInsightsLogs', {
+      logGroupName: names.insightsLogGroupName,
+      retention: logRetention,
+      encryptionKey: logsKey,
+      // ECS creates this log group itself if it is missing, so retaining it
+      // on delete would orphan it.
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+    const cluster = new Cluster(this, 'Cluster', {
+      vpc,
+      clusterName: names.clusterName,
+      containerInsightsV2: ContainerInsights.ENABLED,
+    });
+    // The log group must exist before ECS starts writing performance events.
+    cluster.node.addDependency(insightsLogGroup);
+    return cluster;
+  }
+
+  private containerImage(image: EcsServiceImage): ContainerImage {
+    if ('directory' in image) {
+      return ContainerImage.fromAsset(image.directory, {
+        platform: Platform.LINUX_ARM64,
+      });
+    }
+    const ecr = ECR_IMAGE_URI.exec(image.imageUri);
+    if (!ecr) {
+      return ContainerImage.fromRegistry(image.imageUri);
+    }
+    const [, account, region, repositoryName, tagOrDigest] = ecr;
+    const repository = Repository.fromRepositoryAttributes(
+      this,
+      'ImageRepository',
+      {
+        repositoryName,
+        repositoryArn: Stack.of(this).formatArn({
+          service: 'ecr',
+          account,
+          region,
+          resource: 'repository',
+          resourceName: repositoryName,
+        }),
+      },
+    );
+    return ContainerImage.fromEcrRepository(repository, tagOrDigest ?? 'latest');
+  }
+}
+"
+`;
+
+exports[`addContainerServiceCdkConstructs > should match the vended files snapshot (node) > orders.ts 1`] = `
+"import * as path from 'path';
+import * as url from 'url';
+import { Duration } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import {
+  EcsService,
+  EcsServiceImage,
+  EcsServiceProps,
+} from '../../core/container/ecs-service.js';
+import { RuntimeConfig } from '../../core/runtime-config.js';
+import { findWorkspaceRoot } from '../../core/workspace.js';
+
+const dockerBuildContextDir = path.join(
+  findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+  'dist/apps/shop/bundle/container/orders',
+);
+
+export type OrdersProps = Omit<
+  EcsServiceProps,
+  'serviceName' | 'image'
+> & {
+  /**
+   * The image to run.
+   *
+   * @default the image built from dist/apps/shop/bundle/container/orders
+   */
+  readonly image?: EcsServiceImage;
+};
+
+/**
+ * The Orders container service on Amazon ECS. The container runs a
+ * health check on \`/health\`, gets \`RUNTIME_CONFIG_APP_ID\`, and its task role may
+ * read runtime configuration from AWS AppConfig.
+ */
+export class Orders extends EcsService {
+  constructor(scope: Construct, id: string, props: OrdersProps) {
+    const rc = RuntimeConfig.ensure(scope);
+    super(scope, id, {
+      containerPort: 8080,
+      healthCheck: {
+        command: ["CMD","node","-e","fetch('http://127.0.0.1:'+(process.env.PORT||'8080')+'/health',{signal:AbortSignal.timeout(3000)}).then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"],
+        interval: Duration.seconds(30),
+        timeout: Duration.seconds(5),
+        retries: 3,
+        startPeriod: Duration.seconds(30),
+      },
+      ...props,
+      serviceName: 'Orders',
+      image: props.image ?? { directory: dockerBuildContextDir },
+      environment: {
+        RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
+        ...props.environment,
+      },
+    });
+
+    rc.grantReadAppConfig(this.taskRole);
+  }
+}
+"
+`;
+
+exports[`addContainerServiceCdkConstructs > should match the vended files snapshot (python) > ecs-service.ts 1`] = `
+"import { Duration, Names, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import {
+  Connections,
+  IConnectable,
+  ISecurityGroup,
+  IVpc,
+  Peer,
+  Port,
+  SecurityGroup,
+  SubnetSelection,
+  SubnetType,
+} from 'aws-cdk-lib/aws-ec2';
+import { Repository } from 'aws-cdk-lib/aws-ecr';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import {
+  Cluster,
+  ContainerImage,
+  ContainerInsights,
+  CpuArchitecture,
+  FargatePlatformVersion,
+  FargateService,
+  FargateTaskDefinition,
+  HealthCheck,
+  ICluster,
+  LogDrivers,
+  OperatingSystemFamily,
+  Secret,
+} from 'aws-cdk-lib/aws-ecs';
+import {
+  Effect,
+  IRole,
+  PolicyStatement,
+  ServicePrincipal,
+} from 'aws-cdk-lib/aws-iam';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { ILogGroup, LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { Construct } from 'constructs';
+
+/**
+ * Where the service's container image comes from.
+ */
+export type EcsServiceImage =
+  | {
+      /**
+       * Directory holding a Dockerfile, built as a linux/arm64 CDK image asset
+       * at deploy time.
+       */
+      readonly directory: string;
+    }
+  | {
+      /**
+       * Prebuilt image URI (a public registry or ECR). Nothing is built
+       * locally. For an ECR image the execution role is granted pull on it.
+       */
+      readonly imageUri: string;
+    };
+
+/**
+ * Properties for an ECS service on AWS Fargate (linux/arm64) in an existing VPC.
+ */
+export interface EcsServiceProps {
+  /**
+   * Name of the service, used as the log stream prefix.
+   */
+  readonly serviceName: string;
+  /**
+   * VPC the service runs in. The construct never creates a VPC.
+   */
+  readonly vpc: IVpc;
+  /**
+   * Subnets for the tasks. Tasks never get a public IP.
+   *
+   * @default { subnetType: SubnetType.PRIVATE_WITH_EGRESS }
+   */
+  readonly vpcSubnets?: SubnetSelection;
+  /**
+   * Cluster to run in. Pass the same cluster to several services to run them
+   * in one cluster.
+   *
+   * @default a new cluster with Container Insights on, and its Container
+   * Insights log group, which the stack deletes on destroy
+   */
+  readonly cluster?: ICluster;
+  /**
+   * The container image to run.
+   */
+  readonly image: EcsServiceImage;
+  /**
+   * Port the server listens on inside the container, passed as \`PORT\`.
+   *
+   * @default 8080
+   */
+  readonly containerPort?: number;
+  /**
+   * Task CPU units.
+   *
+   * @default 256
+   */
+  readonly cpu?: number;
+  /**
+   * Task memory in MiB.
+   *
+   * @default 512
+   */
+  readonly memoryLimitMiB?: number;
+  /**
+   * Number of tasks to start with.
+   *
+   * @default 1
+   */
+  readonly desiredCount?: number;
+  /**
+   * Fewest tasks autoscaling keeps.
+   *
+   * @default 1
+   */
+  readonly minCapacity?: number;
+  /**
+   * Most tasks autoscaling starts.
+   *
+   * @default 2
+   */
+  readonly maxCapacity?: number;
+  /**
+   * Average CPU utilisation autoscaling keeps the service at, in percent.
+   *
+   * @default 70
+   */
+  readonly targetCpuUtilizationPercent?: number;
+  /**
+   * Plain environment variables. Never put secret values here; use \`secrets\`.
+   *
+   * @default {}
+   */
+  readonly environment?: Record<string, string>;
+  /**
+   * Secrets passed to the container as environment variables, read from
+   * Secrets Manager or SSM Parameter Store (\`Secret.fromSecretsManager\`,
+   * \`Secret.fromSsmParameter\`). The execution role may read only these.
+   *
+   * @default {}
+   */
+  readonly secrets?: Record<string, Secret>;
+  /**
+   * Retention of the container log group.
+   *
+   * @default RetentionDays.ONE_YEAR
+   */
+  readonly logRetention?: RetentionDays;
+  /**
+   * Called once with the task role, to add grants the service needs. The task
+   * role has no permissions otherwise; connections add theirs here or through
+   * \`taskRole\`.
+   */
+  readonly grantTaskRole?: (taskRole: IRole) => void;
+  /**
+   * User the container runs as. The vended image's \`node\` user is uid 1000.
+   *
+   * @default '1000'
+   */
+  readonly user?: string;
+  /**
+   * Container health check that ECS runs inside the container.
+   *
+   * @default no health check
+   */
+  readonly healthCheck?: HealthCheck;
+}
+
+const ECR_IMAGE_URI =
+  /^(\\d{12})\\.dkr\\.ecr\\.([a-z0-9-]+)\\.amazonaws\\.com(?:\\.cn)?\\/([^:@]+)(?:[:@](.+))?$/;
+
+/**
+ * An ECS service on AWS Fargate (linux/arm64) in an existing VPC, with no load
+ * balancer and no inbound rule on its security group.
+ *
+ * Members other connections and stacks rely on: \`service\`, \`taskDefinition\`,
+ * \`taskRole\`, \`securityGroup\`, \`connections\` and \`logGroup\`.
+ */
+export class EcsService extends Construct implements IConnectable {
+  /** The cluster the service runs in. */
+  public readonly cluster: ICluster;
+  /** The Fargate service. */
+  public readonly service: FargateService;
+  /** The Fargate task definition (linux/arm64). */
+  public readonly taskDefinition: FargateTaskDefinition;
+  /** Role the container's code runs as. No permissions unless granted. */
+  public readonly taskRole: IRole;
+  /**
+   * Security group of the tasks. It has no inbound rule; add one with
+   * \`connections.allowFrom\` for a caller that needs it.
+   */
+  public readonly securityGroup: ISecurityGroup;
+  /** Connections of the tasks' security group, for database and other rules. */
+  public readonly connections: Connections;
+  /** Log group the container writes its output to. */
+  public readonly logGroup: ILogGroup;
+
+  constructor(scope: Construct, id: string, props: EcsServiceProps) {
+    super(scope, id);
+    const { serviceName, vpc } = props;
+
+    const containerPort = props.containerPort ?? 8080;
+    const vpcSubnets = props.vpcSubnets ?? {
+      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+    };
+    const logRetention = props.logRetention ?? RetentionDays.ONE_YEAR;
+
+    // Destroyed with the stack on a 7 day deletion window, matching the
+    // Terraform module: the key only encrypts the two log groups this stack
+    // also deletes, so there is no ciphertext left to recover afterwards.
+    const logsKey = new Key(this, 'LogsKey', {
+      enableKeyRotation: true,
+      removalPolicy: RemovalPolicy.DESTROY,
+      pendingWindow: Duration.days(7),
+    });
+    // The key policy names the log groups the key encrypts, so both names are
+    // resolved here: a policy that referenced a log group would make the key
+    // and the log group depend on each other.
+    const resourceName = Names.uniqueResourceName(this, {
+      maxLength: 255,
+      separator: '-',
+      allowedSpecialCharacters: '-_',
+    });
+    const logGroupName = \`/aws/ecs/\${resourceName}\`;
+    const insightsLogGroupName = \`/aws/ecs/containerinsights/\${resourceName}/performance\`;
+    const stack = Stack.of(this);
+    const logGroupArn = (name: string) =>
+      \`arn:\${stack.partition}:logs:\${stack.region}:\${stack.account}:log-group:\${name}\`;
+    logsKey.addToResourcePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        principals: [
+          new ServicePrincipal(\`logs.\${stack.region}.amazonaws.com\`),
+        ],
+        actions: [
+          'kms:Encrypt',
+          'kms:Decrypt',
+          'kms:ReEncrypt*',
+          'kms:GenerateDataKey*',
+          'kms:DescribeKey',
+        ],
+        resources: ['*'],
+        // CloudWatch Logs passes the log group's ARN as its encryption
+        // context, so the key is usable for these two log groups only.
+        conditions: {
+          ArnLike: {
+            'kms:EncryptionContext:aws:logs:arn': [
+              logGroupArn(logGroupName),
+              logGroupArn(insightsLogGroupName),
+            ],
+          },
+        },
+      }),
+    );
+
+    this.cluster =
+      props.cluster ??
+      this.createCluster(vpc, logsKey, logRetention, {
+        clusterName: resourceName,
+        insightsLogGroupName,
+      });
+
+    this.taskDefinition = new FargateTaskDefinition(this, 'TaskDefinition', {
+      cpu: props.cpu ?? 256,
+      memoryLimitMiB: props.memoryLimitMiB ?? 512,
+      runtimePlatform: {
+        cpuArchitecture: CpuArchitecture.ARM64,
+        operatingSystemFamily: OperatingSystemFamily.LINUX,
+      },
+    });
+    this.taskRole = this.taskDefinition.taskRole;
+    props.grantTaskRole?.(this.taskRole);
+
+    const logGroup = new LogGroup(this, 'Logs', {
+      logGroupName,
+      encryptionKey: logsKey,
+      retention: logRetention,
+      // Named, so it must go with the stack: a redeploy would otherwise fail
+      // on the log group that is already there. The Terraform module also
+      // deletes it.
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+    this.logGroup = logGroup;
+
+    const container = this.taskDefinition.addContainer('Container', {
+      image: this.containerImage(props.image),
+      readonlyRootFilesystem: true,
+      user: props.user ?? '1000',
+      environment: {
+        ...props.environment,
+        PORT: String(containerPort),
+      },
+      secrets: props.secrets,
+      portMappings: [{ containerPort }],
+      healthCheck: props.healthCheck,
+      logging: LogDrivers.awsLogs({ logGroup, streamPrefix: serviceName }),
+    });
+    // The root file system is read-only; give the server a writable /tmp on
+    // task storage, as the Terraform module does.
+    this.taskDefinition.addVolume({ name: 'tmp' });
+    container.addMountPoints({
+      sourceVolume: 'tmp',
+      containerPath: '/tmp',
+      readOnly: false,
+    });
+
+    this.securityGroup = new SecurityGroup(this, 'ServiceSecurityGroup', {
+      vpc,
+      allowAllOutbound: false,
+    });
+    this.securityGroup.addEgressRule(
+      Peer.anyIpv4(),
+      Port.tcp(443),
+      'HTTPS egress',
+    );
+
+    this.service = new FargateService(this, 'Service', {
+      cluster: this.cluster,
+      taskDefinition: this.taskDefinition,
+      vpcSubnets,
+      assignPublicIp: false,
+      securityGroups: [this.securityGroup],
+      circuitBreaker: { enable: true, rollback: true },
+      enableExecuteCommand: false,
+      platformVersion: FargatePlatformVersion.LATEST,
+      desiredCount: props.desiredCount ?? 1,
+      minHealthyPercent: 100,
+      maxHealthyPercent: 200,
+    });
+    this.connections = this.service.connections;
+
+    this.service
+      .autoScaleTaskCount({
+        minCapacity: props.minCapacity ?? 1,
+        maxCapacity: props.maxCapacity ?? 2,
+      })
+      .scaleOnCpuUtilization('CpuScaling', {
+        targetUtilizationPercent: props.targetCpuUtilizationPercent ?? 70,
+      });
+  }
+
+  /**
+   * Creates a cluster with Container Insights on, and the log group Container
+   * Insights writes to, so that destroying the stack removes it.
+   */
+  private createCluster(
+    vpc: IVpc,
+    logsKey: Key,
+    logRetention: RetentionDays,
+    names: { clusterName: string; insightsLogGroupName: string },
+  ): Cluster {
+    const insightsLogGroup = new LogGroup(this, 'ContainerInsightsLogs', {
+      logGroupName: names.insightsLogGroupName,
+      retention: logRetention,
+      encryptionKey: logsKey,
+      // ECS creates this log group itself if it is missing, so retaining it
+      // on delete would orphan it.
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+    const cluster = new Cluster(this, 'Cluster', {
+      vpc,
+      clusterName: names.clusterName,
+      containerInsightsV2: ContainerInsights.ENABLED,
+    });
+    // The log group must exist before ECS starts writing performance events.
+    cluster.node.addDependency(insightsLogGroup);
+    return cluster;
+  }
+
+  private containerImage(image: EcsServiceImage): ContainerImage {
+    if ('directory' in image) {
+      return ContainerImage.fromAsset(image.directory, {
+        platform: Platform.LINUX_ARM64,
+      });
+    }
+    const ecr = ECR_IMAGE_URI.exec(image.imageUri);
+    if (!ecr) {
+      return ContainerImage.fromRegistry(image.imageUri);
+    }
+    const [, account, region, repositoryName, tagOrDigest] = ecr;
+    const repository = Repository.fromRepositoryAttributes(
+      this,
+      'ImageRepository',
+      {
+        repositoryName,
+        repositoryArn: Stack.of(this).formatArn({
+          service: 'ecr',
+          account,
+          region,
+          resource: 'repository',
+          resourceName: repositoryName,
+        }),
+      },
+    );
+    return ContainerImage.fromEcrRepository(repository, tagOrDigest ?? 'latest');
+  }
+}
+"
+`;
+
+exports[`addContainerServiceCdkConstructs > should match the vended files snapshot (python) > orders.ts 1`] = `
+"import * as path from 'path';
+import * as url from 'url';
+import { Duration } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import {
+  EcsService,
+  EcsServiceImage,
+  EcsServiceProps,
+} from '../../core/container/ecs-service.js';
+import { RuntimeConfig } from '../../core/runtime-config.js';
+import { findWorkspaceRoot } from '../../core/workspace.js';
+
+const dockerBuildContextDir = path.join(
+  findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+  'dist/apps/shop/bundle/container/orders',
+);
+
+export type OrdersProps = Omit<
+  EcsServiceProps,
+  'serviceName' | 'image'
+> & {
+  /**
+   * The image to run.
+   *
+   * @default the image built from dist/apps/shop/bundle/container/orders
+   */
+  readonly image?: EcsServiceImage;
+};
+
+/**
+ * The Orders container service on Amazon ECS. The container runs a
+ * health check on \`/health\`, gets \`RUNTIME_CONFIG_APP_ID\`, and its task role may
+ * read runtime configuration from AWS AppConfig.
+ */
+export class Orders extends EcsService {
+  constructor(scope: Construct, id: string, props: OrdersProps) {
+    const rc = RuntimeConfig.ensure(scope);
+    super(scope, id, {
+      containerPort: 8080,
+      healthCheck: {
+        command: ["CMD","python","-c","import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '8080') + '/health', timeout=3)"],
+        interval: Duration.seconds(30),
+        timeout: Duration.seconds(5),
+        retries: 3,
+        startPeriod: Duration.seconds(30),
+      },
+      ...props,
+      serviceName: 'Orders',
+      image: props.image ?? { directory: dockerBuildContextDir },
+      environment: {
+        RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
+        ...props.environment,
+      },
+    });
+
+    rc.grantReadAppConfig(this.taskRole);
+  }
+}
+"
+`;

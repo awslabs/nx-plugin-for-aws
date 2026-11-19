@@ -58,6 +58,11 @@ export const SUPPORTED_CONNECTIONS = [
   { source: 'py#fast-api', target: 'py#rdb' },
   { source: 'py#agent', target: 'py#rdb' },
   { source: 'py#mcp-server', target: 'py#rdb' },
+  // Container services (ts#container / py#container)
+  { source: 'ts#container', target: 'ts#rdb' },
+  { source: 'py#container', target: 'py#rdb' },
+  { source: 'ts#container', target: 'ts#dynamodb' },
+  { source: 'py#container', target: 'py#dynamodb' },
 ] as const satisfies readonly Connection[];
 
 // `<source> -> <target>` string union of every supported connection. Used to

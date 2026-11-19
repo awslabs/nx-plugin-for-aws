@@ -1,0 +1,457 @@
+---
+title: Python 容器服务
+description: 向 Python 项目添加容器化服务并在 Amazon ECS 上私密运行
+generator: py#container
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import ArchitectureDiagram from '@components/architecture-diagram.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import OptionFilter from '@components/option-filter.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Snippet from '@components/snippet.astro';
+
+此生成器向现有 Python 项目添加容器化 HTTP 服务。您将获得一个小型 [FastAPI](https://fastapi.tiangolo.com/) 服务器，由 [uvicorn](https://www.uvicorn.org/) Web 服务器运行，带有 `GET /health` 路由和示例路由 `GET /echo`、Dockerfile 以及用于在本地运行服务器、构建镜像和扫描镜像的目标。您还将获得在 [Amazon Elastic Container Service (Amazon ECS)](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html)（运行和扩展容器的 AWS 服务）上运行镜像的 CDK 或 Terraform 代码。
+
+## 工作原理
+
+该服务运行在 [AWS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) 上，它无需您管理服务器即可运行每个容器。您容器的每个运行副本都是一个 ECS 任务。任务运行在您自己的 VPC（虚拟私有云，AWS 账户中的隔离网络）中。安全组（附加到任务的一组防火墙规则）控制哪些网络流量可以到达它们和离开它们。
+
+该服务是私有的。它没有负载均衡器、没有 API 也没有公共 IP 地址。其安全组没有入站规则，因此在您允许调用者之前，没有任何东西可以打开到服务的连接。该服务仍然可以进行出站调用，例如到数据库或其他 AWS 服务。
+
+:::note[通过 HTTP 访问您的服务]
+生成的服务是私有的，没有可以从 VPC 外部访问的 HTTP 端点。要为 HTTP 客户端提供服务，例如网站、代理或 AWS 外部的调用者，请在服务前面放置一个 API。在 Amazon ECS 上运行 API 生成器（tRPC、FastAPI 和 Smithy）计划作为后续工作。在此之前，您可以让 VPC 内的调用者使用 CDK 中的 `connections.allowFrom` 或 Terraform 中的入站规则进行连接，如下面的"让调用者访问您的服务"所示。
+:::
+
+## 用法
+
+### 添加容器服务
+
+您可以通过两种方式向 Python 项目添加容器服务：
+
+<RunGenerator generator="py#container" />
+
+:::tip[项目前提条件]
+首先使用 <Link path="/guides/python-project">`py#project`</Link> 生成器创建一个项目来添加您的服务。
+:::
+
+### 选项
+
+<GeneratorParameters generator="py#container" />
+
+当 `infra` 设置为 `none` 时，生成器不提供基础设施，服务仅在本地运行。
+
+## 生成器输出
+
+生成器向您的项目添加以下文件。源文件夹以 snake_case 格式的 `name` 选项命名（例如 `--name=my-container` 对应 `my_container`），如果省略则为 `container`：
+
+<FileTree>
+  - your-project/
+    - your_module/
+      - container/ (或您选择的名称)
+        - \_\_init\_\_.py Python 包初始化
+        - main.py 带有 `GET /health` 和示例路由 `GET /echo` 的 FastAPI 应用，由 uvicorn 在 `PORT` 上提供服务
+        - Dockerfile 容器镜像定义
+        - .dockerignore 镜像构建上下文中排除的文件
+    - pyproject.toml 已更新 FastAPI 和 uvicorn 依赖项
+    - project.json 已更新 `bundle-arm` 和 `bundle` 目标以及您服务的 `<name>-serve`、`<name>-docker` 和 `<name>-trivy` 目标
+</FileTree>
+
+目标名称以 `name` 选项开头，如果省略则以 `container` 开头。例如，没有名称时目标为 `container-serve`、`container-docker` 和 `container-trivy`，对于 `--name=orders` 则为 `orders-serve`、`orders-docker` 和 `orders-trivy`。`bundle-arm` 和 `bundle` 目标由项目打包的所有内容共享。
+
+<OptionFilter when={{ infra: 'ecs' }} description="ECS 服务基础设施">
+### 基础设施
+
+<Snippet name="shared-constructs" />
+
+为了部署您的服务，会生成以下文件。`<name>` 是您的服务名称的 kebab-case 格式：`name` 选项，或者当您省略该选项时，项目名称的最后部分后跟 `-container`。项目 `orders` 没有 `name` 选项时给出 `orders-container`，而 `--name=api` 给出 `api`：
+
+<Infrastructure>
+<Fragment slot="cdk">
+<FileTree>
+  - packages/common/constructs/src
+    - app
+      - services
+        - \<name>.ts 您服务的 CDK 构造，带有其镜像
+    - core
+      - container
+        - ecs-service.ts Fargate 上 ECS 服务的通用构造
+</FileTree>
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - app
+      - services
+        - \<name>
+          - \<name>.tf 您服务的模块，发布其镜像
+    - core
+      - container
+        - ecs-service
+          - ecs-service.tf Fargate 上 ECS 服务的通用模块
+          - variables.tf 通用模块的输入
+          - outputs.tf 通用模块的输出
+</FileTree>
+</Fragment>
+</Infrastructure>
+
+构造和模块创建一个带有 Container Insights（集群容器的 CloudWatch 指标）的 ECS 集群、任务定义、服务、任务角色和执行角色、使用 AWS Key Management Service (AWS KMS) 密钥加密的日志组、基于 CPU 的自动扩展以及服务的安全组。
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'none' }} description="infra=none 时不提供基础设施">
+如果将 `infra` 设置为 `none`，则不会生成 CDK 构造或 Terraform 模块，服务仅在本地运行。
+</OptionFilter>
+
+#### 架构
+
+<ArchitectureDiagram />
+
+## 在本地运行您的服务
+
+`<name>-serve` 目标在您的机器上运行服务器，无需容器：
+
+<NxCommands commands={['run your-project:container-serve']} />
+
+服务器监听 `PORT` 环境变量中的端口。`<name>-serve` 目标将其设置为生成器分配的端口，从 8081 开始，跳过工作区中其他项目已使用的端口。在容器内，服务器监听端口 8080。
+
+服务器监听 `HOST` 环境变量中的地址，默认为 `127.0.0.1`，因此 `<name>-serve` 目标仅接受来自您自己机器的连接。镜像设置 `HOST=0.0.0.0`，因此在任务内部，服务器监听任务自己的网络接口。任务的安全组仍然决定谁可以连接。
+
+使用其健康检查路由检查服务器是否启动，它返回状态 200 和 `{"status":"ok"}`：
+
+```bash
+curl http://localhost:<port>/health
+```
+
+服务器还有一个示例路由，您可以用自己的路由替换它。`GET /echo?message=<x>` 返回 `{"message":"<x>"}`。`message` 参数是必需的，最多可以有 1024 个字符。没有它的请求或值更长的请求会获得状态 422。
+
+## 构建和扫描镜像
+
+`<name>-docker` 目标构建您服务的 linux/arm64 镜像。它首先运行 `bundle-arm` 目标，将您的代码及其 linux/arm64 依赖项写入 `dist/<project root>/bundle-arm`。聚合的 `bundle` 目标依赖于 `bundle-arm`。然后 `<name>-docker` 目标将该文件夹、`Dockerfile` 和 `.dockerignore` 复制到 `dist/<project root>/docker/<name>`，并使用该文件夹作为构建上下文（镜像构建可以读取的文件）构建镜像。它使用您的工作区设置的容器引擎，`docker` 或 [Finch](https://runfinch.com/)。该目标作为聚合 `docker` 目标的一部分运行，该目标构建项目中的每个镜像。
+
+<NxCommands commands={['run your-project:container-docker']} />
+
+在 ECS 上，健康检查命令在容器内运行，并在容器端口上调用 `GET /health`。它不需要入站访问。ECS 会替换健康检查持续失败的任务。ECS 忽略 Dockerfile 中的 `HEALTHCHECK` 指令。有关如何构建和发布镜像的更多信息，请参阅 <Link path="/guides/docker-bundling">Docker 打包</Link>。
+
+### 镜像扫描
+
+<Snippet name="trivy-image-scan" parentHeading="镜像扫描" />
+
+<OptionFilter when={{ infra: 'ecs' }} description="部署 ECS 服务">
+## 部署您的服务
+
+### 将服务添加到您的基础设施
+
+构造和模块从不创建 VPC。您在堆栈或根模块中创建或导入一个并传递它。任务在具有出口的私有子网中运行，通过 NAT 网关（允许私有子网进行出站连接的托管网关）或通过 VPC 端点（从您的 VPC 到 AWS 服务的私有连接）访问 AWS 服务。
+
+<Infrastructure>
+<Fragment slot="cdk">
+CDK 构造在 `common/constructs` 中创建。其类名是 PascalCase 格式的 `<name>`，因此项目 `orders` 没有 `name` 选项时给出 `packages/common/constructs/src/app/services/orders-container.ts` 中的类 `OrdersContainer`，而 `--name=api` 给出 `api.ts` 中的 `Api`。下面的 `MyService` 是您自己类的占位符，您的 `@<scope>/common-constructs` 包以该名称导出它。该包不导出名为 `Service` 的构造，因此如果您的编辑器提供一个，它是来自 `aws-cdk-lib/aws-servicediscovery` 的 `Service`。
+
+使用新 VPC 的示例用法：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyService } from '@my-scope/common-constructs';
+import { Stack, StackProps } from 'aws-cdk-lib';
+import { SubnetType, Vpc } from 'aws-cdk-lib/aws-ec2';
+import { Construct } from 'constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const vpc = new Vpc(this, 'Vpc', { natGateways: 1 });
+
+    new MyService(this, 'MyService', {
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    });
+  }
+}
+```
+
+要使用现有 VPC，请使用 `Vpc.fromLookup(this, 'Vpc', { vpcId: '<vpc-id>' })` 查找它并将其作为 `vpc` 传递。
+</Fragment>
+<Fragment slot="terraform">
+Terraform 模块在 `common/terraform` 中创建，位于 `app/services/<name>/<name>.tf`。项目 `orders` 没有 `name` 选项时给出 `packages/common/terraform/src/app/services/orders-container/orders-container.tf`，下面的 `my-service` 是您自己模块文件夹的占位符。服务的镜像发布到共享资产存储库，因此每次部署实例化一次 `core/asset-ecr` 模块，并将其输出传递给每个服务模块。还要传递共享 `runtime_config_appconfig` 模块的输出，其中包含服务从中读取其<Link path="/guides/runtime-config">运行时配置</Link>的 AWS AppConfig 应用程序：
+
+```hcl title="packages/infra/src/main.tf"
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
+}
+
+module "my_service" {
+  source = "../../common/terraform/src/app/services/my-service"
+
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = aws_subnet.private[*].id
+
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+  asset_ecr_repository_arn = module.asset_ecr.repository_arn
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 在没有 NAT 网关的情况下运行
+
+当您的任务启动时，ECS 代表它们拉取镜像并发送日志。您的服务器代码也可能调用 AWS 服务。在没有 NAT 网关的私有子网中，这些调用中的每一个都需要一个 VPC 端点。如果没有正确的端点，任务将无法启动或在调用 AWS 时超时。
+
+在 VPC 中创建这些端点，将 `<region>` 替换为您的 AWS 区域：
+
+| 端点 | 类型 | 使用者 |
+| --- | --- | --- |
+| `com.amazonaws.<region>.ecr.api` | 接口 | ECS，用于向 Amazon ECR 进行身份验证并查找镜像 |
+| `com.amazonaws.<region>.ecr.dkr` | 接口 | ECS，用于从 Amazon ECR 拉取镜像 |
+| `com.amazonaws.<region>.s3` | 网关 | ECS，用于下载镜像层，Amazon ECR 将其存储在 Amazon S3 中 |
+| `com.amazonaws.<region>.logs` | 接口 | 容器的日志输出，发送到 Amazon CloudWatch Logs |
+| `com.amazonaws.<region>.secretsmanager` | 接口 | ECS，用于读取您在任务启动时传递给容器的密钥 |
+| `com.amazonaws.<region>.appconfigdata` | 接口 | 您的代码，用于从 AWS AppConfig 读取<Link path="/guides/runtime-config">运行时配置</Link> |
+| `com.amazonaws.<region>.sts` | 接口 | 您的代码，当它从 AWS STS 请求临时凭证时（例如担任另一个角色） |
+
+接口端点需要一个允许来自任务的 HTTPS（端口 443）的安全组。有关 Amazon ECR 端点的详细信息，请参阅 [Amazon ECR 接口 VPC 端点](https://docs.aws.amazon.com/AmazonECR/latest/userguide/vpc-endpoints.html)。
+
+### 安全默认值
+
+生成的基础设施默认应用这些设置：
+
+- 服务的安全组没有入站规则。在您添加规则之前，VPC 内部或外部的任何调用者都无法连接到任务。
+- 任务在私有子网中运行，永远不会获得公共 IP 地址。
+- 生成器不会在服务前面创建负载均衡器和 API。
+- 任务只能在端口 443 上发送出站流量。与数据库的连接会添加数据库端口。
+- 任务角色（您的服务器代码运行的角色）只能从 AWS AppConfig 读取运行时配置，直到您或连接授予更多权限。
+- 执行角色（ECS 用于启动任务的角色）只能拉取服务的镜像、写入其日志组并读取您列出的密钥。
+- 密钥仅作为对 AWS Secrets Manager 或 AWS Systems Manager Parameter Store 的引用到达容器，永远不会作为纯环境值。
+- 容器具有只读根文件系统和可写的 `/tmp` 文件夹，并以 uid 1000（非 root 用户）运行。ECS Exec（对运行中任务的 shell 访问）已关闭。
+- 健康检查失败的部署会停止并回滚到以前的版本。
+- 日志组使用 AWS KMS 密钥加密，日志保留一年。
+
+### 让调用者访问您的服务
+
+本节是关于 VPC 内的调用者。VPC 外部的 HTTP 客户端需要在服务前面放置一个 API，如本指南顶部的注释所述。
+
+生成的服务无法被调用。如果 VPC 中的另一个工作负载需要调用它，例如 Lambda 函数或另一个 ECS 服务，您需要自己向服务的安全组添加入站规则。生成器不添加入站规则。通过其安全组在容器端口上允许一个命名的调用者，永远不要允许地址范围。
+
+<Infrastructure>
+<Fragment slot="cdk">
+构造实现了 `IConnectable`，因此通过其 `connections` 允许调用者的安全组：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { Port } from 'aws-cdk-lib/aws-ec2';
+
+const svc = new MyService(this, 'MyService', { vpc });
+svc.connections.allowFrom(callerSecurityGroup, Port.tcp(8080));
+```
+
+如果调用者的安全组在您的 CDK 应用中定义并限制出站流量，`allowFrom` 还会向其添加匹配的出站规则。
+</Fragment>
+<Fragment slot="terraform">
+向服务的安全组添加入站规则，您的服务模块将其输出为 `security_group_id`，以调用者的安全组作为源：
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_vpc_security_group_ingress_rule" "caller_to_my_service" {
+  security_group_id            = module.my_service.security_group_id
+  referenced_security_group_id = aws_security_group.caller.id
+  from_port                    = 8080
+  to_port                      = 8080
+  ip_protocol                  = "tcp"
+}
+```
+
+如果调用者的安全组限制出站流量，还要在调用者的组上添加一个 `aws_vpc_security_group_egress_rule` 到服务的安全组。
+</Fragment>
+</Infrastructure>
+
+调用者连接到任务的私有 IP 地址。生成器不设置服务发现，当 ECS 替换任务时，任务的地址会改变。要为调用者提供稳定的名称，请自己设置服务发现，例如使用 [Amazon ECS Service Connect](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-connect.html)。
+
+### 高级配置
+
+生成的服务为您设置其名称和镜像。下面的示例直接使用通用 `EcsService` 构造和 `ecs-service` 模块，用于生成的服务不传递的设置。
+
+在 CDK 中，您的 `common-constructs` 包在您服务的构造旁边导出 `EcsService`，因此您以相同的方式导入它：`import { EcsService } from '@my-scope/common-constructs'`。生成的构造扩展 `EcsService` 并传递所有其他属性，例如 `cluster`、`environment`、`secrets` 和 `grantTaskRole`。其可选的 `image` 属性替换从您的项目构建的镜像。
+
+在 Terraform 中，您的服务模块只允许您设置 `ecs-service` 模块的某些变量：`vpc_id`、`subnet_ids`、`cluster_arn`、`environment`、`secrets`、`task_role_policy_statements` 和 `tags`。要设置任何其他变量，请编辑您服务模块中的 `module "ecs_service"` 块。
+
+#### 预构建镜像
+
+要运行已经构建的镜像，例如来自公共注册表的镜像，请传递其 URI。本地不构建任何内容。对于私有 Amazon ECR 存储库中的镜像，CDK 授予执行角色对该存储库的拉取访问权限。Terraform 仅在您还将存储库的 ARN 作为 `image_repository_arn` 传递时才授予拉取访问权限。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+new EcsService(this, 'Prebuilt', {
+  serviceName: 'Prebuilt',
+  vpc,
+  image: { imageUri: 'public.ecr.aws/my-org/my-image@sha256:<digest>' },
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl
+module "prebuilt" {
+  source = "../../common/terraform/src/core/container/ecs-service"
+
+  service_name = "Prebuilt"
+  vpc_id       = aws_vpc.main.id
+  subnet_ids   = aws_subnet.private[*].id
+  image_uri    = "public.ecr.aws/my-org/my-image@sha256:<digest>"
+  # For an image in a private Amazon ECR repository, also pass:
+  # image_repository_arn = aws_ecr_repository.my_image.arn
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+#### 一个堆栈中的多个服务
+
+除非您传入一个集群，否则每个服务都会创建自己的 ECS 集群。要在一个集群中运行多个服务，请将相同的集群传递给每个服务。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+const cluster = new Cluster(this, 'Cluster', { vpc });
+
+new MyService(this, 'MyService', { vpc, cluster });
+new MyOtherService(this, 'MyOtherService', { vpc, cluster });
+```
+
+</Fragment>
+<Fragment slot="terraform">
+将相同的 `cluster_arn` 传递给每个 `ecs-service` 模块。第一个服务的 `cluster_arn` 输出为您提供一个：
+
+```hcl
+cluster_arn = module.my_service.cluster_arn
+```
+
+</Fragment>
+</Infrastructure>
+
+#### 环境变量和密钥
+
+纯设置放在 `environment` 中。永远不要在那里放置密钥值，因为任何可以读取任务定义的人都可以读取它们。改为将密钥作为引用传递。执行角色只能读取您列出的密钥。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+new EcsService(this, 'MyService', {
+  // ...
+  environment: { LOG_LEVEL: 'info' },
+  secrets: { API_KEY: Secret.fromSecretsManager(apiKeySecret) },
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl
+environment = { LOG_LEVEL = "info" }
+secrets     = { API_KEY = aws_secretsmanager_secret.api_key.arn }
+```
+
+</Fragment>
+</Infrastructure>
+
+#### 大小和扩展
+
+默认情况下，每个任务获得 256 个 CPU 单元（四分之一 vCPU）和 512 MiB 内存。服务启动一个任务，自动扩展保持一到两个任务运行，当平均 CPU 使用率超过 70% 时添加任务。
+
+| 设置 | CDK 属性 | Terraform 变量 | 默认值 |
+| --- | --- | --- | --- |
+| 每个任务的 CPU 单元 | `cpu` | `cpu` | 256 |
+| 每个任务的内存 (MiB) | `memoryLimitMiB` | `memory` | 512 |
+| 启动时的任务数 | `desiredCount` | `desired_count` | 1 |
+| 最少任务数 | `minCapacity` | `min_capacity` | 1 |
+| 最多任务数 | `maxCapacity` | `max_capacity` | 2 |
+| 目标平均 CPU (%) | `targetCpuUtilizationPercent` | `target_cpu_utilization` | 70 |
+
+#### 任务角色权限
+
+您服务的构造或模块的任务角色开始时只有对运行时配置的读取访问权限。添加您的代码需要的权限：
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+new EcsService(this, 'MyService', {
+  // ...
+  grantTaskRole: (taskRole) => myTable.grantReadData(taskRole),
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl
+task_role_policy_statements = [{
+  Effect   = "Allow"
+  Action   = ["dynamodb:GetItem", "dynamodb:Query"]
+  Resource = [aws_dynamodb_table.my_table.arn]
+}]
+```
+
+</Fragment>
+</Infrastructure>
+
+#### 容器用户
+
+任务定义将容器作为 uid 1000（非 root 用户）运行。提供的 Dockerfile 与之匹配：它创建一个 uid 和 gid 为 1000 的用户 `app` 并设置 `USER 1000:1000`。要以另一个用户身份运行，请设置 CDK `user` 属性或 Terraform `container_user` 变量。Terraform 拒绝 `0` 和 `root`。
+
+| 设置 | CDK 属性 | Terraform 变量 | 默认值 |
+| --- | --- | --- | --- |
+| 容器运行的用户 | `user` | `container_user` | `'1000'` (CDK), `"1000:1000"` (Terraform) |
+
+在 Terraform 中，`container_user` 是 `ecs-service` 模块的变量。您的服务模块不传递它，因此在其 `module "ecs_service"` 块中设置它。
+
+### 成本
+
+容器服务在空闲时计费，不像 Lambda 函数。无论是否有人调用服务，这些部分都按小时计费：
+
+- Fargate 任务，按 vCPU 和每 GB 内存计费。`desiredCount` 和 `minCapacity` 至少保持一个任务运行。
+- 接口 VPC 端点，在每个可用区按小时计费，或 NAT 网关，按小时和每 GB 处理的数据计费。
+- CloudWatch Logs 中的日志存储和 Amazon ECR 中的镜像存储。
+
+要估算您的区域和流量的成本，请使用 [AWS 定价计算器](https://calculator.aws/)。
+
+### 销毁您的服务
+
+要删除服务，请销毁包含它的堆栈或 Terraform 配置：
+
+<Infrastructure>
+<Fragment slot="cdk">
+运行您的基础设施项目的 `destroy` 目标，它运行 `cdk destroy`：
+
+<NxCommands commands={['run infra:destroy']} />
+</Fragment>
+<Fragment slot="terraform">
+运行您的基础设施项目的 `destroy` 目标：
+
+<NxCommands commands={['run infra:destroy']} />
+</Fragment>
+</Infrastructure>
+
+然后在 AWS 控制台或使用 AWS CLI 检查 ECS 服务和集群是否已消失。使用 CDK 和 Terraform，destroy 都会删除服务的日志组并安排其 AWS KMS 密钥删除，因此服务不会留下任何东西。KMS 删除密钥之前的等待期在 CDK 中为 30 天，在 Terraform 中为 7 天。镜像保留在 Amazon ECR 中，在 CDK 资产存储库或共享 `asset-ecr` 存储库中。如果您不再需要它们，请删除它们。VPC 是您的，因此销毁服务会将其保留在原处。
+</OptionFilter>
+
+## 连接您的服务
+
+使用 <Link path="/guides/connection">`connection`</Link> 生成器将您的服务连接到工作区中的其他项目：
+
+<RunGenerator generator="connection" />
+
+您的服务可以使用关系数据库或 DynamoDB 表。每个连接都有自己的指南：
+
+- <Link path="guides/connection/py-container-rdb">Python 容器服务到关系数据库</Link>
+- <Link path="guides/connection/py-container-dynamodb">Python 容器服务到 DynamoDB</Link>
+
+连接需要 `infra` 设置为 `ecs` 的服务。

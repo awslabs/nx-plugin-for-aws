@@ -1,0 +1,457 @@
+---
+title: Python Container Service
+description: Thêm dịch vụ được đóng gói container vào dự án Python và chạy nó riêng tư trên Amazon ECS
+generator: py#container
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import ArchitectureDiagram from '@components/architecture-diagram.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import OptionFilter from '@components/option-filter.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Snippet from '@components/snippet.astro';
+
+Generator này thêm một dịch vụ HTTP được đóng gói container vào dự án Python hiện có. Bạn sẽ nhận được một máy chủ [FastAPI](https://fastapi.tiangolo.com/) nhỏ, được chạy bởi máy chủ web [uvicorn](https://www.uvicorn.org/), với route `GET /health` và route mẫu `GET /echo`, một Dockerfile, và các target để chạy máy chủ cục bộ, xây dựng image và quét image. Bạn cũng nhận được mã CDK hoặc Terraform chạy image trên [Amazon Elastic Container Service (Amazon ECS)](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html), dịch vụ AWS chạy và mở rộng quy mô container.
+
+## Cách hoạt động
+
+Dịch vụ chạy trên [AWS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html), chạy mỗi container mà không cần máy chủ để bạn quản lý. Mỗi bản sao đang chạy của container của bạn là một ECS task. Các task chạy trong VPC của riêng bạn (virtual private cloud, một mạng cô lập trong tài khoản AWS của bạn). Một security group (một tập hợp các quy tắc tường lửa được gắn vào các task) kiểm soát lưu lượng mạng nào có thể đến và rời khỏi chúng.
+
+Dịch vụ là riêng tư. Nó không có load balancer, không có API và không có địa chỉ IP công khai. Security group của nó không có quy tắc inbound, vì vậy không có gì có thể mở kết nối đến dịch vụ cho đến khi bạn cho phép một người gọi. Dịch vụ vẫn có thể thực hiện các cuộc gọi đi ra, ví dụ đến cơ sở dữ liệu hoặc các dịch vụ AWS khác.
+
+:::note[Truy cập dịch vụ của bạn qua HTTP]
+Dịch vụ được tạo ra là riêng tư và không có HTTP endpoint mà bạn có thể truy cập từ bên ngoài VPC. Để phục vụ các HTTP client, ví dụ như một trang web, một agent hoặc một người gọi bên ngoài AWS, hãy đặt một API phía trước dịch vụ. Việc chạy các API generator (tRPC, FastAPI và Smithy) trên Amazon ECS được lên kế hoạch như một bước tiếp theo. Cho đến lúc đó, bạn có thể cho phép một người gọi bên trong VPC kết nối với `connections.allowFrom` trong CDK hoặc một ingress rule trong Terraform, như phần "Cho phép người gọi tiếp cận dịch vụ của bạn" bên dưới cho thấy.
+:::
+
+## Cách sử dụng
+
+### Thêm Container Service
+
+Bạn có thể thêm container service vào dự án Python theo hai cách:
+
+<RunGenerator generator="py#container" />
+
+:::tip[Điều kiện tiên quyết của dự án]
+Trước tiên hãy sử dụng generator <Link path="/guides/python-project">`py#project`</Link> để tạo dự án để thêm dịch vụ của bạn vào.
+:::
+
+### Tùy chọn
+
+<GeneratorParameters generator="py#container" />
+
+Với `infra` được đặt thành `none`, generator không tạo infrastructure, và dịch vụ chỉ chạy cục bộ.
+
+## Đầu ra của Generator
+
+Generator thêm các tệp sau vào dự án của bạn. Thư mục nguồn được đặt tên theo tùy chọn `name` ở dạng snake_case (ví dụ `my_container` cho `--name=my-container`), hoặc `container` nếu bạn bỏ qua nó:
+
+<FileTree>
+  - your-project/
+    - your_module/
+      - container/ (hoặc tên bạn đã chọn)
+        - \_\_init\_\_.py Khởi tạo package Python
+        - main.py Ứng dụng FastAPI với `GET /health` và route mẫu `GET /echo`, được phục vụ bởi uvicorn trên `PORT`
+        - Dockerfile Định nghĩa container image
+        - .dockerignore Các tệp bị bỏ qua khỏi ngữ cảnh xây dựng image
+    - pyproject.toml Được cập nhật với các dependency FastAPI và uvicorn
+    - project.json Được cập nhật với các target `bundle-arm` và `bundle` cùng các target `<name>-serve`, `<name>-docker` và `<name>-trivy` cho dịch vụ của bạn
+</FileTree>
+
+Tên target bắt đầu bằng tùy chọn `name`, hoặc bằng `container` nếu bạn bỏ qua nó. Ví dụ, các target là `container-serve`, `container-docker` và `container-trivy` khi không có tên, và `orders-serve`, `orders-docker` và `orders-trivy` cho `--name=orders`. Các target `bundle-arm` và `bundle` được chia sẻ bởi mọi thứ mà dự án đóng gói.
+
+<OptionFilter when={{ infra: 'ecs' }} description="ECS service infrastructure">
+### Infrastructure
+
+<Snippet name="shared-constructs" />
+
+Để triển khai dịch vụ của bạn, các tệp sau được tạo ra. `<name>` là tên dịch vụ của bạn ở dạng kebab-case: tùy chọn `name`, hoặc phần cuối cùng của tên dự án của bạn theo sau bởi `-container` khi bạn bỏ qua tùy chọn. Dự án `orders` không có tùy chọn `name` cho ra `orders-container`, và `--name=api` cho ra `api`:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<FileTree>
+  - packages/common/constructs/src
+    - app
+      - services
+        - \<name>.ts CDK construct cho dịch vụ của bạn, với image
+    - core
+      - container
+        - ecs-service.ts Construct chung cho dịch vụ ECS trên Fargate
+</FileTree>
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - app
+      - services
+        - \<name>
+          - \<name>.tf Module cho dịch vụ của bạn, xuất bản image
+    - core
+      - container
+        - ecs-service
+          - ecs-service.tf Module chung cho dịch vụ ECS trên Fargate
+          - variables.tf Đầu vào của module chung
+          - outputs.tf Đầu ra của module chung
+</FileTree>
+</Fragment>
+</Infrastructure>
+
+Construct và module tạo một ECS cluster với Container Insights (các chỉ số CloudWatch cho các container của cluster), một task definition, dịch vụ, một task role và một execution role, một log group được mã hóa bằng khóa AWS Key Management Service (AWS KMS), autoscaling dựa trên CPU và security group của dịch vụ.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'none' }} description="Không có infrastructure được tạo cho infra=none">
+Nếu bạn đặt `infra` thành `none`, không có CDK construct hoặc Terraform module nào được tạo, và dịch vụ chỉ chạy cục bộ.
+</OptionFilter>
+
+#### Kiến trúc
+
+<ArchitectureDiagram />
+
+## Chạy dịch vụ của bạn cục bộ
+
+Target `<name>-serve` chạy máy chủ trên máy của bạn, không có container:
+
+<NxCommands commands={['run your-project:container-serve']} />
+
+Máy chủ lắng nghe trên cổng trong biến môi trường `PORT`. Target `<name>-serve` đặt nó thành một cổng mà generator chỉ định, bắt đầu từ 8081 và bỏ qua các cổng mà các dự án khác trong workspace của bạn đã sử dụng. Bên trong container, máy chủ lắng nghe trên cổng 8080.
+
+Máy chủ lắng nghe trên địa chỉ trong biến môi trường `HOST`, mặc định là `127.0.0.1`, vì vậy target `<name>-serve` chỉ chấp nhận kết nối từ máy của chính bạn. Image đặt `HOST=0.0.0.0`, vì vậy bên trong một task, máy chủ lắng nghe trên giao diện mạng của chính task. Security group của task vẫn quyết định ai có thể kết nối.
+
+Kiểm tra xem máy chủ đã hoạt động chưa với route health của nó, trả về status 200 và `{"status":"ok"}`:
+
+```bash
+curl http://localhost:<port>/health
+```
+
+Máy chủ cũng có một route mẫu mà bạn thay thế bằng các route của riêng mình. `GET /echo?message=<x>` trả về `{"message":"<x>"}`. Tham số `message` là bắt buộc và có thể dài tối đa 1024 ký tự. Một yêu cầu không có nó, hoặc với giá trị dài hơn, nhận status 422.
+
+## Xây dựng và quét Image
+
+Target `<name>-docker` xây dựng một image linux/arm64 của dịch vụ của bạn. Nó chạy target `bundle-arm` trước, ghi mã của bạn và các dependency linux/arm64 của nó vào `dist/<project root>/bundle-arm`. Target tổng hợp `bundle` phụ thuộc vào `bundle-arm`. Target `<name>-docker` sau đó sao chép thư mục đó, `Dockerfile` và `.dockerignore` vào `dist/<project root>/docker/<name>`, và xây dựng image với thư mục đó làm build context (các tệp mà quá trình xây dựng image có thể đọc). Nó sử dụng container engine mà workspace của bạn được thiết lập, `docker` hoặc [Finch](https://runfinch.com/). Target chạy như một phần của target tổng hợp `docker`, xây dựng mọi image trong dự án.
+
+<NxCommands commands={['run your-project:container-docker']} />
+
+Trên ECS, một lệnh kiểm tra sức khỏe chạy bên trong container và gọi `GET /health` trên cổng container. Nó không cần quyền truy cập inbound. ECS thay thế một task mà kiểm tra sức khỏe của nó liên tục thất bại. ECS bỏ qua chỉ thị `HEALTHCHECK` trong Dockerfile. Để biết thêm về cách image được xây dựng và xuất bản, xem <Link path="/guides/docker-bundling">Docker Bundling</Link>.
+
+### Quét Image
+
+<Snippet name="trivy-image-scan" parentHeading="Quét Image" />
+
+<OptionFilter when={{ infra: 'ecs' }} description="Triển khai dịch vụ ECS">
+## Triển khai dịch vụ của bạn
+
+### Thêm dịch vụ vào Infrastructure của bạn
+
+Construct và module không bao giờ tạo VPC. Bạn tạo hoặc import một VPC trong stack hoặc root module của bạn và truyền nó vào. Các task chạy trong các private subnet với egress, tiếp cận các dịch vụ AWS thông qua NAT gateway (một gateway được quản lý cho phép các private subnet thực hiện kết nối đi ra) hoặc thông qua VPC endpoint (kết nối riêng tư từ VPC của bạn đến các dịch vụ AWS).
+
+<Infrastructure>
+<Fragment slot="cdk">
+CDK construct được tạo trong `common/constructs`. Tên class của nó là `<name>` ở dạng PascalCase, vì vậy dự án `orders` không có tùy chọn `name` cho ra class `OrdersContainer` trong `packages/common/constructs/src/app/services/orders-container.ts`, và `--name=api` cho ra `Api` trong `api.ts`. `MyService` bên dưới là một placeholder cho class của riêng bạn, mà package `@<scope>/common-constructs` của bạn xuất dưới tên đó. Package không xuất construct nào có tên `Service`, vì vậy nếu editor của bạn đề xuất một cái thì đó là `Service` từ `aws-cdk-lib/aws-servicediscovery`.
+
+Ví dụ sử dụng với VPC mới:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyService } from '@my-scope/common-constructs';
+import { Stack, StackProps } from 'aws-cdk-lib';
+import { SubnetType, Vpc } from 'aws-cdk-lib/aws-ec2';
+import { Construct } from 'constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const vpc = new Vpc(this, 'Vpc', { natGateways: 1 });
+
+    new MyService(this, 'MyService', {
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    });
+  }
+}
+```
+
+Để sử dụng VPC hiện có, tra cứu nó với `Vpc.fromLookup(this, 'Vpc', { vpcId: '<vpc-id>' })` và truyền nó làm `vpc`.
+</Fragment>
+<Fragment slot="terraform">
+Terraform module được tạo trong `common/terraform`, trong `app/services/<name>/<name>.tf`. Dự án `orders` không có tùy chọn `name` cho ra `packages/common/terraform/src/app/services/orders-container/orders-container.tf`, và `my-service` bên dưới là một placeholder cho thư mục module của riêng bạn. Image của dịch vụ được xuất bản vào kho lưu trữ asset được chia sẻ, vì vậy hãy khởi tạo module `core/asset-ecr` một lần cho mỗi triển khai và truyền đầu ra của nó cho mọi service module. Cũng truyền đầu ra của module `runtime_config_appconfig` được chia sẻ, chứa ứng dụng AWS AppConfig mà dịch vụ đọc <Link path="/guides/runtime-config">runtime configuration</Link> của nó từ đó:
+
+```hcl title="packages/infra/src/main.tf"
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
+}
+
+module "my_service" {
+  source = "../../common/terraform/src/app/services/my-service"
+
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = aws_subnet.private[*].id
+
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+  asset_ecr_repository_arn = module.asset_ecr.repository_arn
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Chạy không có NAT Gateway
+
+Khi các task của bạn khởi động, ECS kéo image và gửi log thay mặt cho chúng. Mã máy chủ của bạn cũng có thể gọi các dịch vụ AWS. Trong các private subnet không có NAT gateway, mỗi cuộc gọi này cần một VPC endpoint. Không có các endpoint phù hợp, các task không khởi động được hoặc hết thời gian chờ khi chúng gọi AWS.
+
+Tạo các endpoint này trong VPC, thay thế `<region>` bằng AWS Region của bạn:
+
+| Endpoint | Loại | Cái gì sử dụng nó |
+| --- | --- | --- |
+| `com.amazonaws.<region>.ecr.api` | Interface | ECS, để xác thực với Amazon ECR và tra cứu image |
+| `com.amazonaws.<region>.ecr.dkr` | Interface | ECS, để kéo image từ Amazon ECR |
+| `com.amazonaws.<region>.s3` | Gateway | ECS, để tải xuống các lớp image, mà Amazon ECR lưu trữ trong Amazon S3 |
+| `com.amazonaws.<region>.logs` | Interface | Đầu ra log của container, được gửi đến Amazon CloudWatch Logs |
+| `com.amazonaws.<region>.secretsmanager` | Interface | ECS, để đọc các secret bạn truyền vào container khi một task khởi động |
+| `com.amazonaws.<region>.appconfigdata` | Interface | Mã của bạn, để đọc <Link path="/guides/runtime-config">runtime configuration</Link> từ AWS AppConfig |
+| `com.amazonaws.<region>.sts` | Interface | Mã của bạn, khi nó yêu cầu thông tin xác thực tạm thời từ AWS STS (ví dụ để assume một role khác) |
+
+Interface endpoint cần một security group cho phép HTTPS (cổng 443) từ các task. Để biết chi tiết về các Amazon ECR endpoint, xem [Amazon ECR interface VPC endpoints](https://docs.aws.amazon.com/AmazonECR/latest/userguide/vpc-endpoints.html).
+
+### Mặc định bảo mật
+
+Infrastructure được tạo áp dụng các cài đặt này theo mặc định:
+
+- Security group của dịch vụ không có quy tắc inbound. Không có người gọi nào bên trong hoặc bên ngoài VPC có thể kết nối với các task cho đến khi bạn thêm một quy tắc.
+- Các task chạy trong các private subnet và không bao giờ nhận địa chỉ IP công khai.
+- Generator không tạo load balancer và không có API phía trước dịch vụ.
+- Các task chỉ có thể gửi lưu lượng đi ra trên cổng 443. Kết nối đến cơ sở dữ liệu thêm cổng cơ sở dữ liệu.
+- Task role (role mà mã máy chủ của bạn chạy với) chỉ có thể đọc runtime configuration từ AWS AppConfig cho đến khi bạn hoặc một kết nối cấp thêm quyền.
+- Execution role (role mà ECS sử dụng để khởi động task của bạn) chỉ có thể kéo image của dịch vụ, ghi vào log group của nó và đọc các secret bạn liệt kê.
+- Các secret chỉ đến container dưới dạng tham chiếu đến AWS Secrets Manager hoặc AWS Systems Manager Parameter Store, không bao giờ là giá trị môi trường thuần túy.
+- Container có hệ thống tệp gốc chỉ đọc với thư mục `/tmp` có thể ghi, và chạy với uid 1000, một người dùng không phải root. ECS Exec (truy cập shell vào một task đang chạy) bị tắt.
+- Một triển khai không vượt qua kiểm tra health sẽ dừng lại và rollback về phiên bản trước.
+- Log group được mã hóa bằng khóa AWS KMS, và log được giữ trong một năm.
+
+### Cho phép người gọi tiếp cận dịch vụ của bạn
+
+Phần này nói về các người gọi bên trong VPC. Một HTTP client bên ngoài VPC cần một API phía trước dịch vụ, như ghi chú ở đầu hướng dẫn này giải thích.
+
+Không có gì có thể gọi dịch vụ như được tạo ra. Nếu một workload khác trong VPC cần gọi nó, ví dụ một Lambda function hoặc một dịch vụ ECS khác, bạn tự thêm một quy tắc inbound vào security group của dịch vụ. Generator không thêm quy tắc inbound nào. Cho phép một người gọi được đặt tên theo security group của nó, trên cổng container, và không bao giờ cho phép một dải địa chỉ.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Construct triển khai `IConnectable`, vì vậy cho phép security group của người gọi thông qua `connections` của nó:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { Port } from 'aws-cdk-lib/aws-ec2';
+
+const svc = new MyService(this, 'MyService', { vpc });
+svc.connections.allowFrom(callerSecurityGroup, Port.tcp(8080));
+```
+
+Nếu security group của người gọi được định nghĩa trong ứng dụng CDK của bạn và giới hạn lưu lượng đi ra, `allowFrom` cũng thêm quy tắc outbound tương ứng vào nó.
+</Fragment>
+<Fragment slot="terraform">
+Thêm một quy tắc inbound vào security group của dịch vụ, mà module của dịch vụ của bạn xuất ra dưới dạng `security_group_id`, với security group của người gọi làm nguồn:
+
+```hcl title="packages/infra/src/main.tf"
+resource "aws_vpc_security_group_ingress_rule" "caller_to_my_service" {
+  security_group_id            = module.my_service.security_group_id
+  referenced_security_group_id = aws_security_group.caller.id
+  from_port                    = 8080
+  to_port                      = 8080
+  ip_protocol                  = "tcp"
+}
+```
+
+Nếu security group của người gọi giới hạn lưu lượng đi ra, cũng thêm một `aws_vpc_security_group_egress_rule` trên group của người gọi đến security group của dịch vụ.
+</Fragment>
+</Infrastructure>
+
+Người gọi kết nối với địa chỉ IP riêng tư của task. Generator không thiết lập service discovery, và địa chỉ của task thay đổi khi ECS thay thế task. Để cung cấp cho người gọi một tên ổn định, hãy tự thiết lập service discovery, ví dụ với [Amazon ECS Service Connect](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-connect.html).
+
+### Cấu hình nâng cao
+
+Dịch vụ được tạo đặt tên và image của nó cho bạn. Các ví dụ dưới đây sử dụng construct `EcsService` chung và module `ecs-service` trực tiếp, cho các cài đặt mà dịch vụ được tạo không truyền.
+
+Trong CDK, package `common-constructs` của bạn xuất `EcsService` bên cạnh construct của dịch vụ của bạn, vì vậy bạn import nó theo cùng một cách: `import { EcsService } from '@my-scope/common-constructs'`. Construct được tạo mở rộng `EcsService` và truyền mọi prop khác qua, ví dụ `cluster`, `environment`, `secrets` và `grantTaskRole`. Prop `image` tùy chọn của nó thay thế image được xây dựng từ dự án của bạn.
+
+Trong Terraform, module của dịch vụ của bạn chỉ cho phép bạn đặt một số biến của module `ecs-service`: `vpc_id`, `subnet_ids`, `cluster_arn`, `environment`, `secrets`, `task_role_policy_statements` và `tags`. Để đặt bất kỳ biến nào khác, hãy chỉnh sửa khối `module "ecs_service"` trong module của dịch vụ của bạn.
+
+#### Image được xây dựng sẵn
+
+Để chạy một image đã được xây dựng, ví dụ từ một registry công khai, hãy truyền URI của nó. Không có gì được xây dựng cục bộ. Đối với một image trong kho lưu trữ Amazon ECR riêng tư, CDK cấp quyền pull cho execution role trên kho lưu trữ đó. Terraform chỉ cấp quyền pull khi bạn cũng truyền ARN của kho lưu trữ dưới dạng `image_repository_arn`.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+new EcsService(this, 'Prebuilt', {
+  serviceName: 'Prebuilt',
+  vpc,
+  image: { imageUri: 'public.ecr.aws/my-org/my-image@sha256:<digest>' },
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl
+module "prebuilt" {
+  source = "../../common/terraform/src/core/container/ecs-service"
+
+  service_name = "Prebuilt"
+  vpc_id       = aws_vpc.main.id
+  subnet_ids   = aws_subnet.private[*].id
+  image_uri    = "public.ecr.aws/my-org/my-image@sha256:<digest>"
+  # For an image in a private Amazon ECR repository, also pass:
+  # image_repository_arn = aws_ecr_repository.my_image.arn
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+#### Nhiều dịch vụ trong một Stack
+
+Mỗi dịch vụ tạo cluster ECS riêng của nó trừ khi bạn truyền một cluster vào. Để chạy nhiều dịch vụ trong một cluster, hãy truyền cùng một cluster cho mỗi dịch vụ.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+const cluster = new Cluster(this, 'Cluster', { vpc });
+
+new MyService(this, 'MyService', { vpc, cluster });
+new MyOtherService(this, 'MyOtherService', { vpc, cluster });
+```
+
+</Fragment>
+<Fragment slot="terraform">
+Truyền cùng một `cluster_arn` cho mỗi module `ecs-service`. Đầu ra `cluster_arn` của dịch vụ đầu tiên cung cấp cho bạn một:
+
+```hcl
+cluster_arn = module.my_service.cluster_arn
+```
+
+</Fragment>
+</Infrastructure>
+
+#### Biến môi trường và Secret
+
+Các cài đặt thuần túy đi vào `environment`. Không bao giờ đặt giá trị secret ở đó, vì bất kỳ ai có thể đọc task definition đều có thể đọc chúng. Thay vào đó, hãy truyền secret dưới dạng tham chiếu. Execution role chỉ có thể đọc các secret bạn liệt kê.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+new EcsService(this, 'MyService', {
+  // ...
+  environment: { LOG_LEVEL: 'info' },
+  secrets: { API_KEY: Secret.fromSecretsManager(apiKeySecret) },
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl
+environment = { LOG_LEVEL = "info" }
+secrets     = { API_KEY = aws_secretsmanager_secret.api_key.arn }
+```
+
+</Fragment>
+</Infrastructure>
+
+#### Kích thước và mở rộng quy mô
+
+Mỗi task nhận 256 đơn vị CPU (một phần tư vCPU) và 512 MiB bộ nhớ theo mặc định. Dịch vụ khởi động một task, và autoscaling giữ từ một đến hai task đang chạy, thêm task khi mức sử dụng CPU trung bình vượt quá 70%.
+
+| Cài đặt | CDK prop | Terraform variable | Mặc định |
+| --- | --- | --- | --- |
+| Đơn vị CPU mỗi task | `cpu` | `cpu` | 256 |
+| Bộ nhớ mỗi task (MiB) | `memoryLimitMiB` | `memory` | 512 |
+| Task khi khởi động | `desiredCount` | `desired_count` | 1 |
+| Ít task nhất | `minCapacity` | `min_capacity` | 1 |
+| Nhiều task nhất | `maxCapacity` | `max_capacity` | 2 |
+| CPU trung bình mục tiêu (%) | `targetCpuUtilizationPercent` | `target_cpu_utilization` | 70 |
+
+#### Quyền Task Role
+
+Task role của construct hoặc module dịch vụ của bạn bắt đầu chỉ với quyền đọc runtime configuration. Thêm các quyền mà mã của bạn cần:
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts
+new EcsService(this, 'MyService', {
+  // ...
+  grantTaskRole: (taskRole) => myTable.grantReadData(taskRole),
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl
+task_role_policy_statements = [{
+  Effect   = "Allow"
+  Action   = ["dynamodb:GetItem", "dynamodb:Query"]
+  Resource = [aws_dynamodb_table.my_table.arn]
+}]
+```
+
+</Fragment>
+</Infrastructure>
+
+#### Container User
+
+Task definition chạy container với uid 1000, một người dùng không phải root. Dockerfile được cung cấp khớp với nó: nó tạo một người dùng `app` với uid và gid 1000 và đặt `USER 1000:1000`. Để chạy với người dùng khác, hãy đặt prop `user` của CDK hoặc biến `container_user` của Terraform. Terraform từ chối `0` và `root`.
+
+| Cài đặt | CDK prop | Terraform variable | Mặc định |
+| --- | --- | --- | --- |
+| Người dùng mà container chạy với | `user` | `container_user` | `'1000'` (CDK), `"1000:1000"` (Terraform) |
+
+Trong Terraform, `container_user` là một biến của module `ecs-service`. Module của dịch vụ của bạn không truyền nó, vì vậy hãy đặt nó trong khối `module "ecs_service"` của nó.
+
+### Chi phí
+
+Một container service tính phí khi nó không hoạt động, không giống như Lambda function. Các phần này tính phí theo giờ cho dù có ai gọi dịch vụ hay không:
+
+- Các task Fargate, mỗi vCPU và mỗi GB bộ nhớ. `desiredCount` và `minCapacity` giữ ít nhất một task đang chạy.
+- Interface VPC endpoint, mỗi giờ trong mỗi Availability Zone, hoặc NAT gateway, mỗi giờ và mỗi GB dữ liệu nó xử lý.
+- Lưu trữ log trong CloudWatch Logs, và lưu trữ image trong Amazon ECR.
+
+Để ước tính chi phí cho Region và lưu lượng của bạn, hãy sử dụng [AWS Pricing Calculator](https://calculator.aws/).
+
+### Hủy dịch vụ của bạn
+
+Để xóa dịch vụ, hãy hủy stack hoặc cấu hình Terraform chứa nó:
+
+<Infrastructure>
+<Fragment slot="cdk">
+Chạy target `destroy` của dự án infrastructure của bạn, chạy `cdk destroy`:
+
+<NxCommands commands={['run infra:destroy']} />
+</Fragment>
+<Fragment slot="terraform">
+Chạy target `destroy` của dự án infrastructure của bạn:
+
+<NxCommands commands={['run infra:destroy']} />
+</Fragment>
+</Infrastructure>
+
+Sau đó kiểm tra trong AWS console hoặc với AWS CLI rằng dịch vụ ECS và cluster đã biến mất. Với cả CDK và Terraform, destroy đều xóa log group của dịch vụ và lên lịch xóa khóa AWS KMS của nó, vì vậy không có gì của dịch vụ còn lại. Thời gian chờ của khóa trước khi KMS xóa nó là 30 ngày với CDK và 7 ngày với Terraform. Các image vẫn ở trong Amazon ECR, trong kho lưu trữ CDK assets hoặc kho lưu trữ `asset-ecr` được chia sẻ. Xóa chúng nếu bạn không còn cần chúng nữa. VPC là của bạn, vì vậy việc hủy dịch vụ để nó nguyên vị trí.
+</OptionFilter>
+
+## Kết nối dịch vụ của bạn
+
+Sử dụng generator <Link path="/guides/connection">`connection`</Link> để kết nối dịch vụ của bạn với các dự án khác trong workspace của bạn:
+
+<RunGenerator generator="connection" />
+
+Dịch vụ của bạn có thể sử dụng cơ sở dữ liệu quan hệ hoặc bảng DynamoDB. Mỗi kết nối có hướng dẫn riêng:
+
+- <Link path="guides/connection/py-container-rdb">Python Container Service to Relational Database</Link>
+- <Link path="guides/connection/py-container-dynamodb">Python Container Service to DynamoDB</Link>
+
+Một kết nối cần dịch vụ có `infra` được đặt thành `ecs`.

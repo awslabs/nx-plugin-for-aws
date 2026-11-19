@@ -13,6 +13,12 @@ describe('dev', () => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
+  it('exports only addTargetToLocalDev', async () => {
+    expect(Object.keys(await import('./local-dev.js'))).toEqual([
+      'addTargetToLocalDev',
+    ]);
+  });
+
   describe('addTargetToLocalDev', () => {
     const options: LocalDevOptions = {
       apiName: 'testApi',
