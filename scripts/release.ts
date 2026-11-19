@@ -13,6 +13,10 @@ import { stampMigrationsFile } from './stamp-migrations';
  * single entry point the release job runs, so the flow reads top to bottom
  * rather than being spread across inline workflow bash and several scripts.
  *
+ * Versioning decides whether there is a release at all: when nx finds no bump
+ * for the release projects, the script logs that and exits zero, having changed
+ * nothing.
+ *
  * Publishing is `nx release publish`, retried on a transient failure. nx skips a
  * package already on the registry and tolerates an already-present 409, so a
  * retry only re-attempts what didn't land — safe to run repeatedly, and correct
@@ -128,6 +132,7 @@ const main = async (): Promise<void> => {
     throw new Error(`Run from the repo root — ${PLUGIN_ROOT} not found.`);
   }
   const args = releaseArgs();
+  const versionBeforeBump = distVersion(NX_PLUGIN_PACKAGE);
   // Write the pending version into the dist manifests only (no tag/commit), so
   // migrations can be stamped with it before the tag-and-changelog step resolves
   // the same version.
@@ -140,8 +145,20 @@ const main = async (): Promise<void> => {
     '--git-commit=false',
     '--stage-changes=false',
   ]);
+  const version = distVersion(NX_PLUGIN_PACKAGE);
+  // nx leaves the manifests at the built version when the commits since the last
+  // tag carry no bump for the release projects — a `fix`/`feat` that only touched
+  // e2e, docs or CI passes the workflow's subject grep and reaches here. Nothing
+  // a user installs changed, so stop before any side effect: publishing the
+  // unbumped build fails on the version already on the registry.
+  if (version === versionBeforeBump) {
+    console.log(
+      `No releasable changes since ${currentTag()}; skipping publish.`,
+    );
+    return;
+  }
   // migrations.json is assembled unversioned; stamp it with the shipping version.
-  stampMigrationsFile(distVersion(NX_PLUGIN_PACKAGE));
+  stampMigrationsFile(version);
   // Tag + changelog (resolves the same version from the git tag), then publish.
   run('pnpm', ['nx', 'release', '--skip-publish', ...args]);
   await publishWithRetry();
