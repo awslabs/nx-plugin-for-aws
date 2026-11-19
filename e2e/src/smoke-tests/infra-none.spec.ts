@@ -91,6 +91,17 @@ describe('smoke test - infra-none', () => {
       opts,
     );
 
+    // Container services with infra=none, one per language. Distinct names so
+    // the two vended constructs do not collide when infrastructure is added.
+    await runCLI(
+      `generate @aws/nx-plugin:ts#container --project=ts-project --name=my-ts-container --infra=none --no-interactive`,
+      opts,
+    );
+    await runCLI(
+      `generate @aws/nx-plugin:py#container --project=e2e_test.py_project --name=my-py-container --infra=none --no-interactive`,
+      opts,
+    );
+
     // Greengrass component with infra=none
     await runCLI(
       `generate @aws/nx-plugin:py#project --name=py-greengrass-project --type=application --no-interactive`,
@@ -173,6 +184,16 @@ describe('smoke test - infra-none', () => {
       opts,
     );
 
+    // Re-run the container services with infra=ecs
+    await runCLI(
+      `generate @aws/nx-plugin:ts#container --project=ts-project --name=my-ts-container --infra=ecs --no-interactive`,
+      opts,
+    );
+    await runCLI(
+      `generate @aws/nx-plugin:py#container --project=e2e_test.py_project --name=my-py-container --infra=ecs --no-interactive`,
+      opts,
+    );
+
     // Re-run the Greengrass component with infra=component-version
     await runCLI(
       `generate @aws/nx-plugin:greengrass#component --project=e2e_test.py_greengrass_project --name=my-greengrass-component --language=python --infra=component-version --no-interactive`,
@@ -208,6 +229,17 @@ describe('smoke test - infra-none', () => {
     expect(
       existsSync(
         `${projectRoot}/packages/common/constructs/src/app/greengrass/my-ts-greengrass-component.ts`,
+      ),
+    ).toBe(true);
+    // Escalating a container service from infra=none vends its ECS construct.
+    expect(
+      existsSync(
+        `${projectRoot}/packages/common/constructs/src/app/services/my-ts-container.ts`,
+      ),
+    ).toBe(true);
+    expect(
+      existsSync(
+        `${projectRoot}/packages/common/constructs/src/app/services/my-py-container.ts`,
       ),
     ).toBe(true);
     // IPC stays disabled through infrastructure escalation for both languages.
