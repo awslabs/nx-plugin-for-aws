@@ -11,6 +11,7 @@ import {
 } from '../../sdk/connection.js';
 import { greengrassComponentGenerator } from '../../sdk/greengrass.js';
 import { licenseGenerator } from '../../sdk/license.js';
+import { observabilityLangfuseGenerator } from '../../sdk/observability.js';
 import {
   type PyAgentGeneratorSchema,
   type PyApiGeneratorSchema,
@@ -82,6 +83,7 @@ export const internalTestMatrixGenerator = async (
   options: InternalTestMatrixGeneratorSchema = {},
 ): Promise<GeneratorCallback> => {
   assertSupportedNxVersion(tree);
+  const iac = options.infra ?? 'cdk';
   const preferInstallDependencies = options.preferInstallDependencies ?? false;
   const defaults = { preferInstallDependencies };
   const projectDefaults = { ...defaults, directory: 'packages' };
@@ -95,7 +97,7 @@ export const internalTestMatrixGenerator = async (
   // The infrastructure project every other generator deploys into. Which
   // generator owns it depends on the workspace's IaC provider, so the caller
   // asks for the one matching the workspace it created.
-  if (options.infra === 'terraform') {
+  if (iac === 'terraform') {
     await terraformProjectGenerator(tree, {
       name: 'infra',
       type: 'application',
@@ -136,6 +138,7 @@ export const internalTestMatrixGenerator = async (
     cognitoDomain: 'test-no-router',
     allowSignup: true,
     iac: 'inherit',
+    federation: 'oidc',
     ...defaults,
   });
 
@@ -410,6 +413,31 @@ export const internalTestMatrixGenerator = async (
   ];
   for (const agent of pyAgents) {
     await pyAgentGenerator(tree, { ...agent, ...defaults });
+  }
+  if (iac === 'cdk') {
+    await pyProjectGenerator(tree, {
+      name: 'py-langfuse-project',
+      type: 'application',
+      ...projectDefaults,
+    });
+    await pyAgentGenerator(tree, {
+      project: py('py-langfuse-project'),
+      framework: 'strands',
+      protocol: 'http',
+      infra: 'agentcore',
+      iac: 'cdk',
+      auth: 'iam',
+      session: 'in-memory',
+      ...defaults,
+    });
+    await observabilityLangfuseGenerator(tree, {
+      project: py('py-langfuse-project'),
+      host: 'https://langfuse.example.com',
+      secretArn:
+        'arn:aws:secretsmanager:us-east-1:123456789012:secret:langfuse-abcdef',
+      ...defaults,
+    });
+    // The application stack does not instantiate this build-only agent.
   }
   // Guard the default Python agent, which has AgentCore infrastructure.
   await pyAgentGuardrailsGenerator(tree, {

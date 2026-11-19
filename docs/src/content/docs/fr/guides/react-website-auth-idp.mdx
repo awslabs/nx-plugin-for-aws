@@ -1,0 +1,436 @@
+---
+title: Fournisseurs d'identité pour site web
+description: Permettez aux utilisateurs de se connecter à votre site web via un fournisseur d'identité OpenID Connect externe tel qu'Okta, Auth0 ou Microsoft Entra ID
+generator: ts#website#auth
+when:
+  federation: [oidc]
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+
+<Link path="guides/react-website-auth">L'authentification de site web</Link> crée un pool d'utilisateurs Amazon Cognito, et par défaut seuls les utilisateurs qui ont un nom d'utilisateur et un mot de passe dans ce pool peuvent se connecter. Si votre personnel ou vos clients ont déjà des comptes chez un fournisseur d'identité (IdP), tel qu'Okta, Auth0 ou Microsoft Entra ID, ils auraient autrement besoin d'un deuxième compte juste pour votre site web.
+
+L'exécution de `ts#website#auth` avec `--federation=oidc` vous permet d'ajouter des fournisseurs d'identité [OpenID Connect](https://openid.net/developers/how-connect-works/) (OIDC) externes au pool d'utilisateurs. Vous listez les fournisseurs d'identité dans votre code d'infrastructure : la prop `oidcIdentityProviders` de `UserIdentity` dans CDK, ou la variable `oidc_identity_providers` du module `user_identity` dans Terraform. La page de connexion affiche alors un bouton pour chaque fournisseur d'identité à côté du formulaire de nom d'utilisateur et mot de passe.
+
+## Comment cela fonctionne
+
+- Votre site web envoie toujours les utilisateurs vers la page de connexion Cognito. La page a maintenant un bouton nommé d'après chaque fournisseur d'identité.
+- Un utilisateur qui choisit un bouton se connecte chez ce fournisseur d'identité. Le fournisseur d'identité les renvoie vers Cognito à son URI de redirection, `https://<cognito domain>/oauth2/idpresponse`.
+- Cognito crée un utilisateur dans votre pool d'utilisateurs pour eux, un utilisateur fédéré, et copie les revendications que vous mappez (par exemple `email`) dans les attributs de l'utilisateur.
+- Cognito émet ensuite le même type de jetons qu'il émet pour un utilisateur local. Vos API, agents et pool d'identités les acceptent sans aucun changement.
+
+Les utilisateurs avec un nom d'utilisateur et un mot de passe dans le pool peuvent toujours se connecter.
+
+## Qui peut se connecter
+
+L'ajout d'un fournisseur d'identité peut laisser entrer beaucoup plus de personnes sur votre site web que vous ne le pensez. L'option `allowSignup` de `ts#website#auth` ne s'applique pas aux utilisateurs fédérés. Cognito crée un utilisateur fédéré la première fois que quelqu'un se connecte via le fournisseur d'identité, même lorsque le pool d'utilisateurs ne permet pas aux utilisateurs de s'inscrire eux-mêmes. Chaque utilisateur fédéré obtient également le rôle authentifié du pool d'identités, afin qu'il puisse appeler vos API et agents comme tout utilisateur connecté peut le faire.
+
+Les fournisseurs d'identité s'appliquent à l'ensemble du pool d'utilisateurs. Chaque site web qui utilise le pool affiche leurs boutons et accepte leurs utilisateurs.
+
+Le fournisseur d'identité décide donc qui peut se connecter. Configurez-le de sorte qu'il ne connecte que les personnes qui ont besoin de votre site web :
+
+- Microsoft Entra ID : dans les propriétés de l'application d'entreprise de l'application, définissez « Assignment required? » sur Yes, et assignez uniquement les utilisateurs ou groupes qui ont besoin d'accès. Avec la valeur par défaut, No, chaque utilisateur de votre locataire peut se connecter.
+- Okta : assignez l'application uniquement aux groupes qui ont besoin d'accès.
+- Auth0 : désactivez les inscriptions sur chaque connexion que l'application utilise, et activez pour l'application uniquement les connexions dont les utilisateurs ont besoin d'accès. Sinon, toute personne qui s'inscrit via une connexion activée, par exemple une connexion sociale, peut se connecter.
+
+## Utilisation
+
+### Ajouter la fédération OpenID Connect
+
+Exécutez le générateur <Link path="guides/react-website-auth">`ts#website#auth`</Link> avec `--federation=oidc`. Vous pouvez l'exécuter sur un site web qui n'a pas encore d'authentification, ou sur un site web qui en a déjà une. Les deux donnent le même résultat.
+
+<RunGenerator generator="ts#website#auth" requiredParameters={{ federation: 'oidc' }} />
+
+Le générateur n'ajoute aucun fournisseur d'identité. La liste commence vide, donc la connexion fonctionne comme avant jusqu'à ce que vous ajoutiez une entrée. Vous ajoutez les fournisseurs d'identité à votre code d'infrastructure, donc l'ajout d'un deuxième n'a pas besoin d'une autre exécution du générateur.
+
+Exécuter le générateur à nouveau avec `--federation=oidc` ne modifie aucun fichier. L'exécuter avec `--federation=none`, ou sans `--federation`, conserve la fédération qui est déjà là.
+
+### Ajouter des fournisseurs d'identité
+
+Ajoutez une entrée pour chaque fournisseur d'identité, puis déployez. Le secret client ne va jamais dans votre code. Vous le stockez dans AWS Secrets Manager et donnez son nom, comme décrit dans [Configurer votre fournisseur d'identité](#configurer-votre-fournisseur-didentité).
+
+<Infrastructure>
+  <Fragment slot="cdk">
+Passez les fournisseurs d'identité à `UserIdentity` dans votre pile :
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyWebsite, UserIdentity } from '@my-scope/common-constructs';
+
+const identity = new UserIdentity(this, 'Identity', {
+  oidcIdentityProviders: [
+    {
+      name: 'Okta',
+      issuerUrl: 'https://example.okta.com',
+      clientId: '0oa1example',
+      clientSecretName: 'okta-oidc-client-secret',
+    },
+    {
+      name: 'Entra',
+      issuerUrl: 'https://login.microsoftonline.com/<tenant-id>/v2.0',
+      clientId: '11111111-2222-3333-4444-555555555555',
+      clientSecretName: 'entra-oidc-client-secret',
+      identifiers: ['example.com'],
+    },
+  ],
+});
+new MyWebsite(this, 'MyWebsite');
+```
+
+`OidcIdentityProviderProps`, le type de chaque entrée, est exporté depuis votre package de constructs partagés, vous pouvez donc construire la liste ailleurs et importer le type.
+  </Fragment>
+  <Fragment slot="terraform">
+Passez les fournisseurs d'identité au module `user_identity` dans votre module racine, et ajoutez une sortie pour l'URI de redirection :
+
+```hcl title="packages/infra/src/main.tf"
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+
+  oidc_identity_providers = [
+    {
+      name               = "Okta"
+      issuer_url         = "https://example.okta.com"
+      client_id          = "0oa1example"
+      client_secret_name = "okta-oidc-client-secret"
+    },
+  ]
+}
+
+output "idp_redirect_uri" {
+  value = module.user_identity.idp_redirect_uri
+}
+```
+
+Pour utiliser différents fournisseurs d'identité dans chaque environnement, déclarez une variable racine et définissez-la dans le fichier `.tfvars` de chaque environnement. La variable racine a `type = any`, car la variable du module vérifie le type :
+
+```hcl
+# packages/infra/src/variables.tf
+variable "oidc_identity_providers" {
+  type    = any
+  default = []
+}
+
+# packages/infra/src/env/dev.tfvars
+oidc_identity_providers = [
+  { name = "Okta", issuer_url = "https://example.okta.com", client_id = "0oa1example", client_secret_name = "okta-oidc-client-secret" },
+]
+
+# packages/infra/src/main.tf, in module "user_identity"
+oidc_identity_providers = var.oidc_identity_providers
+```
+  </Fragment>
+</Infrastructure>
+
+### Options
+
+Chaque fournisseur d'identité dans la liste a ces propriétés. Les options du générateur sont décrites dans <Link path="guides/react-website-auth">l'authentification de site web</Link>.
+
+| Prop CDK | Attribut Terraform | Requis | Par défaut | Description |
+|---|---|---|---|---|
+| `name` | `name` | Oui | | Affiché sur le bouton de connexion. Cognito préfixe les noms d'utilisateur fédérés avec celui-ci en minuscules (`<name>_<sub>`). 3-32 lettres, chiffres et traits d'union, commençant par une lettre. Pas `COGNITO`. Unique dans la liste, en ignorant la casse. Dans CDK, il doit être une chaîne littérale, pas un token. |
+| `issuerUrl` | `issuer_url` | Oui | | L'émetteur exactement tel qu'il apparaît dans la revendication `iss` des jetons du fournisseur d'identité. Doit utiliser `https://`. |
+| `clientId` | `client_id` | Oui | | ID client de l'application enregistrée chez le fournisseur d'identité. |
+| `clientSecretName` | `client_secret_name` | Oui | | Nom du secret Secrets Manager qui contient le secret client sous forme de chaîne simple. Un nom, pas un ARN. |
+| `scopes` | `scopes` | Non | `openid`, `email`, `profile` | Portées OAuth à demander. Doit inclure `openid`. |
+| `attributeMapping` | `attribute_mapping` | Non | `email`, `given_name` et `family_name`, chacun vers la revendication avec le même nom | Attribut du pool d'utilisateurs vers revendication du fournisseur d'identité. Voir [Mappage des attributs](#mappage-des-attributs). |
+| `identifiers` | `identifiers` | Non | Aucun | Identifiants, tels que les domaines de messagerie, que Cognito peut utiliser pour envoyer un utilisateur vers ce fournisseur d'identité. |
+
+### Validation
+
+Le code fourni vérifie chaque entrée avant que quoi que ce soit ne soit déployé :
+
+<Infrastructure>
+  <Fragment slot="cdk">
+`UserIdentity` lève une exception lorsque vous le créez avec une entrée qui enfreint une règle, donc `cdk synth` échoue. La construction du projet d'infrastructure exécute `cdk synth`. Le message nomme l'entrée, par exemple `UserIdentity: oidcIdentityProviders[1] (Entra): Microsoft Entra ID issuers have no trailing slash. Use https://login.microsoftonline.com/<tenant-id>/v2.0`.
+
+Une valeur qui est un token, par exemple une valeur lue depuis AWS Systems Manager Parameter Store, n'est pas vérifiée. Une valeur incorrecte fait alors échouer le déploiement au lieu de la synthèse. `name` ne doit pas être un token.
+  </Fragment>
+  <Fragment slot="terraform">
+La variable `oidc_identity_providers` du module a un bloc `validation` pour chaque règle. Ses messages d'erreur ne nomment pas l'entrée qui enfreint la règle.
+
+Lorsque vous écrivez la liste comme un littéral dans le bloc du module `user_identity`, `terraform validate` la vérifie. La cible `validate` du projet exécute `terraform validate`. Lorsque la liste provient d'une variable racine, comme dans le modèle `.tfvars` ci-dessus, `terraform plan` la vérifie à la place.
+  </Fragment>
+</Infrastructure>
+
+Les règles :
+
+- `name` : 3-32 lettres, chiffres et traits d'union, commençant par une lettre. Pas `COGNITO` dans n'importe quelle casse, car Cognito le réserve pour la connexion avec le pool d'utilisateurs lui-même.
+- Les noms sont uniques dans la liste, en ignorant la casse, car Cognito préfixe les noms d'utilisateur fédérés avec le nom en minuscules. Par exemple, `Okta` et `OKTA` ne peuvent pas tous deux être dans la liste. `test-idp` et `testidp` le peuvent, car leurs préfixes diffèrent.
+- L'émetteur utilise `https://` et n'a pas de requête, fragment, nom d'utilisateur, mot de passe ou espace. Dans CDK, il doit également être analysable comme une URL. Dans Terraform, une expression régulière le vérifie, qui accepte quelques URL mal formées que CDK refuse.
+- Microsoft Entra ID : les émetteurs multi-locataires (`common`, `organizations`, `consumers` et `9188040d-6c67-4c5b-b112-36a304b66dad`) sont refusés, et l'émetteur ne doit pas se terminer par une barre oblique.
+- Auth0 : un émetteur sur `*.auth0.com` doit se terminer par une barre oblique.
+- L'ID client n'est pas vide.
+- Le nom du secret est de 1-512 lettres, chiffres et `/ _ + = . @ -`. Ce sont les règles de nommage de Secrets Manager, donc un ARN est refusé.
+- Les portées incluent `openid`. Dans CDK, chaque portée doit également être non vide et ne pas avoir d'espace.
+- Les clés et valeurs du mappage d'attributs suivent les règles dans [Mappage des attributs](#mappage-des-attributs).
+- Au plus 50 identifiants. Chacun est de 1-40 lettres, chiffres, espaces ou `_ + = . @ -`.
+
+## Sortie du générateur
+
+Avec `--federation=oidc`, le générateur ajoute ces fichiers et modifications pour votre fournisseur `iac` sélectionné :
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src/core
+        - oidc-identity-providers.ts Le construct `OidcIdentityProviders`, ses props et la validation
+        - index.ts Exporte maintenant `oidc-identity-providers.ts`
+        - user-identity.ts A maintenant la prop `oidcIdentityProviders` et crée les fournisseurs d'identité
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src/core/user-identity
+        - oidc-identity-providers.tf La variable `oidc_identity_providers` avec sa validation, et la sortie `idp_redirect_uri`
+        - main.tf Passe maintenant la variable au module identity
+        - identity
+          - oidc-identity-providers.tf Les fournisseurs d'identité, la source de données qui lit chaque secret client, et la sortie `idp_redirect_uri`
+          - identity.tf Liste maintenant les fournisseurs d'identité sur le client web
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+Les modifications permettent au client web du pool d'utilisateurs, le client d'application Cognito par lequel votre site web se connecte, d'accepter les fournisseurs d'identité :
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```diff lang="ts" title="packages/common/constructs/src/core/user-identity.ts"
++import {
++  OidcIdentityProviders,
++  type OidcIdentityProviderProps,
++} from './oidc-identity-providers.js';
+   readonly mfaSecondFactor?: MfaSecondFactor;
++
++  /**
++   * OpenID Connect identity providers users can sign in through, next to the user pool's own sign-in.
++   * Applies to every website that uses this user pool.
++   * ...
++   */
++  readonly oidcIdentityProviders?: OidcIdentityProviderProps[];
+ }
+       mfaSecondFactor = { sms: true, otp: true },
++      oidcIdentityProviders = [],
+     }: UserIdentityProps = {},
+     this.userPoolDomain = this.createUserPoolDomain(this.userPool);
++    new OidcIdentityProviders(this, 'OidcIdentityProviders', {
++      userPool: this.userPool,
++      userPoolDomain: this.userPoolDomain,
++      providers: oidcIdentityProviders,
++    });
+     this.userPoolClient = this.createUserPoolClient(this.userPool);
+```
+
+`UserIdentity` crée les fournisseurs d'identité avant le client web, donc le client web les liste, suivis de `COGNITO`.
+  </Fragment>
+  <Fragment slot="terraform">
+```diff lang="hcl" title="packages/common/terraform/src/core/user-identity/main.tf"
+   mfa_second_factor_sms = var.mfa_second_factor_sms
++  oidc_identity_providers = var.oidc_identity_providers
+```
+
+```diff lang="hcl" title="packages/common/terraform/src/core/user-identity/identity/identity.tf"
+-  supported_identity_providers = ["COGNITO"]
++  supported_identity_providers = concat(["COGNITO"], [for p in aws_cognito_identity_provider.oidc : p.provider_name])
+```
+
+Chaque fournisseur d'identité est une instance `for_each` indexée par son nom, par exemple `aws_cognito_identity_provider.oidc["Okta"]`. Renommer une entrée remplace donc ce fournisseur d'identité.
+  </Fragment>
+</Infrastructure>
+
+Le générateur n'écrase pas vos modifications des nouveaux fichiers. Si vous avez modifié `user-identity.ts`, ou `main.tf` ou `identity.tf`, de sorte que le générateur ne le reconnaît plus, le générateur laisse ces fichiers inchangés. Il ajoute toujours les nouveaux fichiers et affiche les lignes à ajouter manuellement.
+
+## Configurer votre fournisseur d'identité
+
+Le déploiement qui ajoute un fournisseur d'identité lit son secret client depuis Secrets Manager. Si le secret n'existe pas, le déploiement échoue.
+
+<Infrastructure>
+  <Fragment slot="cdk">
+CloudFormation lit le secret avec le rôle d'exécution de la pile, par défaut `cdk-hnb659fds-cfn-exec-role-<account>-<region>`. Ce rôle a besoin de `secretsmanager:GetSecretValue` sur le secret, plus `kms:Decrypt` sur la clé si le secret est chiffré avec une clé AWS KMS gérée par le client.
+  </Fragment>
+  <Fragment slot="terraform">
+L'identité qui exécute `terraform apply` lit le secret. Elle a besoin de `secretsmanager:GetSecretValue` sur le secret, plus `kms:Decrypt` sur la clé si le secret est chiffré avec une clé AWS KMS gérée par le client.
+  </Fragment>
+</Infrastructure>
+
+Suivez ces étapes dans cet ordre. Le générateur les affiche également lorsqu'il se termine.
+
+1. Exécutez `ts#website#auth` avec `--federation=oidc`, et déployez une fois.
+2. Trouvez l'URI de redirection de votre pool d'utilisateurs. Tous les fournisseurs d'identité du pool utilisent le même.
+
+<Infrastructure>
+  <Fragment slot="cdk">
+La pile qui contient `UserIdentity` a une sortie dont la clé commence par `<id>OidcIdentityProvidersIdpRedirectUri`, où `<id>` est l'ID de construct que vous avez donné à `UserIdentity`, par exemple `IdentityOidcIdentityProvidersIdpRedirectUri`. Vous pouvez également le calculer avant de déployer, à partir du `cognitoDomain` que vous avez choisi pour `ts#website#auth`, votre ID de compte AWS et votre région :
+
+```
+https://<cognitoDomain>-<account>.auth.<region>.amazoncognito.com/oauth2/idpresponse
+```
+  </Fragment>
+  <Fragment slot="terraform">
+Le domaine Cognito a un suffixe aléatoire, donc l'URI de redirection n'est connu qu'après le déploiement. Le module `user_identity` le sort comme `idp_redirect_uri`. Pour le voir, ajoutez une sortie à votre module racine, par exemple `packages/infra/src/main.tf` :
+
+```hcl
+output "idp_redirect_uri" { value = module.user_identity.idp_redirect_uri }
+```
+  </Fragment>
+</Infrastructure>
+
+3. Enregistrez une application chez le fournisseur d'identité avec cet URI de redirection, et notez son ID client et son secret client. Enregistrez uniquement cet URI `/oauth2/idpresponse` chez le fournisseur d'identité. Les URL de votre propre site web sont enregistrées avec Cognito, pas avec le fournisseur d'identité.
+4. Stockez le secret client dans Secrets Manager. Passez-le dans un fichier, pas comme argument de ligne de commande. Un argument reste dans votre historique de shell, et d'autres utilisateurs du même ordinateur peuvent le voir dans la liste des processus pendant l'exécution de la commande :
+
+   ```bash
+   (
+     umask 077
+     d=$(mktemp -d) || exit
+     trap 'rm -rf "$d"' EXIT
+     trap 'exit 1' HUP INT TERM
+     unset CLIENT_SECRET
+     IFS= read -rs CLIENT_SECRET || exit 1
+     printf '%s' "$CLIENT_SECRET" > "$d/secret" || exit 1
+     unset CLIENT_SECRET
+     aws secretsmanager create-secret --name okta-oidc-client-secret --secret-string "file://$d/secret" --region <region>
+   )
+   ```
+
+   Les commandes s'exécutent dans un sous-shell, entre les parenthèses. `read` attend que vous colliez le secret client et appuyiez sur Entrée, et ne l'affiche pas. Les deux commandes `unset` gardent le secret hors de l'environnement de la commande `aws`, même si vous avez exporté `CLIENT_SECRET` plus tôt. `IFS=` et `-r` gardent le secret exactement tel que vous le collez, y compris les espaces aux deux extrémités et les barres obliques inverses. `mktemp -d` crée un nouveau répertoire que vous seul pouvez ouvrir (mode 700), et `printf` écrit le secret dedans sans retour à la ligne à la fin. L'AWS CLI lit la valeur de `--secret-string` depuis le fichier nommé après `file://` et la passe inchangée, donc un retour à la ligne à la fin du fichier ferait partie du secret. Lorsque le sous-shell se termine, les commandes `trap` suppriment le répertoire. Elles le font également si la commande `aws` échoue ou si vous appuyez sur Ctrl-C. Les commandes fonctionnent dans bash et zsh, les shells par défaut sur Linux et macOS. Pour Windows, voir [Mitigate the risks of using the AWS CLI to store your AWS Secrets Manager secrets](https://docs.aws.amazon.com/secretsmanager/latest/userguide/security_cli-exposure-risks.html).
+
+   Définissez `--region` sur la région de votre pile. Le secret doit exister dans cette région avant le déploiement qui ajoute le fournisseur d'identité. Stockez le secret sous forme de chaîne simple, pas JSON, car Cognito reçoit la valeur entière du secret comme secret client. Dans la console Secrets Manager, choisissez Plaintext, pas Key/value.
+
+5. Ajoutez le fournisseur d'identité à la liste, avec le nom du secret comme `clientSecretName` (`client_secret_name` dans Terraform), comme le montre [Ajouter des fournisseurs d'identité](#ajouter-des-fournisseurs-didentité). Puis déployez.
+
+## Mappage des attributs
+
+Le pool d'utilisateurs généré nécessite les attributs `email`, `given_name` et `family_name`. Cognito les remplit à partir des revendications du fournisseur d'identité à chaque connexion. Si le fournisseur d'identité n'envoie pas l'un d'eux, la première connexion de l'utilisateur échoue. `UserIdentity` et la variable Terraform refusent donc un mappage d'attributs qui omet l'un des trois.
+
+`attributeMapping` (`attribute_mapping` dans Terraform) mappe les attributs du pool d'utilisateurs aux revendications. Chaque clé est un attribut du pool d'utilisateurs, et chaque valeur est le nom de la revendication du fournisseur d'identité, de 1-128 caractères. Un mappage que vous donnez remplace le mappage par défaut. Le mappage par défaut mappe chaque attribut requis à la revendication avec le même nom :
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts
+attributeMapping: { email: 'email', given_name: 'given_name', family_name: 'family_name' },
+```
+  </Fragment>
+  <Fragment slot="terraform">
+```hcl
+attribute_mapping = { email = "email", given_name = "given_name", family_name = "family_name" }
+```
+  </Fragment>
+</Infrastructure>
+
+- Une clé peut être n'importe quel [attribut standard](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-attributes.html#cognito-user-pools-standard-attributes), tel que `name` ou `phone_number`, `phone_number_verified`, ou un attribut personnalisé tel que `custom:department` (jusqu'à 20 lettres, chiffres ou traits de soulignement après `custom:`). Les clés utilisent les noms d'attributs Cognito dans CDK et Terraform. `username` est refusé.
+- Cognito traite une adresse e-mail mappée comme non vérifiée. Mappez `email_verified` uniquement depuis un fournisseur d'identité qui vérifie lui-même les adresses e-mail. Sinon, un utilisateur pourrait définir l'adresse de quelqu'un d'autre chez le fournisseur d'identité et la faire marquer comme vérifiée dans votre pool.
+- Si l'adresse e-mail d'un utilisateur change chez le fournisseur d'identité, Cognito écrit la nouvelle adresse dans le pool d'utilisateurs lors de la prochaine connexion de l'utilisateur. `email_verified` reste `false`.
+- Un attribut personnalisé doit déjà exister dans le pool d'utilisateurs, et il doit être mutable.
+
+La ressource du fournisseur d'identité Terraform, dans `identity/oidc-identity-providers.tf`, définit également deux valeurs que Cognito ajoute lorsqu'il retourne le fournisseur d'identité : `username = "sub"` dans `attribute_mapping` et `attributes_url_add_attributes = "false"` dans `provider_details`. Parce que le fichier les définit, un deuxième `terraform plan` après le premier déploiement ne montre aucun changement au fournisseur d'identité. Si un deuxième plan montre toujours un changement dans `provider_details` avec un autre fournisseur d'identité, ajoutez cette clé au fichier avec la valeur que le plan montre que Cognito retourne.
+
+## Notes sur les fournisseurs d'identité
+
+Les paramètres ci-dessous proviennent de la documentation de chaque fournisseur. Okta a été testé sur AWS avec CDK et Terraform. Les paramètres Auth0 et Microsoft Entra ID ont été vérifiés par rapport au document de découverte OpenID publié par chaque fournisseur, mais pas avec une connexion en direct.
+
+### Okta
+
+Testé sur AWS avec CDK et Terraform. Créez une OIDC Web Application dans Okta, avec l'octroi Authorization Code et un secret client. Définissez son URI de redirection de connexion sur l'URI de redirection `/oauth2/idpresponse` de l'étape 2 de [Configurer votre fournisseur d'identité](#configurer-votre-fournisseur-didentité). Il n'a pas besoin d'URI de redirection de déconnexion. L'émetteur est votre domaine Okta, `https://<your-org>.okta.com`, qui est la forme qui a été testée. Un serveur d'autorisation personnalisé, tel que `https://<your-org>.okta.com/oauth2/default`, a également un émetteur, mais cette forme n'a pas été testée. Les portées par défaut, `openid email profile`, retournent `email`, `given_name` et `family_name`, donc le mappage par défaut fonctionne. Chaque utilisateur a besoin d'un e-mail, d'un prénom et d'un nom de famille définis dans Okta. Assignez l'application uniquement aux utilisateurs ou groupes qui ont besoin d'accès.
+
+### Auth0
+
+Vérifié par rapport au document de découverte d'Auth0, non testé avec une connexion en direct. Créez une Regular Web Application dans Auth0. L'émetteur est `https://<your-tenant>.auth0.com/`, y compris la barre oblique finale.
+
+:::caution
+La revendication `iss` dans les jetons Auth0 se termine par une barre oblique, donc un émetteur sans elle fait échouer la connexion. Le code fourni refuse un émetteur sur `*.auth0.com` sans la barre oblique. Il ne peut pas reconnaître un domaine personnalisé Auth0, donc vérifiez la barre oblique vous-même lorsque vous en utilisez un.
+:::
+
+Auth0 retourne `given_name` et `family_name` uniquement lorsque la connexion de l'utilisateur les fournit. Les utilisateurs d'une connexion sans eux ne peuvent pas se connecter jusqu'à ce que vous mappiez d'autres revendications.
+
+### Microsoft Entra ID
+
+Vérifié par rapport au document de découverte de Microsoft, non testé avec une connexion en direct. Enregistrez une application mono-locataire dans Entra ID. L'émetteur est `https://login.microsoftonline.com/<tenant-id>/v2.0`. Le code fourni refuse les émetteurs multi-locataires (`common`, `organizations` et `consumers`), car ils acceptent les utilisateurs de n'importe quel locataire Entra ID. Il refuse également le locataire `9188040d-6c67-4c5b-b112-36a304b66dad`, qui accepte tout compte Microsoft personnel.
+
+L'émetteur ne doit pas se terminer par une barre oblique : utilisez `/v2.0`, pas `/v2.0/`. La revendication `iss` dans les jetons Entra ID n'a pas de barre oblique, donc la connexion échouerait. Le code fourni refuse la forme avec la barre oblique.
+
+Ajoutez `email`, `given_name` et `family_name` comme revendications optionnelles au jeton d'ID de l'application. Entra ID les envoie uniquement si vous le faites. Chaque utilisateur a besoin du champ Mail défini. Sinon, la revendication `email` est vide, et la première connexion de l'utilisateur échoue, car le pool d'utilisateurs nécessite `email`. La revendication `email` d'Entra ID n'est pas vérifiée, donc ne mappez pas `email_verified` depuis Entra ID.
+
+### Pool d'utilisateurs Cognito
+
+Pour tester avec un autre pool d'utilisateurs Cognito comme fournisseur d'identité, utilisez l'émetteur `https://cognito-idp.<region>.amazonaws.com/<user pool id>`. Donnez à son client d'application un secret client, l'octroi de code d'autorisation et les portées `openid email profile`.
+
+## Sécurité
+
+- Identifiez les utilisateurs par la revendication `sub` (l'ID unique de l'utilisateur dans votre pool d'utilisateurs), jamais par `email`. Un utilisateur fédéré est un nouvel utilisateur dans votre pool avec son propre `sub`, même lorsque son e-mail correspond à un utilisateur local. Le code que le plugin génère utilise `sub`.
+- Utilisez un émetteur mono-locataire. Un émetteur multi-locataire permet aux utilisateurs de n'importe quelle organisation de se connecter.
+- Supprimez les URL de rappel `http://localhost` des étapes de production, comme décrit dans <Link path="guides/react-website-auth">l'authentification de site web</Link>. La fédération n'ajoute aucune URL de rappel.
+
+## Ce que la fédération ne fait pas
+
+- L'authentification multifacteur (MFA) requise dans votre pool d'utilisateurs ne s'applique pas aux utilisateurs fédérés. Cognito laisse leur authentification au fournisseur d'identité, donc appliquez l'authentification multifacteur chez le fournisseur d'identité.
+- Se déconnecter de votre site web termine uniquement la session Cognito. Cela ne termine pas la session de l'utilisateur chez un fournisseur d'identité OIDC, donc la prochaine connexion via le bouton peut se terminer sans mot de passe. Sur un ordinateur partagé, les utilisateurs doivent également se déconnecter chez le fournisseur d'identité.
+- Le menu utilisateur affiche le nom d'utilisateur Cognito. Pour un utilisateur fédéré, c'est le nom du fournisseur d'identité, un trait de soulignement et le `sub` de l'utilisateur chez le fournisseur d'identité, en minuscules, par exemple `okta_00u1abcd`.
+- Supprimer ou désactiver un utilisateur chez le fournisseur d'identité arrête uniquement sa prochaine connexion via celui-ci. Cognito renouvelle les jetons avec son propre jeton de rafraîchissement et ne demande pas au fournisseur d'identité, et le site web renouvelle les jetons sans que l'utilisateur ne le remarque. L'utilisateur peut donc conserver l'accès jusqu'à l'expiration du jeton de rafraîchissement, jusqu'à 30 jours après sa dernière connexion. Pour empêcher l'utilisateur d'obtenir de nouveaux jetons, déconnectez-le également de chaque session et désactivez-le dans le pool d'utilisateurs. Son nom d'utilisateur est `<identity provider name in lowercase>_<sub>` :
+
+  ```bash
+  aws cognito-idp admin-user-global-sign-out --user-pool-id <user pool id> --username okta_<sub>
+  aws cognito-idp admin-disable-user --user-pool-id <user pool id> --username okta_<sub>
+  ```
+
+  Cela a été testé sur AWS. Après `admin-user-global-sign-out` et `admin-disable-user`, le fournisseur d'identité connecte toujours l'utilisateur, mais Cognito les refuse.
+
+  Ces commandes ne mettent pas fin à l'accès que l'utilisateur a déjà. [`admin-user-global-sign-out`](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_AdminUserGlobalSignOut.html) révoque les jetons de rafraîchissement de l'utilisateur, donc le site web ne peut pas obtenir de nouveaux jetons pour eux, et `admin-disable-user` arrête leur prochaine connexion. Les jetons d'ID et d'accès que Cognito a déjà émis restent valides jusqu'à leur expiration, par défaut une heure après leur émission ([validité des jetons d'ID et d'accès](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_CreateUserPoolClient.html#CognitoUserPools-CreateUserPoolClient-request-IdTokenValidity)). Les informations d'identification AWS que le pool d'identités a déjà données au site web restent également valides jusqu'à leur expiration, une heure après leur émission ([flux d'authentification des pools d'identités](https://docs.aws.amazon.com/cognito/latest/developerguide/concepts.html#authentication-flow-enhanced)). Jusqu'à leur expiration, l'utilisateur peut toujours utiliser le site web et le rôle authentifié du pool d'identités.
+
+  Une validité de jeton de rafraîchissement plus courte sur le client web (`refreshTokenValidity` dans CDK, `refresh_token_validity` dans Terraform) raccourcit le temps pendant lequel un utilisateur supprimé conserve l'accès si vous n'exécutez pas ces commandes. Une validité de jeton d'ID et d'accès plus courte (`idTokenValidity` et `accessTokenValidity` dans CDK, `id_token_validity` et `access_token_validity` dans Terraform) raccourcit le temps pendant lequel les jetons déjà émis restent valides après l'exécution des commandes, mais un certain temps reste toujours. Aucune des deux n'a été testée sur AWS.
+
+## Le secret client
+
+Cognito conserve le secret client dans les paramètres du fournisseur d'identité. Toute personne autorisée à appeler `cognito-idp:DescribeIdentityProvider` sur votre pool d'utilisateurs peut le lire. C'est ainsi que Cognito fonctionne, quel que soit le fournisseur IaC que vous utilisez.
+
+<Infrastructure>
+  <Fragment slot="cdk">
+Le construct passe le secret à CloudFormation comme une [référence dynamique](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/dynamic-references-secretsmanager.html), `{{resolve:secretsmanager:<clientSecretName>:SecretString:::}}`. Le modèle synthétisé contient uniquement cette référence. CloudFormation lit le secret lorsqu'il crée ou met à jour le fournisseur d'identité. Si vous faites pivoter le secret, Cognito obtient la nouvelle valeur uniquement lorsque la ressource du fournisseur d'identité change lors d'un déploiement ultérieur.
+
+CloudFormation résout la référence à l'intérieur des paramètres du fournisseur d'identité (`ProviderDetails`), donc la connexion fédérée fonctionne avec le secret stocké, et le modèle déployé ne contient toujours que la référence. Après une rotation, un déploiement sans autre changement laisse l'ancien secret dans Cognito. Les deux ont été vérifiés sur AWS.
+  </Fragment>
+  <Fragment slot="terraform">
+Le module lit le secret avec une source de données `data "aws_secretsmanager_secret_version"`, donc `terraform plan` l'affiche comme `(sensitive value)`. L'état Terraform conserve toujours le secret en texte brut, une fois pour la source de données et une fois pour le fournisseur d'identité. Toute personne qui peut lire l'objet d'état dans votre bucket d'état peut lire le secret. Limitez l'accès en lecture au bucket d'état en conséquence.
+
+Un fichier de plan enregistré, par exemple depuis `terraform plan -out`, contient également le secret en texte brut. Si votre bucket d'état a la gestion des versions activée, les anciennes versions de l'état conservent le secret après `terraform destroy`. Supprimez également ces versions lorsque vous retirez la pile. Après un test, faites pivoter le secret client chez le fournisseur d'identité.
+  </Fragment>
+</Infrastructure>
+
+Pour envoyer un secret pivoté à Cognito :
+
+<Infrastructure>
+  <Fragment slot="cdk">
+Modifiez la ressource du fournisseur d'identité dans le déploiement qui suit la rotation. Une façon est de stocker le secret pivoté sous un nouveau nom et de définir `clientSecretName` sur ce nom. La référence dans le modèle change alors, donc CloudFormation met à jour le fournisseur d'identité et lit le nouveau secret. Supprimez l'ancien secret ensuite. Cela suit la documentation CloudFormation pour les références dynamiques et n'a pas été testé sur AWS.
+  </Fragment>
+  <Fragment slot="terraform">
+Exécutez `terraform plan` et `terraform apply` après la rotation. La source de données lit la version actuelle du secret à chaque plan, donc le plan montre une mise à jour sur place du fournisseur d'identité, et `apply` envoie le nouveau secret à Cognito. Dans la source du fournisseur `hashicorp/aws`, un changement à `provider_details` met à jour le fournisseur d'identité sur place et ne le remplace pas. Cela n'a pas été testé sur AWS.
+  </Fragment>
+</Infrastructure>
+
+## Autres clients d'application
+
+Un client d'application est la configuration Cognito par laquelle une application se connecte. Le générateur ajoute les fournisseurs d'identité au client d'application du site web, le client web, uniquement. Un autre client d'application dans le même pool d'utilisateurs accepte les utilisateurs fédérés uniquement s'il liste également les fournisseurs d'identité. Par exemple, le client d'application que vous créez pour un <Link path="guides/ts-dcr-proxy">proxy DCR</Link> (qui permet aux clients MCP, les outils d'IA qui utilisent le Model Context Protocol, de se connecter via Cognito) en a besoin. Sinon, les utilisateurs fédérés ne peuvent pas se connecter à votre serveur MCP.
+
+<Infrastructure>
+  <Fragment slot="cdk">
+Un client d'application que vous créez avec `identity.userPool.addClient(...)` après `UserIdentity`, sans `supportedIdentityProviders`, liste tous les fournisseurs d'identité du pool et `COGNITO`. L'exemple du proxy DCR fait cela. Si votre client d'application définit `supportedIdentityProviders`, ajoutez-y les fournisseurs d'identité du pool :
+
+```ts
+import { UserPoolClientIdentityProvider } from 'aws-cdk-lib/aws-cognito';
+
+supportedIdentityProviders: [
+  UserPoolClientIdentityProvider.COGNITO,
+  ...identity.userPool.identityProviders.map((p) =>
+    UserPoolClientIdentityProvider.custom(p.providerName),
+  ),
+],
+```
+  </Fragment>
+  <Fragment slot="terraform">
+Ajoutez le `name` de chaque fournisseur d'identité aux `supported_identity_providers` du client d'application, et faites dépendre le client d'application de `module.user_identity`, afin que les fournisseurs d'identité existent en premier.
+  </Fragment>
+</Infrastructure>
+
+## Jetons pour le chat de l'agent
+
+La cible `<agent>-chat` d'un <Link path="guides/ts-agent">agent TypeScript</Link> avec authentification Cognito lit un jeton d'accès Cognito depuis la variable d'environnement `AGENT_ACCESS_TOKEN`. Un utilisateur fédéré n'a pas de mot de passe Cognito, donc `admin-initiate-auth` ne fonctionne pas pour eux. Au lieu de cela, connectez-vous à votre site web, ouvrez les outils de développement du navigateur, et copiez `access_token` depuis l'entrée `oidc.user:...` dans le stockage de session.

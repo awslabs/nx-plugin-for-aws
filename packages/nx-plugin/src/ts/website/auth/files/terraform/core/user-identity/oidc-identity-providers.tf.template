@@ -1,0 +1,151 @@
+# OpenID Connect identity providers that users can sign in through, next to
+# the user pool's own sign-in. List them where you call this module, for example:
+#
+#   module "user_identity" {
+#     source = "../../common/terraform/src/core/user-identity"
+#
+#     oidc_identity_providers = [
+#       {
+#         name               = "Okta"
+#         issuer_url         = "https://example.okta.com"
+#         client_id          = "0oa1example"
+#         client_secret_name = "okta-oidc-client-secret"
+#       },
+#     ]
+#   }
+#
+# See https://awslabs.github.io/nx-plugin-for-aws/en/guides/react-website-auth-idp/
+
+variable "oidc_identity_providers" {
+  description = "OpenID Connect identity providers that users can sign in through, next to the user pool's own sign-in. Applies to every website that uses this user pool. client_secret_name is the name of an AWS Secrets Manager secret that holds the client secret as a plain string"
+  type = list(object({
+    name               = string
+    issuer_url         = string
+    client_id          = string
+    client_secret_name = string
+    scopes             = optional(list(string), ["openid", "email", "profile"])
+    attribute_mapping = optional(map(string), {
+      email       = "email"
+      given_name  = "given_name"
+      family_name = "family_name"
+    })
+    identifiers = optional(list(string), [])
+  }))
+  default = []
+
+  validation {
+    condition = alltrue([
+      for p in var.oidc_identity_providers :
+      can(regex("^[A-Za-z][A-Za-z0-9-]{2,31}$", p.name)) && upper(p.name) != "COGNITO"
+    ])
+    error_message = "Each name must be 3-32 letters, digits and hyphens, start with a letter, and not be COGNITO, which Cognito reserves for sign-in with the user pool itself."
+  }
+
+  validation {
+    condition     = length(distinct([for p in var.oidc_identity_providers : lower(p.name)])) == length(var.oidc_identity_providers)
+    error_message = "Identity provider names must be unique, ignoring case. Cognito prefixes federated usernames with the lower-case name."
+  }
+
+  validation {
+    condition = alltrue([
+      for p in var.oidc_identity_providers :
+      can(regex("^https://[^/?#@\\s]+(/[^?#\\s]*)?$", p.issuer_url))
+    ])
+    error_message = "Each issuer_url must use https:// and have no query, fragment, user name, password or whitespace."
+  }
+
+  validation {
+    condition = alltrue([
+      for p in var.oidc_identity_providers :
+      !can(regex("^https://login\\.microsoftonline\\.com/(common|organizations|consumers|9188040d-6c67-4c5b-b112-36a304b66dad)(/|$)", lower(p.issuer_url)))
+    ])
+    error_message = "Microsoft Entra ID multi-tenant issuers (common, organizations, consumers, 9188040d-6c67-4c5b-b112-36a304b66dad) are not supported. Use your tenant's issuer, https://login.microsoftonline.com/<tenant-id>/v2.0."
+  }
+
+  validation {
+    condition = alltrue([
+      for p in var.oidc_identity_providers :
+      !(startswith(lower(p.issuer_url), "https://login.microsoftonline.com/") && endswith(p.issuer_url, "/"))
+    ])
+    error_message = "Microsoft Entra ID issuers have no trailing slash, for example https://login.microsoftonline.com/<tenant-id>/v2.0."
+  }
+
+  validation {
+    condition = alltrue([
+      for p in var.oidc_identity_providers :
+      !can(regex("^https://[^/]+\\.auth0\\.com(/|$)", lower(p.issuer_url))) || endswith(p.issuer_url, "/")
+    ])
+    error_message = "Auth0 issuers end with a slash, for example https://example.us.auth0.com/."
+  }
+
+  validation {
+    condition = alltrue([
+      for p in var.oidc_identity_providers : length(trimspace(p.client_id)) > 0
+    ])
+    error_message = "Each client_id must not be empty."
+  }
+
+  validation {
+    condition = alltrue([
+      for p in var.oidc_identity_providers :
+      can(regex("^[A-Za-z0-9/_+=.@-]{1,512}$", p.client_secret_name))
+    ])
+    error_message = "Each client_secret_name must be the name of a secret: 1-512 letters, digits and / _ + = . @ -."
+  }
+
+  validation {
+    condition = alltrue([
+      for p in var.oidc_identity_providers : contains(p.scopes, "openid")
+    ])
+    error_message = "Each scopes list must include openid."
+  }
+
+  validation {
+    condition = alltrue([
+      for p in var.oidc_identity_providers : length(p.identifiers) <= 50
+    ])
+    error_message = "Each identifiers list must have at most 50 entries."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for p in var.oidc_identity_providers : [
+        for i in p.identifiers : can(regex("^[\\w\\s+=.@-]{1,40}$", i))
+      ]
+    ]))
+    error_message = "Each identifier must be 1-40 letters, digits, spaces or _ + = . @ -."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for p in var.oidc_identity_providers : [
+        for k in keys(p.attribute_mapping) :
+        can(regex("^(address|birthdate|email|email_verified|family_name|gender|given_name|locale|middle_name|name|nickname|phone_number|picture|preferred_username|profile|zoneinfo|updated_at|website|phone_number_verified|custom:\\w{1,20})$", k))
+      ]
+    ]))
+    error_message = "Each attribute_mapping key must be a user pool attribute: a standard attribute such as given_name, phone_number_verified or custom:<name>. username is mapped to sub for you."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for p in var.oidc_identity_providers : [
+        for v in values(p.attribute_mapping) : length(v) >= 1 && length(v) <= 128
+      ]
+    ]))
+    error_message = "Each attribute_mapping value must be a claim name of 1-128 characters."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for p in var.oidc_identity_providers : [
+        for a in ["email", "given_name", "family_name"] : contains(keys(p.attribute_mapping), a)
+      ]
+    ]))
+    error_message = "Each attribute_mapping must map email, given_name and family_name, which the user pool requires."
+  }
+}
+
+output "idp_redirect_uri" {
+  description = "Redirect URI to register at each identity provider"
+  value       = module.identity.idp_redirect_uri
+}

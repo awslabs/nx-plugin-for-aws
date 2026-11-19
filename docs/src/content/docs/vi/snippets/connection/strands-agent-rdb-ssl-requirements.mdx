@@ -1,35 +1,10 @@
 ---
 title: Yêu cầu SSL khi Kết nối không qua RDS Proxy
 ---
-import Infrastructure from '@components/infrastructure.astro';
 
-Trình tạo kết nối cập nhật Dockerfile để cài đặt gói CA của Amazon RDS tại `/usr/local/share/ca-certificates/rds-bundle.crt`. Đặt `NODE_EXTRA_CA_CERTS` thành đường dẫn đó để Node.js tin tưởng chứng chỉ khi kết nối không qua RDS Proxy:
+Khi agent kết nối đến cụm Aurora mà không qua RDS Proxy, Node.js phải tin tưởng cơ quan cấp chứng chỉ (CA) của Amazon RDS. Node.js không đọc kho tin cậy của hệ điều hành. Nó chỉ tải các chứng chỉ CA bổ sung từ tệp mà biến môi trường `NODE_EXTRA_CA_CERTS` trỏ đến.
 
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-new MyAgent(this, 'MyAgent', {
-  ...
-  environmentVariables: {
-    NODE_EXTRA_CA_CERTS: '/usr/local/share/ca-certificates/rds-bundle.crt',
-  },
-});
-```
-
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_agent" {
-  ...
-  env = {
-    NODE_EXTRA_CA_CERTS = "/usr/local/share/ca-certificates/rds-bundle.crt"
-  }
-}
-```
-
-</Fragment>
-</Infrastructure>
+- Khi `infra` của agent là `agentcore-ecr`, trình tạo kết nối cập nhật Dockerfile. Nó tải xuống gói CA của Amazon RDS vào `/usr/local/share/ca-certificates/rds-bundle.crt` và đặt `NODE_EXTRA_CA_CERTS` thành đường dẫn đó, vì vậy không cần cấu hình gì thêm. Đối với Dockerfile được tạo bởi phiên bản plugin cũ hơn, `nx migrate` sẽ thêm dòng `NODE_EXTRA_CA_CERTS`.
+- Khi `infra` của agent là `agentcore` (mặc định), agent được triển khai dưới dạng gói mã không bao gồm gói CA của RDS. Giữ RDS Proxy được bật (mặc định), hoặc sử dụng `agentcore-ecr`.
 
 Để biết thêm chi tiết, xem [tài liệu Amazon RDS SSL/TLS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html). Khi sử dụng RDS Proxy, bạn không cần cấu hình `NODE_EXTRA_CA_CERTS`.

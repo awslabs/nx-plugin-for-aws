@@ -52,7 +52,7 @@ export const runTerraformSmokeTest = async (
     opts,
   );
 
-  await runGeneratorMatrix(opts);
+  await runGeneratorMatrix(opts, { iac: 'terraform' });
 
   // Since the smoke tests don't run in a git repo, we need to exclude some
   // patterns for the license sync.

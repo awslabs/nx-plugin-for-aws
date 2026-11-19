@@ -8,6 +8,7 @@ import { generateFiles } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import { buildDefaultComponentName } from '../../../packages/nx-plugin/src/utils/greengrass/naming';
 import { runCLI } from '../utils';
+import { renderIdpPlaceholders, SAMPLE_IDP } from '../utils/idp-placeholders';
 
 /**
  * Validates the generated Terraform with a credential-free `terraform test`.
@@ -73,11 +74,15 @@ export const runTerraformPlanTest = async (opts: {
 
   // Wire every generated module together using the terraform-deploy template
   // (the maintained source of truth for module wiring). Plan never runs the
-  // resources, so the TEST_RUN_ID placeholder just needs a static value.
-  const mainTf = readFileSync(
-    join(__dirname, '../files/terraform-deploy/main.tf.template'),
-    'utf-8',
-  ).replace(/<% TEST_RUN_ID %>/g, 'plantest');
+  // resources, so the TEST_RUN_ID and identity provider placeholders just need
+  // static values. The mocked provider returns a generated client secret.
+  const mainTf = renderIdpPlaceholders(
+    readFileSync(
+      join(__dirname, '../files/terraform-deploy/main.tf.template'),
+      'utf-8',
+    ).replace(/<% TEST_RUN_ID %>/g, 'plantest'),
+    SAMPLE_IDP,
+  );
   writeFileSync(join(infraSrc, 'main.tf'), `${mainTf}\n${CUSTOM_DOMAIN_APIS}`);
 
   // Greengrass modules are wired only in the plan fixture.

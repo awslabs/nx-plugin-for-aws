@@ -1,35 +1,10 @@
 ---
 title: Exigences SSL lors de la connexion sans RDS Proxy
 ---
-import Infrastructure from '@components/infrastructure.astro';
 
-Le générateur de connexion met à jour le Dockerfile pour installer le bundle CA Amazon RDS à l'emplacement `/usr/local/share/ca-certificates/rds-bundle.crt`. Définissez `NODE_EXTRA_CA_CERTS` sur ce chemin afin que Node.js fasse confiance au certificat lors de la connexion sans RDS Proxy :
+Lorsque l'agent se connecte au cluster Aurora sans RDS Proxy, Node.js doit faire confiance à l'autorité de certification (CA) Amazon RDS. Node.js ne lit pas le magasin de confiance du système d'exploitation. Il charge des certificats CA supplémentaires uniquement à partir du fichier vers lequel pointe la variable d'environnement `NODE_EXTRA_CA_CERTS`.
 
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-new MyAgent(this, 'MyAgent', {
-  ...
-  environmentVariables: {
-    NODE_EXTRA_CA_CERTS: '/usr/local/share/ca-certificates/rds-bundle.crt',
-  },
-});
-```
-
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_agent" {
-  ...
-  env = {
-    NODE_EXTRA_CA_CERTS = "/usr/local/share/ca-certificates/rds-bundle.crt"
-  }
-}
-```
-
-</Fragment>
-</Infrastructure>
+- Lorsque l'`infra` de l'agent est `agentcore-ecr`, le générateur de connexion met à jour le Dockerfile. Il télécharge le bundle CA Amazon RDS vers `/usr/local/share/ca-certificates/rds-bundle.crt` et définit `NODE_EXTRA_CA_CERTS` sur ce chemin, il n'y a donc rien à configurer. Pour un Dockerfile généré par une version antérieure du plugin, `nx migrate` ajoute la ligne `NODE_EXTRA_CA_CERTS`.
+- Lorsque l'`infra` de l'agent est `agentcore` (la valeur par défaut), l'agent est déployé en tant que package de code qui n'inclut pas le bundle CA RDS. Gardez RDS Proxy activé (la valeur par défaut), ou utilisez `agentcore-ecr`.
 
 Pour plus de détails, consultez la [documentation Amazon RDS SSL/TLS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html). Lors de l'utilisation de RDS Proxy, vous n'avez pas besoin de configurer `NODE_EXTRA_CA_CERTS`.

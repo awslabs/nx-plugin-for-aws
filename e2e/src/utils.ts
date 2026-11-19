@@ -261,9 +261,8 @@ function logError(message: string, body?: string) {
 export { buildCreateNxWorkspaceCommand, buildPackageManagerShortCommand };
 
 /**
- * Pin the `@aws` scope to the local verdaccio in `targetDir`, so a `create
- * @aws/nx-workspace` run from there resolves the version this e2e run published
- * rather than falling through to the public registry's `latest` tag.
+ * Pin the `@aws` scope in `targetDir` to this run's registry. Public-package
+ * runs use npmjs; other runs use the local verdaccio.
  *
  * A cwd-local `.npmrc` rather than the user-level one written by `global-setup`:
  * pnpm 11's `dlx` appears to ignore the user-level `@aws:registry` entry in some
@@ -277,15 +276,21 @@ export const pinAwsScopeToLocalRegistry = (
   targetDir: string,
   extra: string[] = [],
 ) => {
-  const localRegistry = process.env.NX_E2E_LOCAL_REGISTRY;
-  if (!localRegistry) {
+  const registry = process.env.NX_E2E_PUBLIC_VERSION
+    ? 'https://registry.npmjs.org/'
+    : process.env.NX_E2E_LOCAL_REGISTRY;
+  if (!registry) {
     return;
   }
   writeFileSync(
     join(targetDir, '.npmrc'),
     [
-      `@aws:registry=${localRegistry}`,
-      `//${localRegistry.replace(/^https?:\/\//, '').replace(/\/$/, '')}/:_authToken=secretVerdaccioToken`,
+      `@aws:registry=${registry}`,
+      ...(process.env.NX_E2E_PUBLIC_VERSION
+        ? []
+        : [
+            `//${registry.replace(/^https?:\/\//, '').replace(/\/$/, '')}/:_authToken=secretVerdaccioToken`,
+          ]),
       ...extra,
       '',
     ].join('\n'),
@@ -341,7 +346,7 @@ export const createTestWorkspace = async (
   name: string,
   iac?: 'cdk' | 'terraform',
   module?: 'esm' | 'cjs',
-  version?: string,
+  version = process.env.NX_E2E_PUBLIC_VERSION,
 ): Promise<string> => {
   const workspaceDir = join(targetDir, name);
   const npmCacheDir = join(targetDir, '.npm-cache');
@@ -415,6 +420,9 @@ export const assertWorkspaceUsesPackageManager = (
 // read the agent's conversation history.
 export const getDungeonAdventureElectroDbDependencies = () =>
   `@aws-sdk/client-s3@${TS_VERSIONS['@aws-sdk/client-s3']}`;
+
+export const getDungeonDiceDependencies = () =>
+  `@aws-sdk/client-iot-data-plane@${TS_VERSIONS['@aws-sdk/client-s3']}`;
 
 /** Send `signal` to a pid (or a process group when negative), ignoring exited ones. */
 function signalProcess(pid: number, signal: NodeJS.Signals | 0): boolean {

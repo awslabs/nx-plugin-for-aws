@@ -1,0 +1,53 @@
+variable "oidc_identity_providers" {
+  description = "OpenID Connect identity providers that users can sign in through. Validated by the user-identity module"
+  type = list(object({
+    name               = string
+    issuer_url         = string
+    client_id          = string
+    client_secret_name = string
+    scopes             = optional(list(string), ["openid", "email", "profile"])
+    attribute_mapping = optional(map(string), {
+      email       = "email"
+      given_name  = "given_name"
+      family_name = "family_name"
+    })
+    identifiers = optional(list(string), [])
+  }))
+  default = []
+}
+
+locals {
+  oidc_identity_providers = { for p in var.oidc_identity_providers : p.name => p }
+}
+
+# The client secret value is stored in plain text in Terraform state and in
+# saved plans. See https://awslabs.github.io/nx-plugin-for-aws/en/guides/react-website-auth-idp/#the-client-secret
+data "aws_secretsmanager_secret_version" "oidc_client_secret" {
+  for_each  = local.oidc_identity_providers
+  secret_id = each.value.client_secret_name
+}
+
+resource "aws_cognito_identity_provider" "oidc" {
+  for_each      = local.oidc_identity_providers
+  user_pool_id  = aws_cognito_user_pool.user_pool.id
+  provider_name = each.key
+  provider_type = "OIDC"
+
+  provider_details = {
+    client_id                     = each.value.client_id
+    client_secret                 = data.aws_secretsmanager_secret_version.oidc_client_secret[each.key].secret_string
+    authorize_scopes              = join(" ", each.value.scopes)
+    attributes_request_method     = "GET"
+    attributes_url_add_attributes = "false"
+    oidc_issuer                   = each.value.issuer_url
+  }
+
+  # Cognito adds username = sub when it reads the provider back
+  attribute_mapping = merge(each.value.attribute_mapping, { username = "sub" })
+  idp_identifiers   = length(each.value.identifiers) > 0 ? each.value.identifiers : null
+}
+
+output "idp_redirect_uri" {
+  description = "Redirect URI to register at each identity provider"
+  value       = "https://${aws_cognito_user_pool_domain.user_pool_domain.domain}.auth.${data.aws_region.current.region}.amazoncognito.com/oauth2/idpresponse"
+}

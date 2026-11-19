@@ -1,0 +1,32 @@
+import importlib.util
+import json
+from pathlib import Path
+
+# main.py lives beside recipe.yaml under greengrass/<component>/, outside this
+# project's importable package, so it is loaded directly by file path.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+MAIN_PATH = PROJECT_ROOT / "greengrass" / "pulse" / "main.py"
+
+
+def _load_main():
+    spec = importlib.util.spec_from_file_location("pulse_main", MAIN_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_publish_heartbeat_publishes_to_iot_core():
+    module = _load_main()
+    calls = []
+
+    class FakeClient:
+        def publish_to_iot_core(self, **kwargs):
+            calls.append(kwargs)
+
+    module.publish_heartbeat(FakeClient(), 1)
+
+    assert len(calls) == 1
+    assert calls[0]["topic_name"] == "tutorial/greengrass/heartbeat"
+    assert calls[0]["qos"] == "1"
+    assert json.loads(calls[0]["payload"]) == {"sequence": 1, "greeting": module.GREETING}

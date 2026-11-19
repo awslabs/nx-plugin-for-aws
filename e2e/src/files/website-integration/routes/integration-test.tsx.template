@@ -25,20 +25,32 @@ export const Route = createFileRoute('/integration-test')({
   component: IntegrationTest,
 });
 
-// Retry a flaky invocation a few times to ride out AgentCore cold starts
-// (the first invoke can fail while the runtime pulls its container image).
+// Retry a flaky invocation a few times. Agent invokes can fail on an
+// AgentCore cold start while the runtime pulls its container image, and the
+// first API call after sign-in can fail while the Cognito identity pool
+// catches up with the pool login ("Invalid login token").
 async function withRetries(fn: () => Promise<string>): Promise<string> {
+  const MAX_ATTEMPTS = 4;
   let lastError: unknown;
-  for (let attempt = 0; attempt < 4; attempt++) {
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
       const text = await fn();
       if (text.length > 0) return text;
+      console.warn(`attempt ${attempt}/${MAX_ATTEMPTS} returned no content`);
     } catch (e) {
       lastError = e;
+      // The error message only: an error object or a request could carry a
+      // credential onto the console.
+      console.warn(
+        `attempt ${attempt}/${MAX_ATTEMPTS} failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
-    await new Promise((resolve) => setTimeout(resolve, 15000));
+    // Sleep between attempts, not after the last one.
+    if (attempt < MAX_ATTEMPTS) {
+      await new Promise((resolve) => setTimeout(resolve, 15000));
+    }
   }
-  throw lastError ?? new Error('agent returned no content');
+  throw lastError ?? new Error('invocation returned no content');
 }
 
 <%_ if (tsHttp.length) { _%>
@@ -143,7 +155,7 @@ function IntegrationTest() {
 <%_ } _%>
     ];
     for (const [key, fn] of apiInvocations) {
-      await record(key, fn);
+      await record(key, () => withRetries(fn));
     }
 
     // Agents — invoked through their vended hooks/clients.
