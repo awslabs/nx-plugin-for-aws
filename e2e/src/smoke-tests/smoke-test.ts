@@ -20,7 +20,7 @@ import { runGeneratorMatrix } from './generator-matrix';
 
 export const runSmokeTest = async (
   dir: string,
-  pkgMgr: string,
+  pkgMgr: PackageManager,
   onProjectCreate?: (projectRoot: string) => void,
   beforeBuild?: (projectRoot: string) => void | Promise<void>,
   module?: 'esm' | 'cjs',

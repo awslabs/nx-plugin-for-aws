@@ -14,6 +14,8 @@ smokeTest('pnpm', {
   variant: 'finch',
   setup: () => {
     installFinch();
+    // `setup` returns an optional teardown function; Finch needs none.
+    return undefined;
   },
   onProjectCreate: setFinchAsContainerEngine,
 });

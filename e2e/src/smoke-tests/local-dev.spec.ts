@@ -53,6 +53,10 @@ const A2A_DELEGATED_MARKER = 'delegated reply:';
 // the delegating agent's response proves the A2A round trip actually completed.
 const A2A_REMOTE_REPLY = 'The answer is 42';
 
+// The one field of the A2A agent card the tests below assert on. `json()`
+// resolves to `unknown`, so each card fetch names this shape.
+type AgentCard = { name?: string };
+
 /**
  * Scope the mock to drive one A2A delegation per `A2A_DELEGATE_PROMPT` turn,
  * then echo the remote's reply back under `A2A_DELEGATED_MARKER`.
@@ -1026,7 +1030,10 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     const res = await fetch(
       `http://127.0.0.1:${ports.trpc}/echo?input=${input}`,
     );
-    const body = await res.json();
+    // `json()` resolves to `unknown`, so name the tRPC envelope asserted below.
+    const body = (await res.json()) as {
+      result: { data: { message: string } };
+    };
     console.log('tRPC echo response:', JSON.stringify(body));
     expect(body.result.data.message).toBe('hello');
     await stopLast();
@@ -1045,7 +1052,8 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     const base = `http://127.0.0.1:${ports.fastApi}`;
 
     const res = await fetch(`${base}/echo?message=hello`);
-    const body = await res.json();
+    // `json()` resolves to `unknown`, so name the echo body asserted below.
+    const body = (await res.json()) as { message: string };
     console.log('FastAPI echo response:', JSON.stringify(body));
     expect(body.message).toBe('hello');
 
@@ -1058,11 +1066,12 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     expect(empty).toEqual([]);
 
     // Create persists through the PynamoDB client to DynamoDB Local
-    const created = await fetch(`${base}/examples`, {
+    const created = (await fetch(`${base}/examples`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: '1', name: 'Widget', category: 'tools' }),
-    }).then((r) => r.json());
+      // `json()` resolves to `unknown`, so name the item asserted below.
+    }).then((r) => r.json())) as { name: string };
     console.log('create example:', JSON.stringify(created));
     expect(created.name).toBe('Widget');
 
@@ -1078,15 +1087,13 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     expect(fetched).toEqual({ id: '1', name: 'Widget', category: 'tools' });
 
     // List exercises a GSI query (gsi1 by category)
-    const byCategory = await fetch(`${base}/examples?category=tools`).then(
+    // `json()` resolves to `unknown`, so name the item list asserted below.
+    const byCategory = (await fetch(`${base}/examples?category=tools`).then(
       (r) => r.json(),
-    );
+    )) as { id: string }[];
     console.log('examples by category:', JSON.stringify(byCategory));
     expect(byCategory).toHaveLength(2);
-    expect(byCategory.map((i: { id: string }) => i.id).sort()).toEqual([
-      '1',
-      '2',
-    ]);
+    expect(byCategory.map((i) => i.id).sort()).toEqual(['1', '2']);
 
     await stopLast();
   });
@@ -1096,7 +1103,8 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     const res = await fetch(
       `http://127.0.0.1:${ports.smithy}/echo?message=hello`,
     );
-    const body = await res.json();
+    // `json()` resolves to `unknown`, so name the echo body asserted below.
+    const body = (await res.json()) as { message: string };
     console.log('Smithy echo response:', JSON.stringify(body));
     expect(body.message).toBe('hello');
     await stopLast();
@@ -1468,7 +1476,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
       const cardRes = await fetch(
         `${gatewayUrl}/${target}/invocations/.well-known/agent-card.json`,
       );
-      const card = await cardRes.json();
+      const card = (await cardRes.json()) as AgentCard;
       console.log(`Gateway -> ${target} (A2A) card:`, card.name);
       expect(card.name).toBeDefined();
 
@@ -1531,7 +1539,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     const cardRes = await fetch(
       `http://127.0.0.1:${ports.tsA2a}/.well-known/agent-card.json`,
     );
-    const card = await cardRes.json();
+    const card = (await cardRes.json()) as AgentCard;
     console.log('TS A2A agent card:', card.name);
     expect(card.name).toBeDefined();
 
@@ -1743,7 +1751,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     const cardRes = await fetch(
       `http://127.0.0.1:${ports.pyA2a}/.well-known/agent-card.json`,
     );
-    const card = await cardRes.json();
+    const card = (await cardRes.json()) as AgentCard;
     console.log('Python A2A agent card:', card.name);
     expect(card.name).toBeDefined();
 
@@ -2015,7 +2023,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     const cardRes = await fetch(
       `http://127.0.0.1:${ports.pyLangchainA2a}/.well-known/agent-card.json`,
     );
-    const card = await cardRes.json();
+    const card = (await cardRes.json()) as AgentCard;
     expect(card.name).toBeDefined();
 
     const streamRes = await fetch(`http://127.0.0.1:${ports.pyLangchainA2a}/`, {
