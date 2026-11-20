@@ -112,7 +112,7 @@ export const pyFastApiProjectGenerator = async (
   if (isEcs) {
     if (integrationPattern !== 'shared') {
       throw new Error(
-        `Invalid FastAPI infra/integrationPattern combination: http-ecs + ${integrationPattern}. One container service answers every operation, so http-ecs needs integrationPattern 'shared'. Pass --integrationPattern=shared.`,
+        `Invalid FastAPI infra/integrationPattern combination: http-ecs + ${integrationPattern}. One container service answers every operation, so http-ecs needs integrationPattern 'shared'. Pass --integrationPattern=shared, or omit the option: http-ecs defaults to shared.`,
       );
     }
     if (iac !== 'cdk') {
@@ -405,6 +405,14 @@ export const pyFastApiProjectGenerator = async (
 
 const getIntegrationPattern = (
   schema: PyFastApiProjectGeneratorSchema,
-): 'isolated' | 'shared' => schema.integrationPattern ?? 'isolated';
+): 'isolated' | 'shared' => {
+  if (schema.integrationPattern) {
+    return schema.integrationPattern;
+  }
+  // The schema has no default, so the pattern is resolved from the infra here:
+  // one container service answers every operation, leaving the isolated pattern
+  // nothing to isolate. Without this, --infra=http-ecs alone would fail.
+  return schema.infra === 'http-ecs' ? 'shared' : 'isolated';
+};
 
 export default pyFastApiProjectGenerator;

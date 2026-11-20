@@ -50,4 +50,31 @@ describe('py#api generator', () => {
     );
     expect(projectConfig.metadata.apiType).toBe('fast-api');
   });
+
+  it('should default the integration pattern to shared for http-ecs', async () => {
+    // What `py#api --name=TestApi --infra=http-ecs` gives on its own: neither
+    // the schema nor this wrapper fills `integrationPattern` in, so the FastAPI
+    // generator resolves it from the infra.
+    await pyApiGenerator(tree, {
+      name: 'TestApi',
+      directory: 'packages',
+      infra: 'http-ecs',
+      auth: 'iam',
+      iac: 'cdk',
+    });
+
+    expect(
+      tree.exists(
+        'packages/common/constructs/src/core/api/ecs-http-endpoint.ts',
+      ),
+    ).toBeTruthy();
+    expect(
+      tree.exists(
+        'packages/common/constructs/src/app/services/test-api-container.ts',
+      ),
+    ).toBeTruthy();
+    expect(
+      tree.read('packages/common/constructs/src/app/apis/test-api.ts', 'utf-8'),
+    ).toContain("pattern: 'shared'");
+  });
 });

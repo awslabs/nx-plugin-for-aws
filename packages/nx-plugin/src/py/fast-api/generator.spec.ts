@@ -790,6 +790,33 @@ describe('fastapi project generator', () => {
       ).rejects.toThrow(/http-ecs needs integrationPattern 'shared'/);
     });
 
+    it('should default the integration pattern to shared', async () => {
+      // What `--infra=http-ecs` on its own gives. The schema has no default for
+      // `integrationPattern`, so the option arrives undefined and the generator
+      // resolves it from the infra.
+      const { integrationPattern: _unset, ...withoutPattern } =
+        ecsOptions('iam');
+      await pyFastApiProjectGenerator(tree, withoutPattern);
+
+      expect(
+        tree.exists(
+          'packages/common/constructs/src/core/api/ecs-http-endpoint.ts',
+        ),
+      ).toBe(true);
+      expect(
+        tree.exists(
+          'packages/common/constructs/src/app/services/test-api-container.ts',
+        ),
+      ).toBe(true);
+      // One integration for every operation, not one per operation.
+      expect(
+        tree.read(
+          'packages/common/constructs/src/app/apis/test-api.ts',
+          'utf-8',
+        ),
+      ).toContain("pattern: 'shared'");
+    });
+
     it('should reject terraform', async () => {
       await expect(
         pyFastApiProjectGenerator(tree, {
