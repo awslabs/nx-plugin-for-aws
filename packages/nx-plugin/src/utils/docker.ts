@@ -68,13 +68,14 @@ export const NODE_IMAGE_DEPENDENCIES = [
 
 /**
  * Packages the prisma CLI install in a vended RDB migration `Dockerfile` pins.
- * The CLI's own ranges resolve both below a known HIGH vulnerability's fix, so
- * the image overrides them. Spread through `ownedElsewhere` for the same reason
- * as {@link NODE_IMAGE_DEPENDENCIES}.
+ * The CLI's own dependencies resolve all three below a known HIGH
+ * vulnerability's fix, so the image overrides them. Spread through
+ * `ownedElsewhere` for the same reason as {@link NODE_IMAGE_DEPENDENCIES}.
  */
 export const PRISMA_IMAGE_DEPENDENCIES = [
   { name: 'deepmerge-ts' },
   { name: 'mysql2' },
+  { name: 'effect' },
 ] as const satisfies readonly { name: ITsDepVersion }[];
 
 /**

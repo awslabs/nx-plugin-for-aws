@@ -319,6 +319,7 @@ const VENDED_TEMPLATE_VARS = new Set([
   'prismaVersion',
   'deepmergeTsVersion',
   'mysql2Version',
+  'effectVersion',
   'rolldownVersion',
   'rolldownDtsVersion',
   'esmShimVersion',

@@ -170,6 +170,7 @@ export const tsRdbGenerator = async (
     prismaVersion: TS_VERSIONS.prisma,
     deepmergeTsVersion: TS_VERSIONS['deepmerge-ts'],
     mysql2Version: TS_VERSIONS.mysql2,
+    effectVersion: TS_VERSIONS.effect,
     ...nodeImageVersions(),
     prismaAdapterPackage:
       options.engine === 'mysql'

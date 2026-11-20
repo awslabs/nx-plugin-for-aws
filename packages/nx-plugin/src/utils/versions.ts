@@ -24,12 +24,14 @@ export const TS_VERSIONS = {
   // as fixed. Overriding brace-expansion directly is not viable — 5.x drops the
   // CommonJS default export that minimatch 9 calls.
   minimatch: '11.0.8',
-  // Both overridden in the vended RDB migration image build, which installs the
-  // prisma CLI to run migrations: its own ranges resolve deepmerge-ts below the
-  // CVE-2026-40345 fix (HIGH) and mysql2 below the GHSA-3f6p-5ww8-9rcr fix
-  // (HIGH). Neither is imported by the handler, which drives the schema engine.
+  // All three overridden in the vended RDB migration image build, which
+  // installs the prisma CLI to run migrations: its own dependencies resolve
+  // deepmerge-ts below the CVE-2026-40345 fix (HIGH), mysql2 below the
+  // GHSA-3f6p-5ww8-9rcr fix (HIGH), and effect below the CVE-2026-121707 fix
+  // (HIGH). None is imported by the handler, which drives the schema engine.
   'deepmerge-ts': '8.0.2',
   mysql2: '3.24.6',
+  effect: '3.22.5',
   '@aws-sdk/client-dynamodb': '3.1169.0',
   '@aws-sdk/client-api-gateway': '3.1169.0',
   '@aws-sdk/client-iam': '3.1169.0',
@@ -275,7 +277,7 @@ export const PY_VERSIONS = {
   langgraph: '==1.2.22',
   'langgraph-checkpoint-aws': '==1.2.7',
   'langgraph-checkpoint-sqlite': '==3.1.3',
-  mcp: '==1.28.1',
+  mcp: '==1.30.0',
   'opentelemetry-api': '==1.45.1',
   'opentelemetry-exporter-otlp-proto-http': '==1.45.1',
   'opentelemetry-propagator-aws-xray': '==1.0.2',
