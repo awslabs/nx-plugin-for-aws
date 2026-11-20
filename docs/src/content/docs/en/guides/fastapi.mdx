@@ -21,10 +21,14 @@ import { PY_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/vers
 
 [FastAPI](https://fastapi.tiangolo.com/) is a framework for building APIs in Python.
 
-The FastAPI generator creates a new FastAPI with AWS CDK or Terraform infrastructure setup. The generated backend uses AWS Lambda for serverless deployment, exposed via an AWS API Gateway API. It sets up [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) for observability, including logging, AWS X-Ray tracing and Cloudwatch Metrics.
+The FastAPI generator creates a new FastAPI with AWS CDK or Terraform infrastructure setup. The generated backend is exposed via an AWS API Gateway API. It sets up [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) for observability, including structured logging and CloudWatch metrics.
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Lambda hosting">
+The backend uses AWS Lambda for serverless deployment, and AWS X-Ray tracing is set up too.
+</OptionFilter>
 
 <OptionFilter when={{ infra: 'http-ecs' }} description="ECS hosting">
-Your API runs as a long-lived uvicorn server in a container on Amazon ECS, behind an API Gateway HTTP API, rather than in a Lambda function. See <a href="#running-on-amazon-ecs">Running on Amazon ECS</a> for what that changes.
+Your API runs as a long-lived uvicorn server in a container on Amazon ECS, behind an API Gateway HTTP API, rather than in a Lambda function. See <a href="#running-on-amazon-ecs">Running on Amazon ECS</a> for what that changes, including why X-Ray tracing produces no traces there.
 </OptionFilter>
 
 ## Usage
@@ -47,13 +51,15 @@ Select `rest-lambda` (default) as your `infra` if you intend to build any stream
 
 :::tip[Integration Pattern]
 The `integrationPattern` option defaults to `isolated`, which creates one Lambda per FastAPI operation. Select `shared` if you would prefer a single shared Lambda handler for the whole API, with optional per-operation overrides.
+
+With `infra` set to `http-ecs` the option defaults to `shared` instead, since one container service answers every operation.
 :::
 
 <OptionFilter when={{ infra: 'http-ecs' }} description="ECS hosting is experimental">
 :::caution[Experimental]
 `http-ecs` is experimental. Its generated output may change between releases without a migration to carry an existing workspace across, so expect to reconcile those changes yourself when you upgrade.
 
-It needs `integrationPattern` `shared`, because one container service answers every operation, and the CDK IaC provider: Terraform support is not implemented yet. The generator fails with a message naming the fix if either does not hold.
+It needs the CDK IaC provider: Terraform support is not implemented yet. It also needs `integrationPattern` `shared`, which it defaults to, so passing `--integrationPattern=isolated` alongside it fails. The generator fails with a message naming the fix in either case.
 :::
 </OptionFilter>
 
@@ -127,8 +133,15 @@ The generator sets up several features automatically:
 2. Error handling middleware
 3. Request/response correlation
 4. Metrics collection
-5. AWS Lambda deployment via [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) with uvicorn
-6. Type-safe streaming (REST API only)
+5. Type-safe streaming (REST API only)
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="How the Lambda variants serve the app">
+The app is served in a Lambda function by the [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) running uvicorn.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="How the ECS variant serves the app">
+The app is served by uvicorn in the container, with no Lambda Web Adapter. See <a href="#running-on-amazon-ecs">Running on Amazon ECS</a>.
+</OptionFilter>
 
 ### Observability with AWS Lambda Powertools
 
@@ -165,6 +178,12 @@ def read_item(item_id: int):
         # Your logic here
         return {"item_id": item_id}
 ```
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="X-Ray produces no traces on ECS">
+:::caution[No traces on ECS]
+The decorator and the subsegment above run without error in a container, but produce no traces. Powertools turns its tracer off when it is not running in Lambda. See <a href="#observability">Observability</a> for what you do get, and what to add if you need traces.
+:::
+</OptionFilter>
 
 #### Metrics
 
@@ -846,7 +865,7 @@ With `infra` set to `http-ecs`, your API runs as a long-lived uvicorn server in 
 
 The tasks run in private subnets and never get a public IP address. Nothing in this path allows an address range inbound.
 
-The VPC link, the load balancer, its listener and the target group are created by one construct, `core/api/ecs-http-endpoint.ts` in `common/constructs`, which every API hosted on ECS shares. Your API's own construct names its container service and routes every operation to that endpoint.
+The VPC link, the load balancer, its listener, the target group and the bucket the load balancer writes its access logs to are created by one construct, `core/api/ecs-http-endpoint.ts` in `common/constructs`, which every API hosted on ECS shares. Your API's own construct names its container service and routes every operation to that endpoint.
 
 ### What Runs in the Container
 
@@ -861,7 +880,9 @@ The API Gateway routes still come from your OpenAPI spec, so an operation you ad
 
 Logs and metrics work as they do on Lambda: the container writes to its own CloudWatch log group, and metrics are written in the embedded metric format for CloudWatch Logs to extract.
 
-AWS X-Ray tracing does not. `@tracer.capture_method` is a no-op outside Lambda, because there is no X-Ray daemon in the task to receive segments. Add one as a sidecar if you need traces.
+AWS X-Ray tracing does not. `@tracer.capture_method` is a no-op outside Lambda, and there is no X-Ray daemon in the task to receive segments either. Add one as a sidecar in your container service if you need traces.
+
+The API Gateway HTTP API's access log records every request that reaches the API. The load balancer writes its own access logs to a bucket the `EcsHttpEndpoint` construct creates, which is where you can see which task served a request and what it answered.
 
 ### Image Build and Scanning
 
@@ -877,7 +898,7 @@ See <Link path="/guides/py-container">Python Container Service</Link> for how th
 - **Integration timeout.** API Gateway HTTP APIs cap an integration at about 30 seconds. An operation that takes longer than that fails at the gateway however long the container keeps working.
 - **No streaming.** Streaming operations need the `rest-lambda` infrastructure. An HTTP API cannot stream a response.
 - **Payload size.** Requests and responses follow API Gateway's 10 MB limit.
-- **One service for every operation.** `integrationPattern` must be `shared`: there is one container service, and every route is routed to it.
+- **One service for every operation.** `integrationPattern` is `shared`: there is one container service, and every route is routed to it. The option defaults to `shared` for this infrastructure, and `isolated` is rejected.
 
 ### Cost
 
@@ -889,8 +910,9 @@ The load balancer is the new fixed cost compared with Lambda, where you pay per 
 | Fargate task, 0.25 vCPU / 0.5 GB arm64 | $7 per task |
 | NAT gateway, if your VPC has one | $33 |
 | VPC link | no hourly charge |
+| S3 storage for the load balancer's access logs | cents per GB a month |
 
-So a one-task service costs roughly $23 a month before any traffic, and more if the VPC you pass in has a NAT gateway. Check the [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) and [AWS Fargate](https://aws.amazon.com/fargate/pricing/) pricing pages for current prices in your Region.
+So a one-task service costs roughly $23 a month before any traffic, and more if the VPC you pass in has a NAT gateway. The access logs grow with traffic: add a lifecycle rule to `endpoint.accessLogsBucket` to expire them. Check the [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) and [AWS Fargate](https://aws.amazon.com/fargate/pricing/) pricing pages for current prices in your Region.
 </OptionFilter>
 
 ## Invoking your FastAPI
