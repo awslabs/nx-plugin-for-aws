@@ -1,0 +1,46 @@
+"""Entry point for the <%= apiNameClassName %> container service.
+
+The API's own FastAPI app answers every operation. The health check route is
+added here rather than in the API's module, so it stays out of the OpenAPI spec
+and therefore out of the API Gateway routes: only the load balancer's target
+group and the container health check call it.
+"""
+
+import os
+
+import uvicorn
+from fastapi import Request
+from pydantic import BaseModel
+
+from ..init import metrics
+from ..main import app
+
+
+class HealthOutput(BaseModel):
+    status: str
+
+
+@app.get("<%- healthCheckPath %>", include_in_schema=False)
+def health() -> HealthOutput:
+    return HealthOutput(status="ok")
+
+
+# Registered last, so it wraps the API's own middleware and runs once every
+# request has been handled. In Lambda the handler flushes the metrics it
+# collected; this server lives across requests, so nothing would otherwise
+# write them out, and the next request would re-add the same dimension.
+@app.middleware("http")
+async def flush_metrics(request: Request, call_next):
+    response = await call_next(request)
+    metrics.flush_metrics()
+    return response
+
+
+if __name__ == "__main__":
+    # Binds loopback unless HOST says otherwise. The image sets HOST=0.0.0.0,
+    # where the container's own network namespace is the boundary.
+    uvicorn.run(
+        app,
+        host=os.environ.get("HOST", "127.0.0.1"),
+        port=int(os.environ.get("PORT", "<%- containerPort %>")),
+    )
