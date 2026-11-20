@@ -21,14 +21,16 @@ import { TS_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/vers
 
 [tRPC](https://trpc.io/) is a framework for building APIs in TypeScript with end-to-end type safety. Using tRPC, updates to API operation inputs and outputs are immediately reflected in client code and are visible in your IDE without the need to rebuild your project.
 
-The tRPC API generator creates a new tRPC API with AWS CDK or Terraform infrastructure setup. The generated backend is exposed via an AWS API Gateway API, and includes schema validation using [Zod](https://zod.dev/). It sets up [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) for observability, including logging, AWS X-Ray tracing and Cloudwatch Metrics.
+The tRPC API generator creates a new tRPC API with AWS CDK or Terraform infrastructure setup. The generated backend is exposed via an AWS API Gateway API, and includes schema validation using [Zod](https://zod.dev/). It sets up [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) for observability, including structured logging and CloudWatch metrics.
 
 <OptionFilter not when={{ infra: 'http-ecs' }} description="Lambda hosting">
+AWS X-Ray tracing is set up too.
+
 Your procedures run on AWS Lambda, so there is no server to manage and you pay only for the requests you serve.
 </OptionFilter>
 
 <OptionFilter when={{ infra: 'http-ecs' }} description="ECS hosting">
-Your procedures run as a long-lived HTTP server in a container on Amazon ECS, behind an API Gateway HTTP API. See <a href="#running-on-amazon-ecs">Running on Amazon ECS</a> for what that changes.
+Your procedures run as a long-lived HTTP server in a container on Amazon ECS, behind an API Gateway HTTP API. See <a href="#running-on-amazon-ecs">Running on Amazon ECS</a> for what that changes, including why X-Ray tracing produces no traces there.
 </OptionFilter>
 
 ## Usage
@@ -51,13 +53,15 @@ Select `rest-lambda` (default) as your `infra` if you would like to use [tRPC Su
 
 :::tip[Integration Pattern]
 The `integrationPattern` option defaults to `isolated`, which creates one Lambda per tRPC procedure. Select `shared` if you would prefer a single shared Lambda handler for the whole API, with optional per-procedure overrides.
+
+With `infra` set to `http-ecs` the option defaults to `shared` instead, since one container service answers every operation.
 :::
 
 <OptionFilter when={{ infra: 'http-ecs' }} description="ECS hosting is experimental">
 :::caution[Experimental]
 `http-ecs` is experimental. Its generated output may change between releases without a migration to carry an existing workspace across, so expect to reconcile those changes yourself when you upgrade.
 
-It needs `integrationPattern` `shared`, because one container service answers every operation, and the CDK IaC provider: Terraform support is not implemented yet. The generator fails with a message naming the fix if either does not hold.
+It needs the CDK IaC provider: Terraform support is not implemented yet. It also needs `integrationPattern` `shared`, which it defaults to, so passing `--integrationPattern=isolated` alongside it fails. The generator fails with a message naming the fix in either case.
 :::
 </OptionFilter>
 
@@ -165,7 +169,15 @@ Zod provides powerful utilities to combine or derive schemas such as `.merge`, `
 
 ### Router and Procedures
 
-Your tRPC router is defined in `src/router.ts`, which registers all procedures. Each procedure defines the expected input, output, and implementation. The Lambda handler entry point is in `src/handler.ts`, which forwards requests to your router.
+Your tRPC router is defined in `src/router.ts`, which registers all procedures. Each procedure defines the expected input, output, and implementation.
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="The Lambda entry point">
+The Lambda handler entry point is in `src/handler.ts`, which forwards requests to your router.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="The container entry point">
+The entry point is `src/<api-name>-container/server.ts`, the HTTP server the container runs, which forwards requests to your router.
+</OptionFilter>
 
 The sample router generated for you has a single operation, called `echo`:
 
@@ -329,6 +341,12 @@ export const echo = publicProcedure
 ```
 
 For more information, please refer to the [AWS Lambda Powertools Tracer documentation](https://docs.powertools.aws.dev/lambda/typescript/latest/core/tracer/).
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="X-Ray produces no traces on ECS">
+:::caution[No traces on ECS]
+The calls above run without error in a container, but produce no traces. Powertools turns its tracer off when it is not running in Lambda, so `getSegment()` returns a placeholder subsegment that is never sent anywhere. See <a href="#observability">Observability</a> for what you do get, and what to add if you need traces.
+:::
+</OptionFilter>
 
 ### Implementing Custom Middleware
 
@@ -986,13 +1004,21 @@ With `infra` set to `http-ecs`, your procedures run as a long-lived HTTP server 
 
 The tasks run in private subnets and never get a public IP address. Nothing in this path allows an address range inbound.
 
-The VPC link, the load balancer, its listener and the target group are created by one construct, `core/api/ecs-http-endpoint.ts` in `common/constructs`, which every API hosted on ECS shares. Your API's own construct names its container service and routes every operation to that endpoint.
+The VPC link, the load balancer, its listener, the target group and the bucket the load balancer writes its access logs to are created by one construct, `core/api/ecs-http-endpoint.ts` in `common/constructs`, which every API hosted on ECS shares. Your API's own construct names its container service and routes every operation to that endpoint.
 
 ### What Runs in the Container
 
 `src/<api-name>-container/server.ts` is a `node:http` server with two jobs. `GET /health` answers `{"status":"ok"}`, which is what the load balancer's target group and the container health check call. Every other request goes to the [tRPC standalone adapter](https://trpc.io/docs/server/adapters/standalone), which resolves it against your router.
 
-There is no API Gateway event in the container, so the procedure context's `event`, `context` and `info` fields are empty placeholders. The authorizer still decides whether a request reaches the container at all, but its claims do not arrive with the request, so the identity middleware examples above do not apply. To read the caller's identity in a procedure, map the authorizer's context onto a request header in your API construct and read that header.
+There is no API Gateway event in the container, so the procedure context carries no `event`, `context` or `info` field: for `http-ecs` the vended `IMiddlewareContext` names only what the middleware puts there. The authorizer still decides whether a request reaches the container at all, but its claims do not arrive with the request, so the identity middleware examples above do not apply. To read the caller's identity in a procedure, map the authorizer's context onto a request header in your API construct and read that header.
+
+### Observability
+
+Logs and metrics work as they do on Lambda: the container writes to its own CloudWatch log group, and the metrics plugin publishes each request's metrics in the embedded metric format for CloudWatch Logs to extract.
+
+AWS X-Ray tracing does not. Powertools turns its tracer off outside Lambda, and there is no X-Ray daemon in the task to receive segments, so `opts.ctx.tracer` calls run without error and produce no traces. Add a daemon as a sidecar in your container service if you need them.
+
+The API Gateway HTTP API's access log records every request that reaches the API. The load balancer writes its own access logs to a bucket the `EcsHttpEndpoint` construct creates, which is where you can see which task served a request and what it answered.
 
 ### Image Build and Scanning
 
@@ -1008,7 +1034,7 @@ See <Link path="/guides/ts-container">TypeScript Container Service</Link> for ho
 - **Integration timeout.** API Gateway HTTP APIs cap an integration at about 30 seconds. A procedure that takes longer than that fails at the gateway however long the container keeps working.
 - **No streaming.** tRPC subscriptions need the `rest-lambda` infrastructure. An HTTP API cannot stream a response.
 - **Payload size.** Requests and responses follow API Gateway's 10 MB limit.
-- **One service for every operation.** `integrationPattern` must be `shared`: there is one container service, and every route is routed to it.
+- **One service for every operation.** `integrationPattern` is `shared`: there is one container service, and every route is routed to it. The option defaults to `shared` for this infrastructure, and `isolated` is rejected.
 
 ### Cost
 
@@ -1020,8 +1046,9 @@ The load balancer is the new fixed cost compared with Lambda, where you pay per 
 | Fargate task, 0.25 vCPU / 0.5 GB arm64 | $7 per task |
 | NAT gateway, if your VPC has one | $33 |
 | VPC link | no hourly charge |
+| S3 storage for the load balancer's access logs | cents per GB a month |
 
-So a one-task service costs roughly $23 a month before any traffic, and more if the VPC you pass in has a NAT gateway. Check the [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) and [AWS Fargate](https://aws.amazon.com/fargate/pricing/) pricing pages for current prices in your Region.
+So a one-task service costs roughly $23 a month before any traffic, and more if the VPC you pass in has a NAT gateway. The access logs grow with traffic: add a lifecycle rule to `endpoint.accessLogsBucket` to expire them. Check the [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) and [AWS Fargate](https://aws.amazon.com/fargate/pricing/) pricing pages for current prices in your Region.
 </OptionFilter>
 
 ## Local tRPC Server
