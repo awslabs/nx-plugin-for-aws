@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import type { Tree } from '@nx/devkit';
+import { readProjectConfiguration, type Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
 import { tsApiGenerator } from './generator.js';
 import { TsApiGeneratorSchema } from './schema';
@@ -135,6 +135,30 @@ describe('ts#api generator', () => {
     expect(
       tree.exists(
         'packages/common/constructs/src/app/services/test-api-container.ts',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('should default the integration pattern to shared for http-ecs', async () => {
+    // What `ts#api --name=TestApi --infra=http-ecs` gives on its own: neither
+    // the schema nor this wrapper fills `integrationPattern` in, so the tRPC
+    // generator resolves it from the infra.
+    await tsApiGenerator(tree, {
+      name: 'TestApi',
+      framework: 'trpc',
+      directory: 'packages',
+      infra: 'http-ecs',
+      auth: 'iam',
+      iac: 'cdk',
+    });
+
+    const projectConfig = readProjectConfiguration(tree, '@proj/test-api');
+    expect(
+      (projectConfig.metadata as Record<string, unknown>).integrationPattern,
+    ).toBe('shared');
+    expect(
+      tree.exists(
+        'packages/common/constructs/src/core/api/ecs-http-endpoint.ts',
       ),
     ).toBeTruthy();
   });

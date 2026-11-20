@@ -229,6 +229,24 @@ describe('trpc backend generator', () => {
     expect(projectConfig.targets!.dev!.continuous).toBe(true);
   });
 
+  it('should keep the isolated integration pattern as the Lambda default', async () => {
+    // `integrationPattern` has no schema default, so it arrives undefined when
+    // the caller does not pass it. Every infra except http-ecs still resolves
+    // to isolated.
+    await tsTrpcApiGenerator(tree, {
+      name: 'TestApi',
+      directory: 'apps',
+      infra: 'http-lambda',
+      auth: 'iam',
+      iac: 'cdk',
+    });
+
+    const projectConfig = readProjectConfiguration(tree, '@proj/test-api');
+    expect(
+      (projectConfig.metadata as Record<string, unknown>).integrationPattern,
+    ).toBe('isolated');
+  });
+
   it('should preserve dev dependsOn added by connection generators when re-run', async () => {
     const options: TsTrpcApiGeneratorSchema = {
       name: 'TestApi',
@@ -1585,6 +1603,49 @@ export const echo = publicProcedure.query(() => ({ message: 'hi' }));
           integrationPattern: 'isolated',
         }),
       ).rejects.toThrow(/http-ecs needs integrationPattern 'shared'/);
+    });
+
+    it('should default the integration pattern to shared', async () => {
+      // What `--infra=http-ecs` on its own gives. The schema has no default for
+      // `integrationPattern`, so the option arrives undefined and the generator
+      // resolves it from the infra.
+      const { integrationPattern: _unset, ...withoutPattern } =
+        ecsOptions('iam');
+      await tsTrpcApiGenerator(tree, withoutPattern);
+
+      const projectConfig = readProjectConfiguration(tree, '@proj/test-api');
+      expect(
+        (projectConfig.metadata as Record<string, unknown>).integrationPattern,
+      ).toBe('shared');
+      // The same output as passing it explicitly: one container service behind
+      // the shared HTTP API construct.
+      expect(
+        tree.exists(
+          'packages/common/constructs/src/app/services/test-api-container.ts',
+        ),
+      ).toBe(true);
+      expect(
+        tree.exists(
+          'packages/common/constructs/src/core/api/ecs-http-endpoint.ts',
+        ),
+      ).toBe(true);
+    });
+
+    it('should type the procedure context without an API Gateway event', async () => {
+      await tsTrpcApiGenerator(tree, ecsOptions('iam'));
+
+      const middleware = tree.read(
+        'apps/test-api/src/middleware/index.ts',
+        'utf-8',
+      );
+      // No Lambda event arrives through the load balancer, so the context type
+      // promises none: a procedure reading `ctx.event` fails to compile rather
+      // than throwing on the first request.
+      expect(middleware).not.toContain('CreateAWSLambdaContextOptions');
+      expect(middleware).not.toContain('aws-lambda');
+      expect(middleware).toContain(
+        'export type IMiddlewareContext = ILoggerContext',
+      );
     });
 
     it('should reject terraform', async () => {

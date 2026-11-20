@@ -460,7 +460,7 @@ const validateTrpcInfraAndIntegrationPatternCombination = (
     throw new Error(
       `Invalid tRPC infra/integrationPattern combination: ${options.infra} + ${integrationPattern}.` +
         (options.infra === 'http-ecs'
-          ? ` One container service answers every operation, so http-ecs needs integrationPattern 'shared'. Pass --integrationPattern=shared.`
+          ? ` One container service answers every operation, so http-ecs needs integrationPattern 'shared'. Pass --integrationPattern=shared, or omit the option: http-ecs defaults to shared.`
           : ''),
     );
   }
@@ -469,17 +469,25 @@ const validateTrpcInfraAndIntegrationPatternCombination = (
 const getIntegrationPattern = (
   options: TsTrpcApiGeneratorSchema,
 ): 'isolated' | 'shared' => {
-  return options.integrationPattern ?? 'isolated';
+  if (options.integrationPattern) {
+    return options.integrationPattern;
+  }
+  // The schema has no default, so the pattern is resolved from the infra here:
+  // one container service answers every operation, leaving the isolated pattern
+  // nothing to isolate. Without this, --infra=http-ecs alone would fail.
+  return options.infra === 'http-ecs' ? 'shared' : 'isolated';
 };
 
-const getApiGatewayEventType = (options: TsTrpcApiGeneratorSchema): string => {
+const getApiGatewayEventType = (
+  options: TsTrpcApiGeneratorSchema,
+): string | undefined => {
+  // On ECS a load balancer forwards the request, so no API Gateway event
+  // reaches the server and the vended context names no event type at all.
+  if (options.infra === 'http-ecs') {
+    return undefined;
+  }
   if (options.infra === 'rest-lambda') {
     return 'APIGatewayProxyEvent';
-  }
-  // On ECS the container is reached through a load balancer, so no authorizer
-  // context arrives with the request and the procedure context carries none.
-  if (options.infra === 'http-ecs') {
-    return 'APIGatewayProxyEventV2';
   }
   if (options.auth === 'iam') {
     return 'APIGatewayProxyEventV2WithIAMAuthorizer';
