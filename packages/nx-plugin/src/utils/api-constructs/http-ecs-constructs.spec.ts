@@ -407,16 +407,90 @@ describe('http-ecs API construct synth', () => {
         .filter(
           (skip) => skip.id !== 'CKV_AWS_66' && skip.id !== 'CKV_AWS_338',
         );
-      // Exactly the rules checkov 3.4.5 raises for this design: ALB access
-      // logs, and HTTPS and TLS 1.2 on a listener that TLS never reaches.
+      // Exactly the rules checkov 3.4.5 raises for this design: HTTPS and TLS
+      // 1.2 on a listener that TLS never reaches, and access logging and
+      // versioning on the load balancer's own access log bucket. CKV_AWS_91 is
+      // no longer among them: the load balancer's access logs are on.
       expect(skipped.map((skip) => skip.id).sort()).toEqual([
         'CKV_AWS_103',
+        'CKV_AWS_18',
         'CKV_AWS_2',
-        'CKV_AWS_91',
+        'CKV_AWS_21',
       ]);
       for (const skip of skipped) {
         expect(skip.comment).not.toBe('');
       }
+    });
+
+    it('should write the load balancer access logs to its own bucket', () => {
+      const [[, loadBalancer]] = out.ofType(
+        'AWS::ElasticLoadBalancingV2::LoadBalancer',
+      );
+      const attributes = loadBalancer.Properties.LoadBalancerAttributes as {
+        Key: string;
+        Value: unknown;
+      }[];
+      const attribute = (key: string) =>
+        attributes.find((a) => a.Key === key)?.Value;
+      expect(attribute('access_logs.s3.enabled')).toBe('true');
+
+      const [[bucketId, bucket]] = Object.entries(out.resources).filter(
+        ([id, r]) => r.Type === 'AWS::S3::Bucket' && id.includes('AccessLogs'),
+      );
+      expect(attribute('access_logs.s3.bucket')).toEqual({ Ref: bucketId });
+
+      // A load balancer can only deliver access logs to an SSE-S3 bucket, and
+      // CDK's own `logAccessLogs` refuses a bucket with a KMS key.
+      expect(
+        bucket.Properties.BucketEncryption.ServerSideEncryptionConfiguration,
+      ).toEqual([
+        { ServerSideEncryptionByDefault: { SSEAlgorithm: 'AES256' } },
+      ]);
+      expect(bucket.Properties.PublicAccessBlockConfiguration).toEqual({
+        BlockPublicAcls: true,
+        BlockPublicPolicy: true,
+        IgnorePublicAcls: true,
+        RestrictPublicBuckets: true,
+      });
+      // The destroy path: the e2e leftover check fails on a bucket a destroy
+      // leaves behind.
+      expect(out.resources[bucketId].DeletionPolicy ?? 'Delete').toBe('Delete');
+    });
+
+    it('should let the VPC link reach nothing but the load balancer', () => {
+      const vpcLinkSecurityGroupId = Object.keys(out.resources).find(
+        (id) =>
+          out.resources[id].Type === 'AWS::EC2::SecurityGroup' &&
+          id.includes('VpcLinkSecurityGroup'),
+      )!;
+      const albSecurityGroupId = Object.keys(out.resources).find(
+        (id) =>
+          out.resources[id].Type === 'AWS::EC2::SecurityGroup' &&
+          id.includes('TestApiBackendEndpointLoadBalancer'),
+      )!;
+
+      const egress = [
+        ...(out.resources[vpcLinkSecurityGroupId].Properties
+          .SecurityGroupEgress ?? []),
+        ...Object.values(out.resources)
+          .filter(
+            (r) =>
+              r.Type === 'AWS::EC2::SecurityGroupEgress' &&
+              r.Properties.GroupId?.['Fn::GetAtt']?.[0] ===
+                vpcLinkSecurityGroupId,
+          )
+          .map((r) => r.Properties),
+      ];
+      // One rule: the load balancer's listener port on the load balancer's own
+      // security group. No `allowAllOutbound`, so no address range either.
+      expect(egress).toHaveLength(1);
+      expect(egress[0].FromPort).toBe(80);
+      expect(egress[0].ToPort).toBe(80);
+      expect(
+        egress[0].DestinationSecurityGroupId?.['Fn::GetAtt']?.[0] ??
+          egress[0].DestinationSecurityGroupId,
+      ).toBe(albSecurityGroupId);
+      expect(JSON.stringify(egress)).not.toContain('0.0.0.0/0');
     });
 
     it('should never allow an address range inbound', () => {

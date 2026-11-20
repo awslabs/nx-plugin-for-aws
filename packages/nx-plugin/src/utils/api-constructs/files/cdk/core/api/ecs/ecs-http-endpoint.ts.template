@@ -1,4 +1,4 @@
-import { Duration } from 'aws-cdk-lib';
+import { CfnResource, Duration, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import {
   HttpRouteIntegration,
   VpcLink,
@@ -6,6 +6,7 @@ import {
 import { HttpAlbIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import {
   IVpc,
+  Port,
   SecurityGroup,
   SubnetSelection,
   SubnetType,
@@ -17,6 +18,13 @@ import {
   ApplicationProtocol,
   ApplicationTargetGroup,
 } from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import { PolicyStatement, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
+import {
+  BlockPublicAccess,
+  Bucket,
+  BucketEncryption,
+  ObjectOwnership,
+} from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 import { suppressRules } from '../checkov<% if (esm) { %>.js<% } %>';
 
@@ -66,6 +74,9 @@ export interface EcsHttpEndpointProps {
  * listener, and the load balancer to the tasks' container port. Neither the
  * load balancer nor the tasks are reachable from the internet, and no rule
  * names an address range.
+ *
+ * The load balancer writes its access logs to a bucket this construct creates,
+ * so a request can be traced to the task that served it.
  */
 export class EcsHttpEndpoint extends Construct {
   /** The internal load balancer in front of the service. */
@@ -78,6 +89,11 @@ export class EcsHttpEndpoint extends Construct {
   public readonly vpcLink: VpcLink;
   /** The integration an HTTP API route uses to reach the service. */
   public readonly integration: HttpRouteIntegration;
+  /**
+   * Bucket the load balancer writes its access logs to. Add lifecycle rules
+   * here if you want the logs expired or moved to a cheaper storage class.
+   */
+  public readonly accessLogsBucket: Bucket;
 
   constructor(scope: Construct, id: string, props: EcsHttpEndpointProps) {
     super(scope, id);
@@ -93,7 +109,9 @@ export class EcsHttpEndpoint extends Construct {
         vpc: props.vpc,
         description:
           'API Gateway VPC link. Reaches the internal load balancer only.',
-        allowAllOutbound: true,
+        // The load balancer's listener is the only thing the VPC link talks to,
+        // so the one egress rule below is written by hand instead.
+        allowAllOutbound: false,
       },
     );
     this.vpcLink = new VpcLink(this, 'VpcLink', {
@@ -101,6 +119,31 @@ export class EcsHttpEndpoint extends Construct {
       subnets: vpcSubnets,
       securityGroups: [vpcLinkSecurityGroup],
     });
+
+    // Bucket holding the load balancer's access logs. They name the target that
+    // served each request and its status code, which is what the HTTP API's own
+    // stage log cannot tell you when one task starts failing health checks.
+    this.accessLogsBucket = new Bucket(this, 'AccessLogsBucket', {
+      enforceSSL: true,
+      autoDeleteObjects: true,
+      removalPolicy: RemovalPolicy.DESTROY,
+      // SSE-S3 is the only server-side encryption a load balancer can write
+      // access logs through: delivery fails against an SSE-KMS bucket.
+      encryption: BucketEncryption.S3_MANAGED,
+      objectOwnership: ObjectOwnership.BUCKET_OWNER_PREFERRED,
+      publicReadAccess: false,
+      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+    });
+    suppressRules(
+      this.accessLogsBucket,
+      ['CKV_AWS_21'],
+      'Access log bucket does not need versioning enabled',
+    );
+    suppressRules(
+      this.accessLogsBucket,
+      ['CKV_AWS_18'],
+      'Access log bucket does not need its own S3 server access logs',
+    );
 
     this.loadBalancer = new ApplicationLoadBalancer(this, 'LoadBalancer', {
       vpc: props.vpc,
@@ -111,11 +154,42 @@ export class EcsHttpEndpoint extends Construct {
       // container.
       dropInvalidHeaderFields: true,
     });
-    suppressRules(
-      this.loadBalancer,
-      ['CKV_AWS_91'],
-      'API Gateway is the only caller, and its stage logs every request to CloudWatch Logs',
+    // Turning the logs on, rather than calling `loadBalancer.logAccessLogs`:
+    // that method grants the Region's legacy Elastic Load Balancing account, so
+    // it needs the stack's Region to be known while the template is built and
+    // fails on a Region-agnostic stack — the shape a CDK unit test uses. The
+    // log delivery service principal below is what Elastic Load Balancing
+    // documents today, and it is accepted in every Region.
+    this.accessLogsBucket.addToResourcePolicy(
+      new PolicyStatement({
+        actions: ['s3:PutObject'],
+        principals: [
+          new ServicePrincipal(
+            'logdelivery.elasticloadbalancing.amazonaws.com',
+          ),
+        ],
+        resources: [
+          this.accessLogsBucket.arnForObjects(
+            `AWSLogs/${Stack.of(this).account}/*`,
+          ),
+        ],
+      }),
     );
+    this.loadBalancer.setAttribute('access_logs.s3.enabled', 'true');
+    this.loadBalancer.setAttribute(
+      'access_logs.s3.bucket',
+      this.accessLogsBucket.bucketName,
+    );
+    // The load balancer is rejected if the policy is not in place by the time
+    // it is created.
+    const cfnLoadBalancer = this.loadBalancer.node.defaultChild;
+    const cfnBucketPolicy = this.accessLogsBucket.policy?.node.defaultChild;
+    if (
+      CfnResource.isCfnResource(cfnLoadBalancer) &&
+      CfnResource.isCfnResource(cfnBucketPolicy)
+    ) {
+      cfnLoadBalancer.addResourceDependency(cfnBucketPolicy);
+    }
 
     this.listener = this.loadBalancer.addListener('Listener', {
       port: LISTENER_PORT,
@@ -126,6 +200,14 @@ export class EcsHttpEndpoint extends Construct {
     });
     this.listener.connections.allowDefaultPortFrom(
       vpcLinkSecurityGroup,
+      'API Gateway VPC link to the load balancer',
+    );
+    // `allowDefaultPortFrom` writes the load balancer's inbound rule only, so
+    // the VPC link's matching egress rule is added here. It is the group's only
+    // egress rule.
+    vpcLinkSecurityGroup.connections.allowTo(
+      this.loadBalancer,
+      Port.tcp(LISTENER_PORT),
       'API Gateway VPC link to the load balancer',
     );
     suppressRules(
