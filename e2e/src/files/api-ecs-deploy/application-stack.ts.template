@@ -1,0 +1,24 @@
+import * as cdk from 'aws-cdk-lib';
+import { Vpc } from 'aws-cdk-lib/aws-ec2';
+import { Construct } from 'constructs';
+import { MyApi } from '@e2e-test/common-constructs';
+
+export class ApplicationStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    // One VPC for every API in this stack. One NAT gateway keeps the run under
+    // the default per-region EIP quota while the other deploy jobs run in
+    // parallel.
+    const vpc = new Vpc(this, 'Vpc', { natGateways: 1 });
+
+    // The ECS-hosted tRPC API: a Fargate service, an internal load balancer
+    // and the VPC link its HTTP API reaches the load balancer through.
+    const myApi = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this, { vpc }).build(),
+    });
+
+    // What the test calls, signed and unsigned.
+    new cdk.CfnOutput(this, 'MyApiUrl', { value: myApi.url });
+  }
+}
