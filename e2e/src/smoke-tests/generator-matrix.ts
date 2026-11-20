@@ -133,6 +133,19 @@ export const runGeneratorMatrix = async (
     opts,
   );
 
+  // An API hosted as a container service on Amazon ECS. Only the CDK provider
+  // implements `http-ecs`. Nothing beyond `--infra` is passed: the integration
+  // pattern defaults to `shared` for this infra, and the lane covers that
+  // default being resolved by the generator rather than by the caller. The
+  // application stack instantiates it, so the build synthesises its load
+  // balancer and checkov scans it.
+  if (iac === 'cdk') {
+    await runCLI(
+      `generate @aws/nx-plugin:ts#api --name=my-api-ecs --infra=http-ecs --no-interactive${deferFlag}`,
+      opts,
+    );
+  }
+
   // Python project + lambda function.
   await runCLI(
     `generate @aws/nx-plugin:py#project --name=py-project --type=application --no-interactive${deferFlag}`,

@@ -214,6 +214,20 @@ export const internalTestMatrixGenerator = async (
     await pyApiGenerator(tree, { ...api, ...projectDefaults });
   }
 
+  // An API hosted as a container service on Amazon ECS. Only the CDK provider
+  // implements `http-ecs`. `integrationPattern` is left unset so the generator
+  // resolves it from the infra, which is what a user who passes
+  // `--infra=http-ecs` alone gets.
+  if (iac === 'cdk') {
+    await tsApiGenerator(tree, {
+      name: 'my-api-ecs',
+      infra: 'http-ecs',
+      auth: 'iam',
+      iac: 'cdk',
+      ...projectDefaults,
+    });
+  }
+
   // Library projects hosting the components below, each with a lambda function.
   await pyProjectGenerator(tree, {
     name: 'py-project',
