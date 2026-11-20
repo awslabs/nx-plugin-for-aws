@@ -1,5 +1,164 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`trpc backend generator > infra=http-ecs > should keep the load-balancer wiring in one shared core construct > ecs-http-endpoint.ts 1`] = `
+"import { Duration } from 'aws-cdk-lib';
+import { HttpRouteIntegration, VpcLink } from 'aws-cdk-lib/aws-apigatewayv2';
+import { HttpAlbIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import {
+  IVpc,
+  SecurityGroup,
+  SubnetSelection,
+  SubnetType,
+} from 'aws-cdk-lib/aws-ec2';
+import { FargateService } from 'aws-cdk-lib/aws-ecs';
+import {
+  ApplicationListener,
+  ApplicationLoadBalancer,
+  ApplicationProtocol,
+  ApplicationTargetGroup,
+} from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import { Construct } from 'constructs';
+import { suppressRules } from '../checkov.js';
+
+/** Port the internal load balancer's listener accepts requests on. */
+const LISTENER_PORT = 80;
+
+/**
+ * Properties for an {@link EcsHttpEndpoint}.
+ */
+export interface EcsHttpEndpointProps {
+  /**
+   * VPC holding the load balancer and the VPC link. It must be the VPC the
+   * service runs in.
+   */
+  readonly vpc: IVpc;
+  /**
+   * Subnets for the load balancer and the VPC link. They must be private:
+   * nothing here is reachable from the internet.
+   *
+   * @default { subnetType: SubnetType.PRIVATE_WITH_EGRESS }
+   */
+  readonly vpcSubnets?: SubnetSelection;
+  /**
+   * The Fargate service to send requests to, registered as IP targets.
+   */
+  readonly service: FargateService;
+  /**
+   * Port the server listens on inside the container.
+   */
+  readonly containerPort: number;
+  /**
+   * Path the target group health check calls, which must answer 200.
+   */
+  readonly healthCheckPath: string;
+}
+
+/**
+ * The path API Gateway reaches a private container service through: a VPC
+ * link, an internal load balancer, and a target group holding the service's
+ * tasks.
+ *
+ * Every API that hosts its operations on Amazon ECS uses this construct, so
+ * the load balancer, the VPC link and the security-group rules between them
+ * are defined in one place.
+ *
+ * Exactly two connections are allowed: the VPC link to the load balancer's
+ * listener, and the load balancer to the tasks' container port. Neither the
+ * load balancer nor the tasks are reachable from the internet, and no rule
+ * names an address range.
+ */
+export class EcsHttpEndpoint extends Construct {
+  /** The internal load balancer in front of the service. */
+  public readonly loadBalancer: ApplicationLoadBalancer;
+  /** The load balancer's listener, which API Gateway integrates with. */
+  public readonly listener: ApplicationListener;
+  /** The target group holding the service's tasks. */
+  public readonly targetGroup: ApplicationTargetGroup;
+  /** API Gateway's path into the VPC. */
+  public readonly vpcLink: VpcLink;
+  /** The integration an HTTP API route uses to reach the service. */
+  public readonly integration: HttpRouteIntegration;
+
+  constructor(scope: Construct, id: string, props: EcsHttpEndpointProps) {
+    super(scope, id);
+    const vpcSubnets = props.vpcSubnets ?? {
+      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+    };
+
+    // Named so the load balancer's only inbound rule can reference it.
+    const vpcLinkSecurityGroup = new SecurityGroup(
+      this,
+      'VpcLinkSecurityGroup',
+      {
+        vpc: props.vpc,
+        description:
+          'API Gateway VPC link. Reaches the internal load balancer only.',
+        allowAllOutbound: true,
+      },
+    );
+    this.vpcLink = new VpcLink(this, 'VpcLink', {
+      vpc: props.vpc,
+      subnets: vpcSubnets,
+      securityGroups: [vpcLinkSecurityGroup],
+    });
+
+    this.loadBalancer = new ApplicationLoadBalancer(this, 'LoadBalancer', {
+      vpc: props.vpc,
+      vpcSubnets,
+      // Only API Gateway reaches this load balancer, through the VPC link.
+      internetFacing: false,
+      // Headers that do not parse are dropped rather than passed to the
+      // container.
+      dropInvalidHeaderFields: true,
+    });
+    suppressRules(
+      this.loadBalancer,
+      ['CKV_AWS_91'],
+      'API Gateway is the only caller, and its stage logs every request to CloudWatch Logs',
+    );
+
+    this.listener = this.loadBalancer.addListener('Listener', {
+      port: LISTENER_PORT,
+      protocol: ApplicationProtocol.HTTP,
+      // \`open\` defaults to true, which would allow 0.0.0.0/0 on the listener
+      // port. The VPC link's security group below is the only source allowed.
+      open: false,
+    });
+    this.listener.connections.allowDefaultPortFrom(
+      vpcLinkSecurityGroup,
+      'API Gateway VPC link to the load balancer',
+    );
+    suppressRules(
+      this.listener,
+      ['CKV_AWS_2', 'CKV_AWS_103'],
+      'TLS terminates at API Gateway; this listener is reachable only from the VPC link inside the VPC',
+    );
+
+    // Registering the service as a target adds the tasks' only inbound rule:
+    // the load balancer's security group on the container port.
+    this.targetGroup = this.listener.addTargets('Targets', {
+      port: props.containerPort,
+      protocol: ApplicationProtocol.HTTP,
+      targets: [props.service],
+      healthCheck: {
+        path: props.healthCheckPath,
+        healthyHttpCodes: '200',
+        interval: Duration.seconds(15),
+        timeout: Duration.seconds(5),
+        healthyThresholdCount: 2,
+        unhealthyThresholdCount: 3,
+      },
+      deregistrationDelay: Duration.seconds(30),
+    });
+
+    this.integration = new HttpAlbIntegration('AlbIntegration', this.listener, {
+      vpcLink: this.vpcLink,
+    });
+  }
+}
+"
+`;
+
 exports[`trpc backend generator > infra=http-ecs > should serve the tRPC router from the container entry point > apps/test-api/src/test-api-container/.dockerignore 1`] = `
 "*
 !index.js
@@ -104,27 +263,16 @@ exports[`trpc backend generator > infra=http-ecs > should vend the HTTP API and 
 "import { Construct } from 'constructs';
 import { Duration } from 'aws-cdk-lib';
 import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
-import {
-  IVpc,
-  SecurityGroup,
-  SubnetSelection,
-  SubnetType,
-} from 'aws-cdk-lib/aws-ec2';
-import {
-  ApplicationListener,
-  ApplicationLoadBalancer,
-  ApplicationProtocol,
-  ApplicationTargetGroup,
-} from 'aws-cdk-lib/aws-elasticloadbalancingv2';
-import { CfnApi, CorsHttpMethod, VpcLink } from 'aws-cdk-lib/aws-apigatewayv2';
+import { IVpc, SubnetSelection } from 'aws-cdk-lib/aws-ec2';
+import { CfnApi, CorsHttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpUserPoolAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
-import { HttpAlbIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
 import {
   ApiIntegrations,
   HttpApiIntegration,
   IntegrationBuilder,
 } from '../../core/api/utils.js';
+import { EcsHttpEndpoint } from '../../core/api/ecs-http-endpoint.js';
 import { findCloudFrontDomainNames } from '../../core/cloudfront.js';
 import { HttpApi } from '../../core/api/http-api.js';
 import {
@@ -139,8 +287,6 @@ type Operations = Procedures<AppRouter>;
 
 /** Port the container listens on, which the target group sends requests to. */
 const CONTAINER_PORT = 8080;
-/** Port the internal load balancer's listener accepts requests on. */
-const LISTENER_PORT = 80;
 
 /**
  * Where the API's container service runs. The construct never creates a VPC;
@@ -170,20 +316,14 @@ export interface TestApiBackendProps {
 }
 
 /**
- * The container service behind the API, and the load balancer and VPC link that
- * API Gateway reaches it through.
+ * The container service behind the API, and the load balancer and VPC link
+ * that API Gateway reaches it through.
  */
 export interface TestApiBackend {
   /** The ECS service running the API. */
   readonly service: TestApiContainer;
-  /** The internal load balancer in front of the service. */
-  readonly loadBalancer: ApplicationLoadBalancer;
-  /** The load balancer's listener, which the HTTP API integrates with. */
-  readonly listener: ApplicationListener;
-  /** The target group holding the service's tasks. */
-  readonly targetGroup: ApplicationTargetGroup;
-  /** API Gateway's path into the VPC. */
-  readonly vpcLink: VpcLink;
+  /** The load balancer, VPC link and target group in front of the service. */
+  readonly endpoint: EcsHttpEndpoint;
 }
 
 /**
@@ -222,9 +362,9 @@ export class TestApi<
   TIntegrations extends ApiIntegrations<Operations, HttpApiIntegration>,
 > extends HttpApi<Operations, TIntegrations> {
   /**
-   * Creates the API's container service, the internal load balancer and VPC
-   * link that API Gateway reaches it through, and a single integration which
-   * every operation is routed to.
+   * Creates the API's container service, the load balancer and VPC link that
+   * API Gateway reaches it through, and a single integration which every
+   * operation is routed to.
    *
    * @param scope - The CDK construct scope
    * @param props - The VPC the service runs in
@@ -242,65 +382,23 @@ export class TestApi<
         const backend = TestApi.createBackend(scope, options);
         return {
           ...backend,
-          integration: new HttpAlbIntegration(
-            'TestApiAlbIntegration',
-            backend.listener,
-            { vpcLink: backend.vpcLink },
-          ),
+          integration: backend.endpoint.integration,
         };
       },
     });
   };
 
   /**
-   * Creates the container service, the internal load balancer and the VPC
-   * link, and allows exactly the two connections the request path needs: the
-   * VPC link to the load balancer's listener, and the load balancer to the
-   * tasks' container port.
+   * Creates the container service and the endpoint API Gateway reaches it
+   * through. The endpoint allows exactly the two connections the request path
+   * needs: the VPC link to the load balancer's listener, and the load balancer
+   * to the tasks' container port.
    */
   private static createBackend(
     scope: Construct,
     props: TestApiBackendProps,
   ): TestApiBackend {
     const parent = new Construct(scope, 'TestApiBackend');
-    const vpcSubnets = props.vpcSubnets ?? {
-      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
-    };
-
-    // Named so the load balancer's only inbound rule can reference it.
-    const vpcLinkSecurityGroup = new SecurityGroup(
-      parent,
-      'VpcLinkSecurityGroup',
-      {
-        vpc: props.vpc,
-        description:
-          'API Gateway VPC link for TestApi. Reaches the internal load balancer only.',
-        allowAllOutbound: true,
-      },
-    );
-    const vpcLink = new VpcLink(parent, 'VpcLink', {
-      vpc: props.vpc,
-      subnets: vpcSubnets,
-      securityGroups: [vpcLinkSecurityGroup],
-    });
-
-    const loadBalancer = new ApplicationLoadBalancer(parent, 'LoadBalancer', {
-      vpc: props.vpc,
-      vpcSubnets,
-      // Only API Gateway reaches this load balancer, through the VPC link.
-      internetFacing: false,
-    });
-    const listener = loadBalancer.addListener('Listener', {
-      port: LISTENER_PORT,
-      protocol: ApplicationProtocol.HTTP,
-      // \`open\` defaults to true, which would allow 0.0.0.0/0 on the listener
-      // port. The VPC link's security group below is the only source allowed.
-      open: false,
-    });
-    listener.connections.allowDefaultPortFrom(
-      vpcLinkSecurityGroup,
-      'API Gateway VPC link to the load balancer',
-    );
 
     const service = new TestApiContainer(parent, 'Service', {
       // ECS replaces a task whose health check fails. Without a grace period
@@ -308,27 +406,18 @@ export class TestApi<
       healthCheckGracePeriod: Duration.minutes(2),
       ...props.service,
       vpc: props.vpc,
-      vpcSubnets,
+      vpcSubnets: props.vpcSubnets,
     });
 
-    // Registering the service as a target adds the tasks' only inbound rule:
-    // the load balancer's security group on the container port.
-    const targetGroup = listener.addTargets('Targets', {
-      port: CONTAINER_PORT,
-      protocol: ApplicationProtocol.HTTP,
-      targets: [service.service],
-      healthCheck: {
-        path: '/health',
-        healthyHttpCodes: '200',
-        interval: Duration.seconds(15),
-        timeout: Duration.seconds(5),
-        healthyThresholdCount: 2,
-        unhealthyThresholdCount: 3,
-      },
-      deregistrationDelay: Duration.seconds(30),
+    const endpoint = new EcsHttpEndpoint(parent, 'Endpoint', {
+      vpc: props.vpc,
+      vpcSubnets: props.vpcSubnets,
+      service: service.service,
+      containerPort: props.service?.containerPort ?? CONTAINER_PORT,
+      healthCheckPath: '/health',
     });
 
-    return { service, loadBalancer, listener, targetGroup, vpcLink };
+    return { service, endpoint };
   }
 
   constructor(
@@ -416,30 +505,19 @@ exports[`trpc backend generator > infra=http-ecs > should vend the HTTP API and 
 import * as url from 'url';
 import { Duration } from 'aws-cdk-lib';
 import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
-import {
-  IVpc,
-  SecurityGroup,
-  SubnetSelection,
-  SubnetType,
-} from 'aws-cdk-lib/aws-ec2';
-import {
-  ApplicationListener,
-  ApplicationLoadBalancer,
-  ApplicationProtocol,
-  ApplicationTargetGroup,
-} from 'aws-cdk-lib/aws-elasticloadbalancingv2';
-import { CfnApi, CorsHttpMethod, VpcLink } from 'aws-cdk-lib/aws-apigatewayv2';
+import { IVpc, SubnetSelection } from 'aws-cdk-lib/aws-ec2';
+import { CfnApi, CorsHttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
 import {
   HttpLambdaAuthorizer,
   HttpLambdaResponseType,
 } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
-import { HttpAlbIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import { Code, Function, Runtime, Tracing } from 'aws-cdk-lib/aws-lambda';
 import {
   ApiIntegrations,
   HttpApiIntegration,
   IntegrationBuilder,
 } from '../../core/api/utils.js';
+import { EcsHttpEndpoint } from '../../core/api/ecs-http-endpoint.js';
 import { findCloudFrontDomainNames } from '../../core/cloudfront.js';
 import { HttpApi } from '../../core/api/http-api.js';
 import {
@@ -454,8 +532,6 @@ type Operations = Procedures<AppRouter>;
 
 /** Port the container listens on, which the target group sends requests to. */
 const CONTAINER_PORT = 8080;
-/** Port the internal load balancer's listener accepts requests on. */
-const LISTENER_PORT = 80;
 
 /**
  * Where the API's container service runs. The construct never creates a VPC;
@@ -485,20 +561,14 @@ export interface TestApiBackendProps {
 }
 
 /**
- * The container service behind the API, and the load balancer and VPC link that
- * API Gateway reaches it through.
+ * The container service behind the API, and the load balancer and VPC link
+ * that API Gateway reaches it through.
  */
 export interface TestApiBackend {
   /** The ECS service running the API. */
   readonly service: TestApiContainer;
-  /** The internal load balancer in front of the service. */
-  readonly loadBalancer: ApplicationLoadBalancer;
-  /** The load balancer's listener, which the HTTP API integrates with. */
-  readonly listener: ApplicationListener;
-  /** The target group holding the service's tasks. */
-  readonly targetGroup: ApplicationTargetGroup;
-  /** API Gateway's path into the VPC. */
-  readonly vpcLink: VpcLink;
+  /** The load balancer, VPC link and target group in front of the service. */
+  readonly endpoint: EcsHttpEndpoint;
 }
 
 /**
@@ -530,9 +600,9 @@ export class TestApi<
   TIntegrations extends ApiIntegrations<Operations, HttpApiIntegration>,
 > extends HttpApi<Operations, TIntegrations> {
   /**
-   * Creates the API's container service, the internal load balancer and VPC
-   * link that API Gateway reaches it through, and a single integration which
-   * every operation is routed to.
+   * Creates the API's container service, the load balancer and VPC link that
+   * API Gateway reaches it through, and a single integration which every
+   * operation is routed to.
    *
    * @param scope - The CDK construct scope
    * @param props - The VPC the service runs in
@@ -550,65 +620,23 @@ export class TestApi<
         const backend = TestApi.createBackend(scope, options);
         return {
           ...backend,
-          integration: new HttpAlbIntegration(
-            'TestApiAlbIntegration',
-            backend.listener,
-            { vpcLink: backend.vpcLink },
-          ),
+          integration: backend.endpoint.integration,
         };
       },
     });
   };
 
   /**
-   * Creates the container service, the internal load balancer and the VPC
-   * link, and allows exactly the two connections the request path needs: the
-   * VPC link to the load balancer's listener, and the load balancer to the
-   * tasks' container port.
+   * Creates the container service and the endpoint API Gateway reaches it
+   * through. The endpoint allows exactly the two connections the request path
+   * needs: the VPC link to the load balancer's listener, and the load balancer
+   * to the tasks' container port.
    */
   private static createBackend(
     scope: Construct,
     props: TestApiBackendProps,
   ): TestApiBackend {
     const parent = new Construct(scope, 'TestApiBackend');
-    const vpcSubnets = props.vpcSubnets ?? {
-      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
-    };
-
-    // Named so the load balancer's only inbound rule can reference it.
-    const vpcLinkSecurityGroup = new SecurityGroup(
-      parent,
-      'VpcLinkSecurityGroup',
-      {
-        vpc: props.vpc,
-        description:
-          'API Gateway VPC link for TestApi. Reaches the internal load balancer only.',
-        allowAllOutbound: true,
-      },
-    );
-    const vpcLink = new VpcLink(parent, 'VpcLink', {
-      vpc: props.vpc,
-      subnets: vpcSubnets,
-      securityGroups: [vpcLinkSecurityGroup],
-    });
-
-    const loadBalancer = new ApplicationLoadBalancer(parent, 'LoadBalancer', {
-      vpc: props.vpc,
-      vpcSubnets,
-      // Only API Gateway reaches this load balancer, through the VPC link.
-      internetFacing: false,
-    });
-    const listener = loadBalancer.addListener('Listener', {
-      port: LISTENER_PORT,
-      protocol: ApplicationProtocol.HTTP,
-      // \`open\` defaults to true, which would allow 0.0.0.0/0 on the listener
-      // port. The VPC link's security group below is the only source allowed.
-      open: false,
-    });
-    listener.connections.allowDefaultPortFrom(
-      vpcLinkSecurityGroup,
-      'API Gateway VPC link to the load balancer',
-    );
 
     const service = new TestApiContainer(parent, 'Service', {
       // ECS replaces a task whose health check fails. Without a grace period
@@ -616,27 +644,18 @@ export class TestApi<
       healthCheckGracePeriod: Duration.minutes(2),
       ...props.service,
       vpc: props.vpc,
-      vpcSubnets,
+      vpcSubnets: props.vpcSubnets,
     });
 
-    // Registering the service as a target adds the tasks' only inbound rule:
-    // the load balancer's security group on the container port.
-    const targetGroup = listener.addTargets('Targets', {
-      port: CONTAINER_PORT,
-      protocol: ApplicationProtocol.HTTP,
-      targets: [service.service],
-      healthCheck: {
-        path: '/health',
-        healthyHttpCodes: '200',
-        interval: Duration.seconds(15),
-        timeout: Duration.seconds(5),
-        healthyThresholdCount: 2,
-        unhealthyThresholdCount: 3,
-      },
-      deregistrationDelay: Duration.seconds(30),
+    const endpoint = new EcsHttpEndpoint(parent, 'Endpoint', {
+      vpc: props.vpc,
+      vpcSubnets: props.vpcSubnets,
+      service: service.service,
+      containerPort: props.service?.containerPort ?? CONTAINER_PORT,
+      healthCheckPath: '/health',
     });
 
-    return { service, loadBalancer, listener, targetGroup, vpcLink };
+    return { service, endpoint };
   }
 
   constructor(
@@ -742,27 +761,16 @@ exports[`trpc backend generator > infra=http-ecs > should vend the HTTP API and 
 "import { Construct } from 'constructs';
 import { Duration } from 'aws-cdk-lib';
 import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
-import {
-  IVpc,
-  SecurityGroup,
-  SubnetSelection,
-  SubnetType,
-} from 'aws-cdk-lib/aws-ec2';
-import {
-  ApplicationListener,
-  ApplicationLoadBalancer,
-  ApplicationProtocol,
-  ApplicationTargetGroup,
-} from 'aws-cdk-lib/aws-elasticloadbalancingv2';
-import { CfnApi, CorsHttpMethod, VpcLink } from 'aws-cdk-lib/aws-apigatewayv2';
+import { IVpc, SubnetSelection } from 'aws-cdk-lib/aws-ec2';
+import { CfnApi, CorsHttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpIamAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
-import { HttpAlbIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import { Grant, IGrantable } from 'aws-cdk-lib/aws-iam';
 import {
   ApiIntegrations,
   HttpApiIntegration,
   IntegrationBuilder,
 } from '../../core/api/utils.js';
+import { EcsHttpEndpoint } from '../../core/api/ecs-http-endpoint.js';
 import { findCloudFrontDomainNames } from '../../core/cloudfront.js';
 import { HttpApi } from '../../core/api/http-api.js';
 import {
@@ -777,8 +785,6 @@ type Operations = Procedures<AppRouter>;
 
 /** Port the container listens on, which the target group sends requests to. */
 const CONTAINER_PORT = 8080;
-/** Port the internal load balancer's listener accepts requests on. */
-const LISTENER_PORT = 80;
 
 /**
  * Where the API's container service runs. The construct never creates a VPC;
@@ -808,20 +814,14 @@ export interface TestApiBackendProps {
 }
 
 /**
- * The container service behind the API, and the load balancer and VPC link that
- * API Gateway reaches it through.
+ * The container service behind the API, and the load balancer and VPC link
+ * that API Gateway reaches it through.
  */
 export interface TestApiBackend {
   /** The ECS service running the API. */
   readonly service: TestApiContainer;
-  /** The internal load balancer in front of the service. */
-  readonly loadBalancer: ApplicationLoadBalancer;
-  /** The load balancer's listener, which the HTTP API integrates with. */
-  readonly listener: ApplicationListener;
-  /** The target group holding the service's tasks. */
-  readonly targetGroup: ApplicationTargetGroup;
-  /** API Gateway's path into the VPC. */
-  readonly vpcLink: VpcLink;
+  /** The load balancer, VPC link and target group in front of the service. */
+  readonly endpoint: EcsHttpEndpoint;
 }
 
 /**
@@ -853,9 +853,9 @@ export class TestApi<
   TIntegrations extends ApiIntegrations<Operations, HttpApiIntegration>,
 > extends HttpApi<Operations, TIntegrations> {
   /**
-   * Creates the API's container service, the internal load balancer and VPC
-   * link that API Gateway reaches it through, and a single integration which
-   * every operation is routed to.
+   * Creates the API's container service, the load balancer and VPC link that
+   * API Gateway reaches it through, and a single integration which every
+   * operation is routed to.
    *
    * @param scope - The CDK construct scope
    * @param props - The VPC the service runs in
@@ -873,65 +873,23 @@ export class TestApi<
         const backend = TestApi.createBackend(scope, options);
         return {
           ...backend,
-          integration: new HttpAlbIntegration(
-            'TestApiAlbIntegration',
-            backend.listener,
-            { vpcLink: backend.vpcLink },
-          ),
+          integration: backend.endpoint.integration,
         };
       },
     });
   };
 
   /**
-   * Creates the container service, the internal load balancer and the VPC
-   * link, and allows exactly the two connections the request path needs: the
-   * VPC link to the load balancer's listener, and the load balancer to the
-   * tasks' container port.
+   * Creates the container service and the endpoint API Gateway reaches it
+   * through. The endpoint allows exactly the two connections the request path
+   * needs: the VPC link to the load balancer's listener, and the load balancer
+   * to the tasks' container port.
    */
   private static createBackend(
     scope: Construct,
     props: TestApiBackendProps,
   ): TestApiBackend {
     const parent = new Construct(scope, 'TestApiBackend');
-    const vpcSubnets = props.vpcSubnets ?? {
-      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
-    };
-
-    // Named so the load balancer's only inbound rule can reference it.
-    const vpcLinkSecurityGroup = new SecurityGroup(
-      parent,
-      'VpcLinkSecurityGroup',
-      {
-        vpc: props.vpc,
-        description:
-          'API Gateway VPC link for TestApi. Reaches the internal load balancer only.',
-        allowAllOutbound: true,
-      },
-    );
-    const vpcLink = new VpcLink(parent, 'VpcLink', {
-      vpc: props.vpc,
-      subnets: vpcSubnets,
-      securityGroups: [vpcLinkSecurityGroup],
-    });
-
-    const loadBalancer = new ApplicationLoadBalancer(parent, 'LoadBalancer', {
-      vpc: props.vpc,
-      vpcSubnets,
-      // Only API Gateway reaches this load balancer, through the VPC link.
-      internetFacing: false,
-    });
-    const listener = loadBalancer.addListener('Listener', {
-      port: LISTENER_PORT,
-      protocol: ApplicationProtocol.HTTP,
-      // \`open\` defaults to true, which would allow 0.0.0.0/0 on the listener
-      // port. The VPC link's security group below is the only source allowed.
-      open: false,
-    });
-    listener.connections.allowDefaultPortFrom(
-      vpcLinkSecurityGroup,
-      'API Gateway VPC link to the load balancer',
-    );
 
     const service = new TestApiContainer(parent, 'Service', {
       // ECS replaces a task whose health check fails. Without a grace period
@@ -939,27 +897,18 @@ export class TestApi<
       healthCheckGracePeriod: Duration.minutes(2),
       ...props.service,
       vpc: props.vpc,
-      vpcSubnets,
+      vpcSubnets: props.vpcSubnets,
     });
 
-    // Registering the service as a target adds the tasks' only inbound rule:
-    // the load balancer's security group on the container port.
-    const targetGroup = listener.addTargets('Targets', {
-      port: CONTAINER_PORT,
-      protocol: ApplicationProtocol.HTTP,
-      targets: [service.service],
-      healthCheck: {
-        path: '/health',
-        healthyHttpCodes: '200',
-        interval: Duration.seconds(15),
-        timeout: Duration.seconds(5),
-        healthyThresholdCount: 2,
-        unhealthyThresholdCount: 3,
-      },
-      deregistrationDelay: Duration.seconds(30),
+    const endpoint = new EcsHttpEndpoint(parent, 'Endpoint', {
+      vpc: props.vpc,
+      vpcSubnets: props.vpcSubnets,
+      service: service.service,
+      containerPort: props.service?.containerPort ?? CONTAINER_PORT,
+      healthCheckPath: '/health',
     });
 
-    return { service, loadBalancer, listener, targetGroup, vpcLink };
+    return { service, endpoint };
   }
 
   constructor(

@@ -213,6 +213,11 @@ const addApiGatewayCdkConstructs = async (
   const coreApiType = options.constructType === 'rest' ? 'rest' : 'http';
   generateCoreApiFile(coreApiType);
   generateCoreApiFile('utils');
+  if (options.constructType === 'http-ecs') {
+    // The load balancer, VPC link and target group every ECS-hosted API
+    // shares, so each API's own construct only names its service.
+    generateCoreApiFile('ecs');
+  }
   if (options.backend.type === 'trpc') {
     generateCoreApiFile('trpc');
   }

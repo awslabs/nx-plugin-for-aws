@@ -4,22 +4,10 @@ import * as url from 'url';
 <%_ } _%>
 import { Duration } from 'aws-cdk-lib';
 import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
-import {
-  IVpc,
-  SecurityGroup,
-  SubnetSelection,
-  SubnetType,
-} from 'aws-cdk-lib/aws-ec2';
-import {
-  ApplicationListener,
-  ApplicationLoadBalancer,
-  ApplicationProtocol,
-  ApplicationTargetGroup,
-} from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import { IVpc, SubnetSelection } from 'aws-cdk-lib/aws-ec2';
 import {
   CfnApi,
   CorsHttpMethod,
-  VpcLink,
 } from 'aws-cdk-lib/aws-apigatewayv2';
 import {
   <%_ if (auth === 'iam') { _%>
@@ -31,7 +19,6 @@ import {
   HttpLambdaResponseType,
   <%_ } _%>
 } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
-import { HttpAlbIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 <%_ if (auth === 'custom') { _%>
 import { Code, Function, Runtime, Tracing } from 'aws-cdk-lib/aws-lambda';
 <%_ } _%>
@@ -46,6 +33,7 @@ import {
   HttpApiIntegration,
   IntegrationBuilder,
 } from '../../core/api/utils<% if (esm) { %>.js<% } %>';
+import { EcsHttpEndpoint } from '../../core/api/ecs-http-endpoint<% if (esm) { %>.js<% } %>';
 import { findCloudFrontDomainNames } from '../../core/cloudfront<% if (esm) { %>.js<% } %>';
 <%_ /* Alias the core class only when this API's name would shadow it. */ _%>
 <%_ const coreHttpApi = apiNameClassName === 'HttpApi' ? 'CoreHttpApi' : 'HttpApi'; _%>
@@ -54,16 +42,22 @@ import {
   <%= ecs.serviceClassName %>,
   <%= ecs.serviceClassName %>Props,
 } from '../services/<%- ecs.serviceFileKebabCase %><% if (esm) { %>.js<% } %>';
+<%_ if (backend.type === 'trpc') { _%>
 import { Procedures, routerToOperations } from '../../core/api/trpc-utils<% if (esm) { %>.js<% } %>';
 import { AppRouter, appRouter } from '<%= backend.projectAlias %>';
 
 // String union type for all API operation names
 type Operations = Procedures<AppRouter>;
+<%_ } else { _%>
+import {
+  OPERATION_DETAILS,
+  Operations,
+} from '../../generated/<%- apiNameKebabCase %>/metadata.gen.js';
+<%_ } _%>
+<%_ const operations = backend.type === 'trpc' ? 'routerToOperations(appRouter)' : 'OPERATION_DETAILS'; _%>
 
 /** Port the container listens on, which the target group sends requests to. */
 const CONTAINER_PORT = <%= ecs.containerPort %>;
-/** Port the internal load balancer's listener accepts requests on. */
-const LISTENER_PORT = 80;
 
 /**
  * Where the API's container service runs. The construct never creates a VPC;
@@ -96,20 +90,14 @@ export interface <%= apiNameClassName %>BackendProps {
 }
 
 /**
- * The container service behind the API, and the load balancer and VPC link that
- * API Gateway reaches it through.
+ * The container service behind the API, and the load balancer and VPC link
+ * that API Gateway reaches it through.
  */
 export interface <%= apiNameClassName %>Backend {
   /** The ECS service running the API. */
   readonly service: <%= ecs.serviceClassName %>;
-  /** The internal load balancer in front of the service. */
-  readonly loadBalancer: ApplicationLoadBalancer;
-  /** The load balancer's listener, which the HTTP API integrates with. */
-  readonly listener: ApplicationListener;
-  /** The target group holding the service's tasks. */
-  readonly targetGroup: ApplicationTargetGroup;
-  /** API Gateway's path into the VPC. */
-  readonly vpcLink: VpcLink;
+  /** The load balancer, VPC link and target group in front of the service. */
+  readonly endpoint: EcsHttpEndpoint;
 }
 
 /**
@@ -150,9 +138,9 @@ export class <%= apiNameClassName %><
   TIntegrations extends ApiIntegrations<Operations, HttpApiIntegration>,
 > extends <%= coreHttpApi %><Operations, TIntegrations> {
   /**
-   * Creates the API's container service, the internal load balancer and VPC
-   * link that API Gateway reaches it through, and a single integration which
-   * every operation is routed to.
+   * Creates the API's container service, the load balancer and VPC link that
+   * API Gateway reaches it through, and a single integration which every
+   * operation is routed to.
    *
    * @param scope - The CDK construct scope
    * @param props - The VPC the service runs in
@@ -164,7 +152,7 @@ export class <%= apiNameClassName %><
   ) => {
     return IntegrationBuilder.http({
       pattern: 'shared',
-      operations: routerToOperations(appRouter),
+      operations: <%- operations %>,
       defaultIntegrationOptions: props,
       buildDefaultIntegration: (
         _op,
@@ -173,65 +161,23 @@ export class <%= apiNameClassName %><
         const backend = <%= apiNameClassName %>.createBackend(scope, options);
         return {
           ...backend,
-          integration: new HttpAlbIntegration(
-            '<%= apiNameClassName %>AlbIntegration',
-            backend.listener,
-            { vpcLink: backend.vpcLink },
-          ),
+          integration: backend.endpoint.integration,
         };
       },
     });
   };
 
   /**
-   * Creates the container service, the internal load balancer and the VPC
-   * link, and allows exactly the two connections the request path needs: the
-   * VPC link to the load balancer's listener, and the load balancer to the
-   * tasks' container port.
+   * Creates the container service and the endpoint API Gateway reaches it
+   * through. The endpoint allows exactly the two connections the request path
+   * needs: the VPC link to the load balancer's listener, and the load balancer
+   * to the tasks' container port.
    */
   private static createBackend(
     scope: Construct,
     props: <%= apiNameClassName %>BackendProps,
   ): <%= apiNameClassName %>Backend {
     const parent = new Construct(scope, '<%= apiNameClassName %>Backend');
-    const vpcSubnets = props.vpcSubnets ?? {
-      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
-    };
-
-    // Named so the load balancer's only inbound rule can reference it.
-    const vpcLinkSecurityGroup = new SecurityGroup(
-      parent,
-      'VpcLinkSecurityGroup',
-      {
-        vpc: props.vpc,
-        description:
-          'API Gateway VPC link for <%= apiNameClassName %>. Reaches the internal load balancer only.',
-        allowAllOutbound: true,
-      },
-    );
-    const vpcLink = new VpcLink(parent, 'VpcLink', {
-      vpc: props.vpc,
-      subnets: vpcSubnets,
-      securityGroups: [vpcLinkSecurityGroup],
-    });
-
-    const loadBalancer = new ApplicationLoadBalancer(parent, 'LoadBalancer', {
-      vpc: props.vpc,
-      vpcSubnets,
-      // Only API Gateway reaches this load balancer, through the VPC link.
-      internetFacing: false,
-    });
-    const listener = loadBalancer.addListener('Listener', {
-      port: LISTENER_PORT,
-      protocol: ApplicationProtocol.HTTP,
-      // `open` defaults to true, which would allow 0.0.0.0/0 on the listener
-      // port. The VPC link's security group below is the only source allowed.
-      open: false,
-    });
-    listener.connections.allowDefaultPortFrom(
-      vpcLinkSecurityGroup,
-      'API Gateway VPC link to the load balancer',
-    );
 
     const service = new <%= ecs.serviceClassName %>(parent, 'Service', {
       // ECS replaces a task whose health check fails. Without a grace period
@@ -239,27 +185,18 @@ export class <%= apiNameClassName %><
       healthCheckGracePeriod: Duration.minutes(2),
       ...props.service,
       vpc: props.vpc,
-      vpcSubnets,
+      vpcSubnets: props.vpcSubnets,
     });
 
-    // Registering the service as a target adds the tasks' only inbound rule:
-    // the load balancer's security group on the container port.
-    const targetGroup = listener.addTargets('Targets', {
-      port: CONTAINER_PORT,
-      protocol: ApplicationProtocol.HTTP,
-      targets: [service.service],
-      healthCheck: {
-        path: '<%- ecs.healthCheckPath %>',
-        healthyHttpCodes: '200',
-        interval: Duration.seconds(15),
-        timeout: Duration.seconds(5),
-        healthyThresholdCount: 2,
-        unhealthyThresholdCount: 3,
-      },
-      deregistrationDelay: Duration.seconds(30),
+    const endpoint = new EcsHttpEndpoint(parent, 'Endpoint', {
+      vpc: props.vpc,
+      vpcSubnets: props.vpcSubnets,
+      service: service.service,
+      containerPort: props.service?.containerPort ?? CONTAINER_PORT,
+      healthCheckPath: '<%- ecs.healthCheckPath %>',
     });
 
-    return { service, loadBalancer, listener, targetGroup, vpcLink };
+    return { service, endpoint };
   }
 
   constructor(
@@ -269,6 +206,7 @@ export class <%= apiNameClassName %><
   ) {
     <%_ if (auth === 'custom') { _%>
     const authorizerFunction = new Function(scope, '<%= apiNameClassName %>AuthorizerFunction', {
+      <%_ if (['trpc', 'smithy'].includes(backend.type)) { _%>
       runtime: <%- nodeRuntime %>,
       handler: 'index.handler',
       code: Code.fromAsset(
@@ -279,6 +217,18 @@ export class <%= apiNameClassName %><
           ),
         ),
       ),
+      <%_ } else if (backend.type === 'fastapi') { _%>
+      runtime: <%- pythonRuntime %>,
+      handler: '<%- backend.moduleName %>.authorizer.handler',
+      code: Code.fromAsset(
+        url.fileURLToPath(
+          new URL(
+            '../../../../../../<%- backend.bundleOutputDir %>',
+            <% if (esm) { %>import.meta.url<% } else { %>require('url').pathToFileURL(__filename).href<% } %>,
+          ),
+        ),
+      ),
+      <%_ } _%>
       timeout: Duration.seconds(10),
       tracing: Tracing.ACTIVE,
     });
@@ -308,7 +258,7 @@ export class <%= apiNameClassName %><
         responseTypes: [HttpLambdaResponseType.SIMPLE],
       }),
       <%_ } _%>
-      operations: routerToOperations(appRouter),
+      operations: <%- operations %>,
       ...props,
     });
   }

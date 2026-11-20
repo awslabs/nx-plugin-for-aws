@@ -1456,6 +1456,30 @@ export const echo = publicProcedure.query(() => ({ message: 'hi' }));
       },
     );
 
+    it('should keep the load-balancer wiring in one shared core construct', async () => {
+      await tsTrpcApiGenerator(tree, ecsOptions('iam'));
+
+      expect(
+        tree.read(
+          'packages/common/constructs/src/core/api/ecs-http-endpoint.ts',
+          'utf-8',
+        ),
+      ).toMatchSnapshot('ecs-http-endpoint.ts');
+
+      // The API's own construct names its service and nothing else about the
+      // request path, so a change to that path is one file for every API.
+      const api = tree.read(
+        'packages/common/constructs/src/app/apis/test-api.ts',
+        'utf-8',
+      );
+      expect(api).toContain(
+        "import { EcsHttpEndpoint } from '../../core/api/ecs-http-endpoint.js'",
+      );
+      expect(api).not.toContain('ApplicationLoadBalancer');
+      expect(api).not.toContain('VpcLink');
+      expect(api).not.toContain('addTargets');
+    });
+
     it('should serve the tRPC router from the container entry point', async () => {
       await tsTrpcApiGenerator(tree, ecsOptions('iam'));
 

@@ -240,6 +240,7 @@ describe('http-ecs API construct synth', () => {
       'core/workspace.ts',
       'core/api/utils.ts',
       'core/api/http-api.ts',
+      'core/api/ecs-http-endpoint.ts',
       'core/api/trpc-utils.ts',
       'core/container/ecs-service.ts',
       'app/services/test-api-container.ts',
@@ -310,7 +311,7 @@ describe('http-ecs API construct synth', () => {
       ).filter(
         ([id, r]) =>
           r.Type === 'AWS::EC2::SecurityGroup' &&
-          id.includes('TestApiBackendLoadBalancer'),
+          id.includes('TestApiBackendEndpointLoadBalancer'),
       );
       const vpcLinkSecurityGroupId = Object.keys(out.resources).find(
         (id) =>
@@ -363,8 +364,59 @@ describe('http-ecs API construct synth', () => {
       expect(
         ingress[0].Properties.SourceSecurityGroupId['Fn::GetAtt'][0],
       ).toEqual(
-        expect.stringContaining('TestApiBackendLoadBalancerSecurityGroup'),
+        expect.stringContaining(
+          'TestApiBackendEndpointLoadBalancerSecurityGroup',
+        ),
       );
+    });
+
+    it('should define the load balancer in the shared core construct', () => {
+      const [[loadBalancerId]] = out.ofType(
+        'AWS::ElasticLoadBalancingV2::LoadBalancer',
+      );
+      // The construct path proves the resource comes from the shared
+      // EcsHttpEndpoint, not from the API's own construct.
+      expect(loadBalancerId).toContain('TestApiBackendEndpoint');
+    });
+
+    it('should drop invalid headers at the load balancer', () => {
+      const [[, loadBalancer]] = out.ofType(
+        'AWS::ElasticLoadBalancingV2::LoadBalancer',
+      );
+      expect(loadBalancer.Properties.LoadBalancerAttributes).toEqual(
+        expect.arrayContaining([
+          {
+            Key: 'routing.http.drop_invalid_header_fields.enabled',
+            Value: 'true',
+          },
+        ]),
+      );
+    });
+
+    it('should explain every checkov rule it skips', () => {
+      const skipped = Object.values(out.resources)
+        .flatMap(
+          (r) =>
+            ((r as unknown as { Metadata?: { checkov?: { skip?: unknown[] } } })
+              .Metadata?.checkov?.skip ?? []) as {
+              id: string;
+              comment: string;
+            }[],
+        )
+        // The access log group's skips come from the core HTTP API construct.
+        .filter(
+          (skip) => skip.id !== 'CKV_AWS_66' && skip.id !== 'CKV_AWS_338',
+        );
+      // Exactly the rules checkov 3.4.5 raises for this design: ALB access
+      // logs, and HTTPS and TLS 1.2 on a listener that TLS never reaches.
+      expect(skipped.map((skip) => skip.id).sort()).toEqual([
+        'CKV_AWS_103',
+        'CKV_AWS_2',
+        'CKV_AWS_91',
+      ]);
+      for (const skip of skipped) {
+        expect(skip.comment).not.toBe('');
+      }
     });
 
     it('should never allow an address range inbound', () => {
