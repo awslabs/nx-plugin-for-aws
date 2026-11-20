@@ -176,6 +176,43 @@ export const addApiGatewayInfra = async <const D extends DependencyDeclaration>(
 };
 
 /**
+ * Vends the `EcsHttpEndpoint` core construct: API Gateway's VPC link, an
+ * internal load balancer with its access log bucket, and a target group
+ * holding a private container service's tasks.
+ *
+ * Exported on its own so a generator that puts an HTTP endpoint in front of a
+ * container service without going through API Gateway can vend the same file.
+ * `addApiGatewayInfra` calls it for `constructType: 'http-ecs'`.
+ *
+ * The shared constructs project has to exist first: the file lands in it, and
+ * imports the `suppressRules` helper that lives there.
+ */
+export const addEcsHttpEndpointConstruct = (tree: Tree) => {
+  generateFiles(
+    tree,
+    joinPathFragments(
+      import.meta.dirname,
+      'files',
+      'cdk',
+      'core',
+      'api',
+      'ecs',
+    ),
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_CONSTRUCTS_DIR,
+      'src',
+      'core',
+      'api',
+    ),
+    esmVars(tree),
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
+    },
+  );
+};
+
+/**
  * Add an API CDK construct, and update the Runtime Config type to export its url
  */
 const addApiGatewayCdkConstructs = async (
@@ -216,7 +253,7 @@ const addApiGatewayCdkConstructs = async (
   if (options.constructType === 'http-ecs') {
     // The load balancer, VPC link and target group every ECS-hosted API
     // shares, so each API's own construct only names its service.
-    generateCoreApiFile('ecs');
+    addEcsHttpEndpointConstruct(tree);
   }
   if (options.backend.type === 'trpc') {
     generateCoreApiFile('trpc');
