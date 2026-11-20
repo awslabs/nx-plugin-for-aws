@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -41,7 +41,7 @@ export interface DeployedResourceIds {
   dbClusterIds: string[];
   /** ARNs of Secrets Manager secrets (the Aurora admin secret). */
   secretIds: string[];
-  /** Ids or ARNs of customer-managed KMS keys (the container log keys). */
+  /** Ids or ARNs of customer-managed KMS keys (the services' encryption keys). */
   kmsKeyIds: string[];
 }
 
@@ -171,6 +171,49 @@ export function findLeftoverTerraformState(infraSrcDir: string): string[] {
   } catch (e) {
     return [`Could not read the Terraform state in ${infraSrcDir}: ${e}`];
   }
+}
+
+/** The shape of `terraform show -json` this file reads. */
+interface TerraformStateModule {
+  resources?: { type?: string; values?: Record<string, unknown> }[];
+  child_modules?: TerraformStateModule[];
+}
+
+/** Every resource of `module` and of the modules below it. */
+const flattenTerraformModule = (
+  module: TerraformStateModule,
+): { type?: string; values?: Record<string, unknown> }[] => [
+  ...(module.resources ?? []),
+  ...(module.child_modules ?? []).flatMap(flattenTerraformModule),
+];
+
+/**
+ * Ids of every `aws_kms_key` in the Terraform state of the root module in
+ * `infraSrcDir` — all the services' encryption keys, not only the container
+ * log ones — the counterpart of the `AWS::KMS::Key` resources
+ * `describeCdkStage` reads from CloudFormation. Reading this test's own state
+ * keeps the check scoped to the keys this test created.
+ *
+ * Call it before destroy: the state holds nothing afterwards. Returns an
+ * empty list when the module was never initialised, since then nothing was
+ * applied. Throws when the state cannot be read, so that the caller records
+ * the failed read instead of treating it as "no keys".
+ */
+export function readTerraformKmsKeyIds(infraSrcDir: string): string[] {
+  if (!existsSync(join(infraSrcDir, '.terraform'))) {
+    return [];
+  }
+  const state = JSON.parse(
+    execFileSync('terraform', ['show', '-json'], {
+      cwd: infraSrcDir,
+      encoding: 'utf-8',
+      maxBuffer: 50 * 1024 * 1024,
+    }),
+  ) as { values?: { root_module?: TerraformStateModule } };
+  return flattenTerraformModule(state.values?.root_module ?? {})
+    .filter((resource) => resource.type === 'aws_kms_key')
+    .map((resource) => resource.values?.key_id ?? resource.values?.id)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0);
 }
 
 /** Whether a resource still exists, from the owning service's answer. */

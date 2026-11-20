@@ -540,7 +540,18 @@ export const runWebsiteIntegrationTest = async (options: {
     ];
     await page.waitForFunction(
       (keys) => {
-        const el = document.querySelector(
+        // This callback runs in the browser, and the e2e project's `lib` has no
+        // DOM types — so type the lookup to just the two members it uses.
+        const browserDocument = (
+          globalThis as unknown as {
+            document: {
+              querySelector(
+                selector: string,
+              ): { textContent: string | null } | null;
+            };
+          }
+        ).document;
+        const el = browserDocument.querySelector(
           '[data-testid="integration-test-results"]',
         );
         if (!el?.textContent) return false;

@@ -113,7 +113,10 @@ export async function invokeTrpcApi(
   const response = await aws.fetch(
     `${normalizeApiUrl(apiUrl)}/echo?input=${input}`,
   );
-  const data = await response.json();
+  // `json()` resolves to `unknown`, so name the tRPC envelope asserted below.
+  const data = (await response.json()) as {
+    result: { data: { message: string } };
+  };
   console.log(`${apiName} response:`, data);
   expect(data.result.data.message).toBe('test');
 }
@@ -127,7 +130,8 @@ export async function invokeRestApi(
   const response = await aws.fetch(
     `${normalizeApiUrl(apiUrl)}/echo?message=test`,
   );
-  const data = await response.json();
+  // `json()` resolves to `unknown`, so name the echo body asserted below.
+  const data = (await response.json()) as { message: string };
   console.log(`${apiName} response:`, data);
   expect(data.message).toBe('test');
 }

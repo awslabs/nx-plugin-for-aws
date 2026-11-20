@@ -4,6 +4,7 @@
  */
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { PackageManager } from '@nx/devkit';
 import { ensureDirSync } from 'fs-extra';
 import { beforeEach, describe, it } from 'vitest';
 import { createTestWorkspace, runCLI, runInstall, tmpProjPath } from '../utils';
@@ -20,7 +21,7 @@ import { runTerraformPlanTest } from './terraform-plan-test';
  */
 export const runTerraformSmokeTest = async (
   dir: string,
-  pkgMgr: string,
+  pkgMgr: PackageManager,
   onProjectCreate?: (projectRoot: string) => void,
   beforeBuild?: (projectRoot: string) => void | Promise<void>,
 ) => {
@@ -92,7 +93,7 @@ export interface TerraformSmokeTestOptions {
 }
 
 export const terraformSmokeTest = (
-  pkgMgr: string,
+  pkgMgr: PackageManager,
   options: TerraformSmokeTestOptions = {},
 ) => {
   const variant = options.variant ?? pkgMgr;
