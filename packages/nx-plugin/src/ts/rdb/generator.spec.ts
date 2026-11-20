@@ -568,15 +568,18 @@ describe('ts#rdb generator', () => {
       expect(projectConfig.targets['trivy'].dependsOn).toEqual(['docker']);
       expect(tree.exists('packages/db/.trivyignore')).toBe(true);
 
-      // The prisma CLI the image installs to run migrations resolves two of its
-      // own dependencies below their fixes, so the build overrides them rather
-      // than suppressing the findings.
+      // The prisma CLI the image installs to run migrations resolves three of
+      // its own dependencies below their fixes, so the build overrides them
+      // rather than suppressing the findings.
       const dockerfile = tree.read('packages/db/Dockerfile', 'utf-8');
       expect(dockerfile).toContain(
         `npm pkg set "overrides.deepmerge-ts=${TS_VERSIONS['deepmerge-ts']}"`,
       );
       expect(dockerfile).toContain(
         `npm pkg set "overrides.mysql2=${TS_VERSIONS.mysql2}"`,
+      );
+      expect(dockerfile).toContain(
+        `npm pkg set "overrides.effect=${TS_VERSIONS.effect}"`,
       );
     },
   );
