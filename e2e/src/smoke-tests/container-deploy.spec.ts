@@ -29,6 +29,7 @@ import {
   findLeftoverCdkStacks,
   findLeftoverResources,
   findLeftoverTerraformState,
+  readTerraformKmsKeyIds,
 } from './container-deploy-leftovers';
 import { ensureRdsServiceLinkedRole } from './deploy-prerequisites';
 import { applyInfra } from './terraform-apply';
@@ -104,7 +105,8 @@ const SERVICES = [
  * Everything is destroyed in `finally`. After destroy it checks, with
  * read-only calls, that no stack, Terraform state entry or named resource
  * (DynamoDB tables, buckets, AppConfig application, Aurora cluster and its
- * secret) is left, and fails the test if one is.
+ * secret, and the services' log encryption keys) is left, and fails the test
+ * if one is.
  *
  * It builds a small workspace of its own rather than the full generator
  * matrix, and runs only on pushes to `main` (`.github/workflows/ci.yml`).
@@ -387,6 +389,8 @@ function describeContainerDeploy(
               appConfigApplicationIds: ids('runtime_config_application_id'),
               dbClusterIds: ids('postgres_db_cluster_arn'),
               secretIds: ids('postgres_db_secret_arn'),
+              // No output names the log keys, so read them from the state.
+              kmsKeyIds: readTerraformKmsKeyIds(infraSrcDir),
             };
           }
         } catch (e) {

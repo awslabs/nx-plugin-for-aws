@@ -173,6 +173,47 @@ export function findLeftoverTerraformState(infraSrcDir: string): string[] {
   }
 }
 
+/** The shape of `terraform show -json` this file reads. */
+interface TerraformStateModule {
+  resources?: { type?: string; values?: Record<string, unknown> }[];
+  child_modules?: TerraformStateModule[];
+}
+
+/** Every resource of `module` and of the modules below it. */
+const flattenTerraformModule = (
+  module: TerraformStateModule,
+): { type?: string; values?: Record<string, unknown> }[] => [
+  ...(module.resources ?? []),
+  ...(module.child_modules ?? []).flatMap(flattenTerraformModule),
+];
+
+/**
+ * Ids of the customer-managed KMS keys in the Terraform state of the root
+ * module in `infraSrcDir` — the counterpart of the `AWS::KMS::Key` resources
+ * `describeCdkStage` reads from CloudFormation. Reading this test's own state
+ * keeps the check scoped to the keys this test created.
+ *
+ * Call it before destroy: the state holds nothing afterwards. Returns an
+ * empty list when the module was never initialised, since then nothing was
+ * applied.
+ */
+export function readTerraformKmsKeyIds(infraSrcDir: string): string[] {
+  if (!existsSync(join(infraSrcDir, '.terraform'))) {
+    return [];
+  }
+  const state = JSON.parse(
+    execSync('terraform show -json', {
+      cwd: infraSrcDir,
+      encoding: 'utf-8',
+      maxBuffer: 50 * 1024 * 1024,
+    }),
+  ) as { values?: { root_module?: TerraformStateModule } };
+  return flattenTerraformModule(state.values?.root_module ?? {})
+    .filter((resource) => resource.type === 'aws_kms_key')
+    .map((resource) => resource.values?.key_id ?? resource.values?.id)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0);
+}
+
 /** Whether a resource still exists, from the owning service's answer. */
 type Existence = 'exists' | 'deleted' | `unknown: ${string}`;
 
