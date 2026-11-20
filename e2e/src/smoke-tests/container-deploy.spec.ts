@@ -389,9 +389,17 @@ function describeContainerDeploy(
               appConfigApplicationIds: ids('runtime_config_application_id'),
               dbClusterIds: ids('postgres_db_cluster_arn'),
               secretIds: ids('postgres_db_secret_arn'),
-              // No output names the log keys, so read them from the state.
-              kmsKeyIds: readTerraformKmsKeyIds(infraSrcDir),
+              kmsKeyIds: [],
             };
+            // No output names the keys, so read every `aws_kms_key` in this
+            // test's own Terraform state. Its own catch keeps a failed
+            // `terraform show` from discarding the ids read above, and still
+            // fails the test by recording the read as a leftover line.
+            try {
+              resourceIds.kmsKeyIds = readTerraformKmsKeyIds(infraSrcDir);
+            } catch (e) {
+              leftovers.push(`Could not read the deployed KMS key ids: ${e}`);
+            }
           }
         } catch (e) {
           leftovers.push(`Could not list the deployed resources: ${e}`);
