@@ -134,21 +134,26 @@ export type AppRouter = typeof appRouter;
 
   /**
    * The call site the api-ecs-deploy e2e lane's stack uses. That stack is a
-   * `.template` file, so nothing else type-checks it: it reads the backend the
-   * shared pattern built, under `$router`, to output the load balancer, cluster,
-   * service and security group the lane then describes.
+   * `.template` file, so nothing else type-checks it: it places the whole
+   * request path in isolated subnets, and reads the backend the shared pattern
+   * built, under `$router`, for the load balancer, cluster, service and
+   * security group the lane outputs and then describes.
    */
   const usageStub = (ext: string) => `import { Construct } from 'constructs';
-import { IVpc } from 'aws-cdk-lib/aws-ec2';
+import { IVpc, SubnetType } from 'aws-cdk-lib/aws-ec2';
 import { TestApi } from './app/apis/test-api${ext}';
 
 export const readEcsBackend = (scope: Construct, vpc: IVpc) => {
-  const integrations = TestApi.defaultIntegrations(scope, { vpc }).build();
+  const integrations = TestApi.defaultIntegrations(scope, {
+    vpc,
+    vpcSubnets: { subnetType: SubnetType.PRIVATE_ISOLATED },
+  }).build();
   const backend = integrations.$router;
   return {
     loadBalancerArn: backend.endpoint.loadBalancer.loadBalancerArn,
     clusterArn: backend.service.cluster.clusterArn,
     serviceName: backend.service.service.serviceName,
+    securityGroup: backend.service.securityGroup,
     securityGroupId: backend.service.securityGroup.securityGroupId,
   };
 };

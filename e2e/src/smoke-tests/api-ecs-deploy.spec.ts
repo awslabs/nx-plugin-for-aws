@@ -34,8 +34,10 @@ import {
  * Only the CDK provider implements `http-ecs`, so there is no Terraform
  * variant. Each API gets an API Gateway HTTP API, a VPC link, an internal
  * Application Load Balancer with its own access log bucket, and a one-task
- * Fargate service. Every API in the stack shares one VPC with one NAT gateway,
- * so the run pays for one of each however many APIs it deploys.
+ * Fargate service. Every API in the stack shares one VPC, which has no NAT
+ * gateway and no internet gateway: the tasks pull their image and write their
+ * logs over VPC endpoints, so the lane takes no Elastic IP from the Region's
+ * quota while the other deploy lanes run beside it.
  *
  * Each API is called twice: once with a SigV4-signed request, which must
  * answer 200 with the echoed message, and once unsigned, which the HTTP API's
