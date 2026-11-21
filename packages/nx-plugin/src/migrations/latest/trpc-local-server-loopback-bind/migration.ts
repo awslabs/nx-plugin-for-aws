@@ -44,6 +44,16 @@ const TRPC_GENERATOR_IDS = ['ts#trpc-api'];
 /** The single-argument listen call the generator used to emit. */
 const LISTEN_WITHOUT_HOST = '`createHTTPServer($opts).listen($port)` as $call';
 
+/**
+ * The log line the generator used to emit, and the one it emits now. Replaced
+ * as literal text rather than through GritQL, whose snippets cannot hold a
+ * template literal's `${}`.
+ */
+const LOG_WITHOUT_HOST =
+  'console.log(`Local TRPC server listening on port ${PORT}`);';
+const LOG_WITH_HOST =
+  'console.log(`Local TRPC server listening on ${HOST}:${PORT}`);';
+
 const HOST_DECLARATION = `// Loopback, so the local server accepts connections only from this machine.
 const HOST = process.env.HOST || '127.0.0.1';`;
 
@@ -78,7 +88,7 @@ export default async function migration(
 
     if (!(await matchGritQL(tree, localServer, LISTEN_WITHOUT_HOST))) {
       nextSteps.push(
-        `${localServer} does not match the single-argument \`.listen(PORT)\` call this version wrote, so it was left alone. Pass a bind address of '127.0.0.1' to its listen call so the local server does not accept connections from other machines.`,
+        `${localServer} does not match the single-argument \`.listen(PORT)\` call this version wrote, so it was left alone. If its listen call already names a bind address, check that address is what you want: '127.0.0.1' accepts connections only from this machine, while '0.0.0.0' accepts them from anywhere that can reach it. If it names none, add '127.0.0.1'.`,
       );
       continue;
     }
@@ -95,6 +105,16 @@ export default async function migration(
       localServer,
       '`createHTTPServer($opts).listen($port)` => `createHTTPServer($opts).listen($port, HOST)`',
     );
+    // The address is the thing this changed, so the log line names it, which
+    // also leaves a migrated file matching a freshly generated one. A file
+    // whose log line was edited keeps it: the text below does not appear.
+    const migrated = tree.read(localServer, 'utf-8') ?? '';
+    if (migrated.includes(LOG_WITHOUT_HOST)) {
+      tree.write(
+        localServer,
+        migrated.replace(LOG_WITHOUT_HOST, LOG_WITH_HOST),
+      );
+    }
   }
 
   await formatFilesInSubtree(tree);

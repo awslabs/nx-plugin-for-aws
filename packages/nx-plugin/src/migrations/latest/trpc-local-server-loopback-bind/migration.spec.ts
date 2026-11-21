@@ -54,7 +54,28 @@ describe('trpc-local-server-loopback-bind', () => {
     const migrated = tree.read('apps/test-api/src/local-server.ts', 'utf-8');
     expect(migrated).toContain("const HOST = process.env.HOST || '127.0.0.1'");
     expect(migrated).toContain('.listen(PORT, HOST)');
+    // The address is what changed, so the log line names it, which also
+    // leaves a migrated file matching a freshly generated one.
+    expect(migrated).toContain(
+      'console.log(`Local TRPC server listening on ${HOST}:${PORT}`)',
+    );
+    expect(migrated).not.toContain('listening on port');
     expect(result.nextSteps).toEqual([]);
+  });
+
+  it('should leave a log line the user edited alone', async () => {
+    const ownLogLine = VENDED_LOCAL_SERVER.replace(
+      'console.log(`Local TRPC server listening on port ${PORT}`);',
+      'console.log(`up on ${PORT}`);',
+    );
+    addApi('test-api', ownLogLine);
+
+    await migration(tree);
+
+    const migrated = tree.read('apps/test-api/src/local-server.ts', 'utf-8');
+    // The bind address is still fixed; only the log rewrite matches nothing.
+    expect(migrated).toContain('.listen(PORT, HOST)');
+    expect(migrated).toContain('console.log(`up on ${PORT}`)');
   });
 
   it('should be idempotent', async () => {
@@ -94,6 +115,11 @@ describe('trpc-local-server-loopback-bind', () => {
     expect(result.nextSteps?.[0]).toContain(
       'apps/test-api/src/local-server.ts',
     );
+    // A file can fail the match because it already names a host deliberately,
+    // so the message names both cases rather than telling every reader to
+    // pass 127.0.0.1.
+    expect(result.nextSteps?.[0]).toContain('already names a bind address');
+    expect(result.nextSteps?.[0]).toContain('0.0.0.0');
   });
 
   it('should skip a project with no local server', async () => {
