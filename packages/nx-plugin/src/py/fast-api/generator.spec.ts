@@ -683,7 +683,13 @@ describe('fastapi project generator', () => {
       expect(entry).toContain('from ..main import app');
       // The health check is not an API operation, so it stays out of the
       // OpenAPI spec and out of the API Gateway routes.
-      expect(entry).toContain('@app.get("/health", include_in_schema=False)');
+      expect(entry).toContain('HEALTH_CHECK_PATH = "/health"');
+      expect(entry).toContain(
+        '@app.get(HEALTH_CHECK_PATH, include_in_schema=False)',
+      );
+      // Nor is it an API request: the target group calls it every 15 seconds,
+      // and counting it would bury real traffic in health checks.
+      expect(entry).toContain('metrics_excluded_paths.add(HEALTH_CHECK_PATH)');
       // This server lives across requests, so it writes out the metrics the
       // API's middleware collects; in Lambda the handler does that.
       expect(entry).toContain('metrics.flush_metrics()');

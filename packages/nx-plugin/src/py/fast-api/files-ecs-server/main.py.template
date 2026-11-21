@@ -12,15 +12,24 @@ import uvicorn
 from fastapi import Request
 from pydantic import BaseModel
 
-from ..init import metrics
+from ..init import metrics, metrics_excluded_paths
 from ..main import app
+
+# Path the load balancer's target group and the container health check call.
+# Changing it means changing the health check in your API CDK construct too.
+HEALTH_CHECK_PATH = "<%- healthCheckPath %>"
+
+# The target group calls the health check every 15 seconds. It is not an API
+# request, so it is left out of the request metrics and nothing is published
+# for it: about 5,760 embedded-metric documents a day per task otherwise.
+metrics_excluded_paths.add(HEALTH_CHECK_PATH)
 
 
 class HealthOutput(BaseModel):
     status: str
 
 
-@app.get("<%- healthCheckPath %>", include_in_schema=False)
+@app.get(HEALTH_CHECK_PATH, include_in_schema=False)
 def health() -> HealthOutput:
     return HealthOutput(status="ok")
 
@@ -31,9 +40,16 @@ def health() -> HealthOutput:
 # write them out, and the next request would re-add the same dimension.
 @app.middleware("http")
 async def flush_metrics(request: Request, call_next):
-    response = await call_next(request)
-    metrics.flush_metrics()
-    return response
+    if request.url.path in metrics_excluded_paths:
+        return await call_next(request)
+
+    try:
+        return await call_next(request)
+    finally:
+        # In a `finally`, so an exception escaping the API's own middleware
+        # does not leave the metric set to be published with the next
+        # request's.
+        metrics.flush_metrics()
 
 
 if __name__ == "__main__":

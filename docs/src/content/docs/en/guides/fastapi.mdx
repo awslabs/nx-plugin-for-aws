@@ -60,6 +60,8 @@ With `infra` set to `http-ecs` the option defaults to `shared` instead, since on
 `http-ecs` is experimental. Its generated output may change between releases without a migration to carry an existing workspace across, so expect to reconcile those changes yourself when you upgrade.
 
 It needs the CDK IaC provider: Terraform support is not implemented yet. It also needs `integrationPattern` `shared`, which it defaults to, so passing `--integrationPattern=isolated` alongside it fails. The generator fails with a message naming the fix in either case.
+
+Running the generator interactively, it asks for `integrationPattern` before `infra`, with `isolated` preselected. Choosing `isolated` there and then `http-ecs` gives that error, so choose `shared` at that prompt. On the command line, pass `--integrationPattern=shared` or leave the flag off altogether.
 :::
 </OptionFilter>
 
@@ -133,7 +135,10 @@ The generator sets up several features automatically:
 2. Error handling middleware
 3. Request/response correlation
 4. Metrics collection
-5. Type-safe streaming (REST API only)
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Streaming, which needs a REST API">
+Type-safe streaming is set up too, for the `rest-lambda` infrastructure only.
+</OptionFilter>
 
 <OptionFilter not when={{ infra: 'http-ecs' }} description="How the Lambda variants serve the app">
 The app is served in a Lambda function by the [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) running uvicorn.
@@ -871,7 +876,7 @@ The VPC link, the load balancer, its listener, the target group and the bucket t
 
 `<module_name>/<api_name>_container/main.py` imports the app from your `main.py`, so every operation you write is served exactly as it is on Lambda. It adds two things of its own:
 
-- `GET /health`, which the load balancer's target group and the container health check call. It is declared `include_in_schema=False`, so it stays out of your OpenAPI spec and therefore out of the API Gateway routes and the generated clients.
+- `GET /health`, which the load balancer's target group and the container health check call. It is declared `include_in_schema=False`, so it stays out of your OpenAPI spec and therefore out of the API Gateway routes and the generated clients. It is also left out of the request metrics, so the target group's call every 15 seconds does not count as an API request.
 - A middleware that writes out the metrics the API's own middleware collects. On Lambda the handler does that at the end of each invocation; this server lives across requests, so it flushes them itself.
 
 The API Gateway routes still come from your OpenAPI spec, so an operation you add is deployed once `nx build` has regenerated the spec.
@@ -879,6 +884,19 @@ The API Gateway routes still come from your OpenAPI spec, so an operation you ad
 ### Observability
 
 Logs and metrics work as they do on Lambda: the container writes to its own CloudWatch log group, and metrics are written in the embedded metric format for CloudWatch Logs to extract.
+
+One thing about metrics is different here, and it is worth knowing before you add your own. `metrics`, the object the <a href="#metrics">Metrics</a> section above tells you to import from `.init`, is a Powertools `Metrics`, and every `Metrics` object in a process shares one metric store. On Lambda one invocation owns that store from start to finish. A uvicorn server handles requests at the same time, so a custom metric one request adds can be written out with another request's. The per-request metrics the API collects itself are not affected: they are published once per request and name only that request's route. If you add your own metrics and need each request kept separate, add them to an `EphemeralMetrics` you create in the request and flush before returning, which keeps a store of its own:
+
+```python
+from aws_lambda_powertools.metrics import EphemeralMetrics, MetricUnit
+
+@app.get("/items/{item_id}")
+def read_item(item_id: int):
+    request_metrics = EphemeralMetrics()
+    request_metrics.add_metric(name="ItemViewed", unit=MetricUnit.Count, value=1)
+    request_metrics.flush_metrics()
+    return {"item_id": item_id}
+```
 
 AWS X-Ray tracing does not. `@tracer.capture_method` is a no-op outside Lambda, and there is no X-Ray daemon in the task to receive segments either. Add one as a sidecar in your container service if you need traces.
 
