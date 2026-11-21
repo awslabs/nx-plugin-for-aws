@@ -79,12 +79,17 @@ describe('py#fast-api container metrics', () => {
       writeTreeDir(tree, 'apps/test_api', projectRoot);
 
       // The packages the generated app imports, at the versions the generator
-      // vends, plus the test client's httpx.
+      // vends, plus the test client's httpx. httpx is not vended to users, so
+      // it is pinned here rather than read from PY_VERSIONS. Pinned at all
+      // because `starlette.testclient` already warns that using it with httpx
+      // is deprecated in favour of httpx2, so an unpinned install is a way for
+      // this spec to start failing on a day nobody touched it.
+      const HTTPX_VERSION = '==0.28.1';
       const withDeps = [
         `fastapi${PY_VERSIONS.fastapi}`,
         `uvicorn${PY_VERSIONS.uvicorn}`,
         `aws-lambda-powertools[tracer]${PY_VERSIONS['aws-lambda-powertools[tracer]']}`,
-        'httpx',
+        `httpx${HTTPX_VERSION}`,
       ].flatMap((dep) => ['--with', dep]);
 
       const output = execFileSync(
