@@ -214,19 +214,14 @@ export const internalTestMatrixGenerator = async (
     await pyApiGenerator(tree, { ...api, ...projectDefaults });
   }
 
-  // An API hosted as a container service on Amazon ECS. Only the CDK provider
-  // implements `http-ecs`. `integrationPattern` is left unset so the generator
-  // resolves it from the infra, which is what a user who passes
-  // `--infra=http-ecs` alone gets.
-  if (iac === 'cdk') {
-    await tsApiGenerator(tree, {
-      name: 'my-api-ecs',
-      infra: 'http-ecs',
-      auth: 'iam',
-      iac: 'cdk',
-      ...projectDefaults,
-    });
-  }
+  // No `http-ecs` API here, deliberately. This generator's workspace is what
+  // the migrate lane upgrades on every release hop, and `http-ecs` is
+  // documented as output that may change between releases with no migration
+  // to carry a workspace across. Its per-API file and the core construct are
+  // both vended `KeepExisting`, so a later template change would fail that
+  // lane with no migration to point at. `e2e/src/smoke-tests/generator-matrix.ts`
+  // generates it instead, where it is built, synthesised and scanned but
+  // never migrated. Add it here once the option is stable.
 
   // Library projects hosting the components below, each with a lambda function.
   await pyProjectGenerator(tree, {
