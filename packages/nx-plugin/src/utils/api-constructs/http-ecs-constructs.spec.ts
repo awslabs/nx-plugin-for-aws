@@ -455,6 +455,89 @@ describe('http-ecs API construct synth', () => {
       // The destroy path: the e2e leftover check fails on a bucket a destroy
       // leaves behind.
       expect(out.resources[bucketId].DeletionPolicy ?? 'Delete').toBe('Delete');
+      // ACLs are off: log delivery writes objects the bucket owner owns.
+      expect(bucket.Properties.OwnershipControls).toEqual({
+        Rules: [{ ObjectOwnership: 'BucketOwnerEnforced' }],
+      });
+    });
+
+    it('should let only this account and Region deliver logs to the bucket', () => {
+      const [[bucketId]] = Object.entries(out.resources).filter(
+        ([id, r]) => r.Type === 'AWS::S3::Bucket' && id.includes('AccessLogs'),
+      );
+      const [[, bucketPolicy]] = Object.entries(out.resources).filter(
+        ([, r]) =>
+          r.Type === 'AWS::S3::BucketPolicy' &&
+          r.Properties.Bucket?.Ref === bucketId,
+      );
+      const delivery = (
+        bucketPolicy.Properties.PolicyDocument.Statement as Record<
+          string,
+          any
+        >[]
+      ).filter(
+        (statement) =>
+          statement.Principal?.Service ===
+          'logdelivery.elasticloadbalancing.amazonaws.com',
+      );
+      // Elastic Load Balancing's documented delivery policy, written by hand
+      // because `logAccessLogs` needs a concrete Region. Without it the load
+      // balancer is rejected at create time, and no other test would notice.
+      expect(delivery).toHaveLength(1);
+      expect(delivery[0].Effect).toBe('Allow');
+      expect(delivery[0].Action).toBe('s3:PutObject');
+      // Objects under this account's log prefix in this bucket, so no other
+      // account's load balancer can write here.
+      expect(delivery[0].Resource).toEqual({
+        'Fn::Join': [
+          '',
+          [
+            { 'Fn::GetAtt': [bucketId, 'Arn'] },
+            '/AWSLogs/',
+            { Ref: 'AWS::AccountId' },
+            '/*',
+          ],
+        ],
+      });
+      // And only from a load balancer in this account and Region.
+      expect(delivery[0].Condition).toEqual({
+        ArnLike: {
+          'aws:SourceArn': {
+            'Fn::Join': [
+              '',
+              [
+                'arn:',
+                { Ref: 'AWS::Partition' },
+                ':elasticloadbalancing:',
+                { Ref: 'AWS::Region' },
+                ':',
+                { Ref: 'AWS::AccountId' },
+                ':loadbalancer/*',
+              ],
+            ],
+          },
+        },
+      });
+    });
+
+    it('should create the load balancer only once the bucket policy is in place', () => {
+      const [[bucketId]] = Object.entries(out.resources).filter(
+        ([id, r]) => r.Type === 'AWS::S3::Bucket' && id.includes('AccessLogs'),
+      );
+      const [[bucketPolicyId]] = Object.entries(out.resources).filter(
+        ([, r]) =>
+          r.Type === 'AWS::S3::BucketPolicy' &&
+          r.Properties.Bucket?.Ref === bucketId,
+      );
+      const [[loadBalancerId]] = out.ofType(
+        'AWS::ElasticLoadBalancingV2::LoadBalancer',
+      );
+      // Elastic Load Balancing rejects a load balancer whose access log
+      // bucket does not yet admit it, so the order is not optional.
+      expect(
+        (out.resources[loadBalancerId] as unknown as { DependsOn?: string[] })
+          .DependsOn,
+      ).toContain(bucketPolicyId);
     });
 
     it('should let the VPC link reach nothing but the load balancer', () => {

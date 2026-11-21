@@ -130,7 +130,9 @@ export class EcsHttpEndpoint extends Construct {
       // SSE-S3 is the only server-side encryption a load balancer can write
       // access logs through: delivery fails against an SSE-KMS bucket.
       encryption: BucketEncryption.S3_MANAGED,
-      objectOwnership: ObjectOwnership.BUCKET_OWNER_PREFERRED,
+      // Log delivery writes objects the bucket owner already owns, so ACLs
+      // have no part to play here and are switched off.
+      objectOwnership: ObjectOwnership.BUCKET_OWNER_ENFORCED,
       publicReadAccess: false,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
     });
@@ -173,6 +175,18 @@ export class EcsHttpEndpoint extends Construct {
             `AWSLogs/${Stack.of(this).account}/*`,
           ),
         ],
+        // Only a load balancer in this account and Region may write here.
+        // Elastic Load Balancing documents this condition as the best
+        // practice to go with the account-scoped resource path above.
+        conditions: {
+          ArnLike: {
+            'aws:SourceArn': Stack.of(this).formatArn({
+              service: 'elasticloadbalancing',
+              resource: 'loadbalancer',
+              resourceName: '*',
+            }),
+          },
+        },
       }),
     );
     this.loadBalancer.setAttribute('access_logs.s3.enabled', 'true');
