@@ -214,14 +214,15 @@ export const internalTestMatrixGenerator = async (
     await pyApiGenerator(tree, { ...api, ...projectDefaults });
   }
 
-  // No `http-ecs` API here, deliberately. This generator's workspace is what
-  // the migrate lane upgrades on every release hop, and `http-ecs` is
-  // documented as output that may change between releases with no migration
-  // to carry a workspace across. Its per-API file and the core construct are
-  // both vended `KeepExisting`, so a later template change would fail that
-  // lane with no migration to point at. `e2e/src/smoke-tests/generator-matrix.ts`
-  // generates it instead, where it is built, synthesised and scanned but
-  // never migrated. Add it here once the option is stable.
+  // No `http-ecs` API here for either framework, deliberately. This
+  // generator's workspace is what the migrate lane upgrades on every release
+  // hop, and `http-ecs` is documented as output that may change between
+  // releases with no migration to carry a workspace across. Its per-API file
+  // and the core construct are both vended `KeepExisting`, so a later template
+  // change would fail that lane with no migration to point at.
+  // `e2e/src/smoke-tests/generator-matrix.ts` generates both instead, where
+  // they are built, synthesised and scanned but never migrated. Add them here
+  // once the option is stable.
 
   // Library projects hosting the components below, each with a lambda function.
   await pyProjectGenerator(tree, {

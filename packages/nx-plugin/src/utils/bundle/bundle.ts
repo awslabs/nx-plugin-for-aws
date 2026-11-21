@@ -87,6 +87,18 @@ const createPythonBundleTarget = ({
 };
 
 /**
+ * Name of the bundle target for a python platform. Callers that build the
+ * bundle only for some of their variants use this to name its output directory
+ * without adding the target.
+ */
+export const pythonBundleTargetName = (
+  pythonPlatform: NonNullable<
+    AddPythonBundleTargetOptions['pythonPlatform']
+  > = 'x86_64-manylinux_2_28',
+): 'bundle-arm' | 'bundle-x86' =>
+  pythonPlatform === 'aarch64-manylinux_2_28' ? 'bundle-arm' : 'bundle-x86';
+
+/**
  * Adds a bundle target to the given project if it does not exist, and updates the build target to depend on it
  */
 export const addPythonBundleTarget = (
@@ -98,8 +110,7 @@ export const addPythonBundleTarget = (
   }
 
   const pythonPlatform = opts?.pythonPlatform ?? 'x86_64-manylinux_2_28';
-  const bundleTargetName =
-    pythonPlatform === 'aarch64-manylinux_2_28' ? 'bundle-arm' : 'bundle-x86';
+  const bundleTargetName = pythonBundleTargetName(pythonPlatform);
 
   if (!project.targets?.[bundleTargetName]) {
     project.targets[bundleTargetName] = normalizeTargetKeyOrder({

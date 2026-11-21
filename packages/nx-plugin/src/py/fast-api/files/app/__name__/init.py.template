@@ -20,6 +20,12 @@ logger: Logger = Logger()
 metrics: Metrics = Metrics()
 tracer: Tracer = Tracer()
 
+# Request paths left out of the request metrics below. The container entry
+# point adds its health check path: the load balancer's target group calls it
+# every 15 seconds, and counting those would bury real traffic in health
+# checks. On Lambda nothing is added, so the metrics are unchanged.
+metrics_excluded_paths: set[str] = set()
+
 
 class InternalServerErrorDetails(BaseModel):
     detail: str
@@ -118,6 +124,9 @@ async def unhandled_exception_handler(request, err):
 
 @app.middleware("http")
 async def metrics_handler(request: Request, call_next):
+    if request.url.path in metrics_excluded_paths:
+        return await call_next(request)
+
     metrics.add_dimension("route", f"{request.method} {request.url.path}")
     metrics.add_metric(name="RequestCount", unit=MetricUnit.Count, value=1)
 

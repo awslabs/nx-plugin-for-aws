@@ -19,7 +19,14 @@ import {
   addApiGatewayInfra,
 } from '../../utils/api-constructs/api-constructs.js';
 import { addSharedConstructsOpenApiMetadataGenerateTarget } from '../../utils/api-constructs/open-api-metadata.js';
-import { addPythonBundleTarget } from '../../utils/bundle/bundle.js';
+import {
+  addPythonBundleTarget,
+  pythonBundleTargetName,
+} from '../../utils/bundle/bundle.js';
+import {
+  CONTAINER_HEALTH_CHECK_PATH,
+  CONTAINER_PORT,
+} from '../../utils/container-constructs/container-constructs.js';
 import {
   declareDependencies,
   ownedElsewhere,
@@ -29,7 +36,7 @@ import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs.js';
 import { resolveIac } from '../../utils/iac.js';
 import { installDependencies } from '../../utils/install.js';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
-import { toClassName, toKebabCase } from '../../utils/names.js';
+import { toClassName, toKebabCase, toSnakeCase } from '../../utils/names.js';
 import {
   addGeneratorMetadata,
   getGeneratorInfo,
@@ -43,6 +50,7 @@ import {
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs.js';
 import type { IacMetadata } from '../../utils/shared-constructs-constants.js';
+import pyContainerGenerator from '../container/generator.js';
 import pyProjectGenerator, {
   getPyProjectDetails,
 } from '../project/generator.js';
@@ -92,6 +100,28 @@ export const pyFastApiProjectGenerator = async (
   assertSupportedNxVersion(tree);
   const integrationPattern = getIntegrationPattern(schema);
 
+  // Recorded in the metadata below so the version sync can tell a CDK
+  // project from a Terraform one; undefined when no infrastructure was
+  // generated, in which case neither provider's packages were added.
+  const iac =
+    schema.infra !== 'none' ? await resolveIac(tree, schema.iac) : undefined;
+
+  // The ECS variant runs the API as a long-lived uvicorn server in a
+  // container, which only the CDK provider vends today.
+  const isEcs = schema.infra === 'http-ecs';
+  if (isEcs) {
+    if (integrationPattern !== 'shared') {
+      throw new Error(
+        `Invalid FastAPI infra/integrationPattern combination: http-ecs + ${integrationPattern}. One container service answers every operation, so http-ecs needs integrationPattern 'shared'. Pass --integrationPattern=shared, or omit the option: http-ecs defaults to shared.`,
+      );
+    }
+    if (iac !== 'cdk') {
+      throw new Error(
+        `infra 'http-ecs' is only implemented for the cdk IaC provider, and this workspace resolved iac '${iac}'. Pass --iac=cdk, or choose rest-lambda or http-lambda for terraform.`,
+      );
+    }
+  }
+
   const { dir, normalizedModuleName, fullyQualifiedName } = getPyProjectDetails(
     tree,
     {
@@ -103,6 +133,12 @@ export const pyFastApiProjectGenerator = async (
   );
   const apiNameKebabCase = toKebabCase(schema.name);
   const apiNameClassName = toClassName(schema.name);
+
+  // The container service is a component of the API project. Suffixed so its
+  // construct class cannot collide with the API construct of the same name.
+  const containerName = `${apiNameKebabCase}-container`;
+  const containerClassName = toClassName(containerName);
+  const containerModuleName = toSnakeCase(containerName);
 
   let projectExists: boolean;
   try {
@@ -124,31 +160,99 @@ export const pyFastApiProjectGenerator = async (
   }
 
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
+  // Reserved before py#container runs, so the API keeps the port FastAPI
+  // projects use and py#container assigns its own above it.
   const port = assignPort(tree, projectConfig, 8000);
 
-  const { bundleOutputDir, bundleTargetName } =
-    addPythonBundleTarget(projectConfig);
+  if (isEcs) {
+    // Persisted so py#container sees the port this project already holds.
+    updateProjectConfiguration(tree, fullyQualifiedName, projectConfig);
+    // py#container vends a sample server at the same path and keeps whatever
+    // is already there, so the API's server is written before it runs.
+    generateFiles(
+      tree,
+      joinPathFragments(import.meta.dirname, 'files-ecs-server'),
+      joinPathFragments(dir, normalizedModuleName, containerModuleName),
+      {
+        apiNameClassName,
+        containerPort: CONTAINER_PORT,
+        healthCheckPath: CONTAINER_HEALTH_CHECK_PATH,
+      },
+      { overwriteStrategy: OverwriteStrategy.KeepExisting },
+    );
+    await pyContainerGenerator(tree, {
+      project: fullyQualifiedName,
+      name: containerName,
+      infra: 'ecs',
+      iac: schema.iac,
+      preferInstallDependencies: false,
+    });
+    // py#container writes its targets and its assigned port straight to the
+    // project, so they are read back before this generator adds its own.
+    Object.assign(
+      projectConfig,
+      readProjectConfiguration(tree, fullyQualifiedName),
+    );
+  }
 
-  // Add a command to copy run.sh to the bundle output for Lambda Web Adapter
-  const fs = new FsCommands(tree, DEPENDENCIES);
-  const bundleTarget = projectConfig.targets[bundleTargetName];
-  const copyRunShCommand = fs.cpFile(
-    `{projectRoot}/run.sh`,
-    `dist/{projectRoot}/${bundleTargetName}/run.sh`,
+  // Bundle for the Lambda platform, built only for what still runs in Lambda:
+  // the API itself on the Lambda variants, and the custom authorizer handler.
+  // py#container builds the arm64 bundle the container image is made from.
+  const bundleOutputDir = joinPathFragments(
+    'dist',
+    dir,
+    pythonBundleTargetName(),
   );
-  if (!bundleTarget.options.commands.includes(copyRunShCommand)) {
-    bundleTarget.options.commands = [
-      ...bundleTarget.options.commands,
-      copyRunShCommand,
-    ];
+  if (!isEcs || schema.auth === 'custom') {
+    const { bundleTargetName } = addPythonBundleTarget(projectConfig);
+
+    if (!isEcs) {
+      // Add a command to copy run.sh to the bundle output for Lambda Web Adapter
+      const fs = new FsCommands(tree, DEPENDENCIES);
+      const bundleTarget = projectConfig.targets[bundleTargetName];
+      const copyRunShCommand = fs.cpFile(
+        `{projectRoot}/run.sh`,
+        `dist/{projectRoot}/${bundleTargetName}/run.sh`,
+      );
+      if (!bundleTarget.options.commands.includes(copyRunShCommand)) {
+        bundleTarget.options.commands = [
+          ...bundleTarget.options.commands,
+          copyRunShCommand,
+        ];
+      }
+    }
+  }
+
+  if (isEcs) {
+    // The container's entry point is the API's server, so the project's own
+    // serve target runs it: py#container's equivalent target is dropped rather
+    // than leaving two copies of the same server to start.
+    delete projectConfig.targets[`${containerName}-serve`];
+    const devDependsOn = (projectConfig.targets['dev']?.dependsOn ?? []).filter(
+      (target) => target !== `${containerName}-serve`,
+    );
+    if (devDependsOn.length > 0) {
+      projectConfig.targets['dev'].dependsOn = devDependsOn;
+    } else {
+      // py#container created `dev` only to run the target just removed, so it
+      // is rebuilt below from the serve target alone.
+      delete projectConfig.targets['dev'];
+    }
   }
 
   projectConfig.targets.serve = {
     executor: '@nxlv/python:run-commands',
     continuous: true,
     options: {
-      command: `uv run fastapi dev ${normalizedModuleName}/main.py --port ${port}`,
+      // No --reload on the container entry point: the reloader's supervisor
+      // keeps the port after SIGTERM.
+      command: isEcs
+        ? `uv run python -m ${normalizedModuleName}.${containerModuleName}.main`
+        : `uv run fastapi dev ${normalizedModuleName}/main.py --port ${port}`,
       cwd: '{projectRoot}',
+      // The container entry point reads its port and bind address from the
+      // environment, and defaults to loopback when HOST is unset.
+      ...(isEcs && { env: { PORT: `${port}` } }),
     },
   };
 
@@ -158,16 +262,11 @@ export const pyFastApiProjectGenerator = async (
     options: {
       ...projectConfig.targets.serve.options,
       env: {
+        ...projectConfig.targets.serve.options.env,
         LOCAL_DEV: 'true',
       },
     },
   };
-
-  // Recorded in the metadata below so the version sync can tell a CDK
-  // project from a Terraform one; undefined when no infrastructure was
-  // generated, in which case neither provider's packages were added.
-  const iac =
-    schema.infra !== 'none' ? await resolveIac(tree, schema.iac) : undefined;
 
   // Recorded below and read by the declaration's predicates, so the packages
   // added here are exactly the ones the version sync will own.
@@ -210,6 +309,13 @@ export const pyFastApiProjectGenerator = async (
     },
   );
 
+  if (isEcs) {
+    // run.sh starts uvicorn behind the Lambda Web Adapter, which has no part
+    // to play on ECS: the container's own entry point is what runs, deployed
+    // and locally.
+    tree.delete(joinPathFragments(dir, 'run.sh'));
+  }
+
   if (schema.infra !== 'none') {
     await sharedConstructsGenerator(
       tree,
@@ -220,7 +326,8 @@ export const pyFastApiProjectGenerator = async (
     );
 
     if (schema.auth === 'custom') {
-      const authorizerType = schema.infra === 'http-lambda' ? 'http' : 'rest';
+      // Both HTTP API variants take the HTTP API authorizer event and response.
+      const authorizerType = schema.infra === 'rest-lambda' ? 'rest' : 'http';
       generateFiles(
         tree,
         joinPathFragments(
@@ -248,7 +355,11 @@ export const pyFastApiProjectGenerator = async (
         apiProjectName: projectConfig.name,
         apiNameClassName,
         apiNameKebabCase,
-        constructType: schema.infra === 'http-lambda' ? 'http' : 'rest',
+        constructType: isEcs
+          ? 'http-ecs'
+          : schema.infra === 'http-lambda'
+            ? 'http'
+            : 'rest',
         backend: {
           type: 'fastapi',
           moduleName: normalizedModuleName,
@@ -256,6 +367,14 @@ export const pyFastApiProjectGenerator = async (
           integrationPattern,
         },
         auth: schema.auth,
+        ...(isEcs && {
+          ecs: {
+            serviceClassName: containerClassName,
+            serviceFileKebabCase: containerName,
+            containerPort: CONTAINER_PORT,
+            healthCheckPath: CONTAINER_HEALTH_CHECK_PATH,
+          },
+        }),
         iac,
       },
       DEPENDENCIES,
@@ -286,6 +405,14 @@ export const pyFastApiProjectGenerator = async (
 
 const getIntegrationPattern = (
   schema: PyFastApiProjectGeneratorSchema,
-): 'isolated' | 'shared' => schema.integrationPattern ?? 'isolated';
+): 'isolated' | 'shared' => {
+  if (schema.integrationPattern) {
+    return schema.integrationPattern;
+  }
+  // The schema has no default, so the pattern is resolved from the infra here:
+  // one container service answers every operation, leaving the isolated pattern
+  // nothing to isolate. Without this, --infra=http-ecs alone would fail.
+  return schema.infra === 'http-ecs' ? 'shared' : 'isolated';
+};
 
 export default pyFastApiProjectGenerator;
