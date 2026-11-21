@@ -110,13 +110,31 @@ export interface SmithyBackendOptions extends BackendOptions {
   authorizerBundleOutputDir?: string;
 }
 
+export interface EcsBackendOptions {
+  /** Class name of the vended ECS service construct the API routes to. */
+  serviceClassName: string;
+  /** File name (without extension) of that construct under `app/services`. */
+  serviceFileKebabCase: string;
+  /** Port the server listens on inside the container. */
+  containerPort: number;
+  /** Path the ALB target group health check calls. */
+  healthCheckPath: string;
+}
+
 export interface AddApiGatewayConstructOptions {
   apiProjectName: string;
   apiNameClassName: string;
   apiNameKebabCase: string;
-  constructType: 'http' | 'rest';
+  /**
+   * `http` and `rest` put API Gateway in front of Lambda functions. `http-ecs`
+   * puts an HTTP API in front of a container service on Amazon ECS, through an
+   * internal load balancer, and requires `ecs`.
+   */
+  constructType: 'http' | 'rest' | 'http-ecs';
   backend: TrpcBackendOptions | FastApiBackendOptions | SmithyBackendOptions;
   auth: 'iam' | 'cognito' | 'custom';
+  /** The ECS service the API routes to. Required for `http-ecs`. */
+  ecs?: EcsBackendOptions;
 }
 
 export const addApiGatewayInfra = async <const D extends DependencyDeclaration>(
@@ -124,6 +142,17 @@ export const addApiGatewayInfra = async <const D extends DependencyDeclaration>(
   options: AddApiGatewayConstructOptions & { iac: Iac },
   declaration: D & MustDeclare<typeof API_CONSTRUCTS_DEPENDENCIES, D>,
 ) => {
+  if (options.constructType === 'http-ecs') {
+    if (options.iac !== 'cdk') {
+      throw new Error(
+        `infra 'http-ecs' is only implemented for the cdk IaC provider. Pass --iac=cdk, or choose rest-lambda or http-lambda for terraform.`,
+      );
+    }
+    if (!options.ecs) {
+      throw new Error(`constructType 'http-ecs' requires ecs options`);
+    }
+  }
+
   if (options.iac === 'cdk') {
     await addApiGatewayCdkConstructs(tree, options, declaration);
   } else if (options.iac === 'terraform') {
@@ -142,6 +171,43 @@ export const addApiGatewayInfra = async <const D extends DependencyDeclaration>(
     (config: ProjectConfiguration) => {
       addArtifactProjectToTargets(config, options.apiProjectName);
       return config;
+    },
+  );
+};
+
+/**
+ * Vends the `EcsHttpEndpoint` core construct: API Gateway's VPC link, an
+ * internal load balancer with its access log bucket, and a target group
+ * holding a private container service's tasks.
+ *
+ * Exported on its own so a generator that puts an HTTP endpoint in front of a
+ * container service without going through API Gateway can vend the same file.
+ * `addApiGatewayInfra` calls it for `constructType: 'http-ecs'`.
+ *
+ * The shared constructs project has to exist first: the file lands in it, and
+ * imports the `suppressRules` helper that lives there.
+ */
+export const addEcsHttpEndpointConstruct = (tree: Tree) => {
+  generateFiles(
+    tree,
+    joinPathFragments(
+      import.meta.dirname,
+      'files',
+      'cdk',
+      'core',
+      'api',
+      'ecs',
+    ),
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_CONSTRUCTS_DIR,
+      'src',
+      'core',
+      'api',
+    ),
+    esmVars(tree),
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
 };
@@ -179,9 +245,16 @@ const addApiGatewayCdkConstructs = async (
     );
   };
 
-  // Generate relevant core CDK construct and utilities
-  generateCoreApiFile(options.constructType);
+  // Generate relevant core CDK construct and utilities. `http-ecs` fronts the
+  // container service with the same core HTTP API construct as `http`.
+  const coreApiType = options.constructType === 'rest' ? 'rest' : 'http';
+  generateCoreApiFile(coreApiType);
   generateCoreApiFile('utils');
+  if (options.constructType === 'http-ecs') {
+    // The load balancer, VPC link and target group every ECS-hosted API
+    // shares, so each API's own construct only names its service.
+    addEcsHttpEndpointConstruct(tree);
+  }
   if (options.backend.type === 'trpc') {
     generateCoreApiFile('trpc');
   }

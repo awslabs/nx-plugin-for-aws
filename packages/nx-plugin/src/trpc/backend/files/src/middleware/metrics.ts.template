@@ -7,14 +7,22 @@ export interface IMetricsContext {
 
 export const createMetricsPlugin = () => {
   const t = initTRPC.context<IMetricsContext>().create();
-  const metrics = new Metrics();
+  // Cold start belongs to the execution environment, not to a request, and the
+  // flag that decides it lives on the Metrics object. This one is kept for the
+  // life of the process so the metric is still reported once per cold start.
+  const environmentMetrics = new Metrics();
 
   return t.procedure.use(async (opts) => {
+    // One metrics object per request. A long-lived server — the ECS container
+    // entry point — serves requests concurrently, so a shared object would let
+    // one request overwrite another's dimensions and publish its metrics.
+    const metrics = new Metrics();
+
     metrics.addDimensions({
       procedure: opts.path,
       type: opts.type,
     });
-    metrics.captureColdStartMetric();
+    environmentMetrics.captureColdStartMetric();
     metrics.addMetric('RequestCount', MetricUnit.Count, 1);
 
     try {

@@ -1,0 +1,35 @@
+import * as cdk from 'aws-cdk-lib';
+import { Vpc } from 'aws-cdk-lib/aws-ec2';
+import { Construct } from 'constructs';
+import { MyApiEcs } from '@e2e-test/common-constructs';
+
+/**
+ * The application stack of the matrix workspace's second CDK app,
+ * `packages/infra-with-stages`. It instantiates the APIs the matrix generates
+ * with `--infra=http-ecs`, so every lane that builds the matrix workspace
+ * synthesises their load balancers, target groups, VPC link and access log
+ * bucket and runs checkov over them.
+ *
+ * They are here rather than in `packages/infra`'s stack because `cdk-deploy`
+ * deploys `packages/infra` and nothing deploys this app. A VPC with a NAT
+ * gateway, two internal load balancers and two Fargate services is the largest
+ * addition any generator has made to `cdk-deploy`, and that lane has the least
+ * headroom under the three-hour IAM session limit. The `api-ecs-deploy` lane
+ * deploys these APIs instead, in a workspace of its own
+ * (`e2e/src/smoke-tests/api-ecs-deploy.spec.ts`).
+ */
+export class ApplicationStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    // The ECS-hosted APIs need a VPC, which no other construct in this
+    // workspace does, so the stack creates one. One NAT gateway is what the
+    // deploy lanes use, so the template this stack synthesises matches what
+    // `api-ecs-deploy` deploys.
+    const vpc = new Vpc(this, 'Vpc', { natGateways: 1 });
+
+    new MyApiEcs(this, 'MyApiEcs', {
+      integrations: MyApiEcs.defaultIntegrations(this, { vpc }).build(),
+    });
+  }
+}

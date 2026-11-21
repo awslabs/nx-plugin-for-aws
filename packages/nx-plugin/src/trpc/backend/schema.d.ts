@@ -8,7 +8,7 @@ import { IacOption } from '../../utils/iac.js';
 
 export interface TsTrpcApiGeneratorSchema {
   name: string;
-  infra: 'rest-lambda' | 'http-lambda' | 'none';
+  infra: 'rest-lambda' | 'http-lambda' | 'http-ecs' | 'none';
   integrationPattern?: 'isolated' | 'shared';
   auth: 'iam' | 'cognito' | 'custom';
   directory?: TsProjectGeneratorSchema['directory'];

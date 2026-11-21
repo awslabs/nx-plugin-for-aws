@@ -1,0 +1,113 @@
+import * as cdk from 'aws-cdk-lib';
+import {
+  GatewayVpcEndpointAwsService,
+  type ISecurityGroup,
+  InterfaceVpcEndpointAwsService,
+  Port,
+  SubnetType,
+  Vpc,
+} from 'aws-cdk-lib/aws-ec2';
+import { Construct } from 'constructs';
+import { MyApi } from '@e2e-test/common-constructs';
+
+export class ApplicationStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    // One VPC for every API in this stack, with no NAT gateway, no Elastic IP
+    // and no internet gateway: there are no public subnets to put one in.
+    //
+    // The default per-Region Elastic IP quota is five and the other four
+    // deploy lanes each create a NAT gateway, so a fifth would leave the whole
+    // matrix with no headroom: one address left over from an earlier run fails
+    // whichever lane creates its NAT gateway last. The tasks reach what they
+    // need over VPC endpoints instead.
+    //
+    // Two availability zones, which is the fewest an Application Load Balancer
+    // allows, and one isolated subnet group holding the tasks, the load
+    // balancer and the VPC link.
+    const vpc = new Vpc(this, 'Vpc', {
+      maxAzs: 2,
+      natGateways: 0,
+      subnetConfiguration: [
+        {
+          name: 'Isolated',
+          subnetType: SubnetType.PRIVATE_ISOLATED,
+          cidrMask: 24,
+        },
+      ],
+    });
+    const vpcSubnets = { subnetType: SubnetType.PRIVATE_ISOLATED };
+
+    // An image layer is an S3 object, so the ECR endpoints below are not
+    // enough on their own. A gateway endpoint is a route table entry: it has
+    // no security group and no hourly charge.
+    vpc.addGatewayEndpoint('S3Endpoint', {
+      service: GatewayVpcEndpointAwsService.S3,
+      subnets: [vpcSubnets],
+    });
+
+    // The ECS-hosted tRPC API: a Fargate service, an internal load balancer
+    // and the VPC link its HTTP API reaches the load balancer through, all in
+    // the isolated subnets. `defaultIntegrations` builds the backend once for
+    // the shared pattern and puts it under `$router`, which is how the test
+    // reaches the service and the load balancer it created.
+    const myApiIntegrations = MyApi.defaultIntegrations(this, {
+      vpc,
+      vpcSubnets,
+    }).build();
+    const myApi = new MyApi(this, 'MyApi', {
+      integrations: myApiIntegrations,
+    });
+    const myApiBackend = myApiIntegrations.$router;
+
+    // What the tasks talk to with no internet path: ECR to pull the image and
+    // CloudWatch Logs for the `awslogs` driver. Nothing else is needed. The
+    // tasks make no AWS API call of their own, their credentials come from the
+    // task metadata endpoint rather than STS, the log groups' KMS key is used
+    // by CloudWatch Logs rather than by the task, and the services pass no
+    // `secrets`, so Secrets Manager and SSM have no part to play either.
+    const taskSecurityGroups: ISecurityGroup[] = [
+      myApiBackend.service.securityGroup,
+    ];
+    for (const [id, service] of [
+      ['EcrApiEndpoint', InterfaceVpcEndpointAwsService.ECR],
+      ['EcrDockerEndpoint', InterfaceVpcEndpointAwsService.ECR_DOCKER],
+      ['LogsEndpoint', InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS],
+    ] as const) {
+      const endpoint = vpc.addInterfaceEndpoint(id, {
+        service,
+        subnets: vpcSubnets,
+        // `open` defaults to true, which allows the whole VPC CIDR on 443.
+        // The tasks' own security groups are the only source allowed.
+        open: false,
+      });
+      const [endpointSecurityGroup] = endpoint.connections.securityGroups;
+      for (const taskSecurityGroup of taskSecurityGroups) {
+        endpointSecurityGroup.addIngressRule(
+          taskSecurityGroup,
+          Port.tcp(443),
+          'Tasks to the endpoint',
+        );
+      }
+    }
+
+    // What the test calls, signed and unsigned.
+    new cdk.CfnOutput(this, 'MyApiUrl', { value: myApi.url });
+
+    // What the test describes afterwards to check the request path is private.
+    // Declared at stack level, so each logical id is exactly the name given.
+    new cdk.CfnOutput(this, 'MyApiLoadBalancerArn', {
+      value: myApiBackend.endpoint.loadBalancer.loadBalancerArn,
+    });
+    new cdk.CfnOutput(this, 'MyApiClusterArn', {
+      value: myApiBackend.service.cluster.clusterArn,
+    });
+    new cdk.CfnOutput(this, 'MyApiServiceName', {
+      value: myApiBackend.service.service.serviceName,
+    });
+    new cdk.CfnOutput(this, 'MyApiServiceSecurityGroupId', {
+      value: myApiBackend.service.securityGroup.securityGroupId,
+    });
+  }
+}
