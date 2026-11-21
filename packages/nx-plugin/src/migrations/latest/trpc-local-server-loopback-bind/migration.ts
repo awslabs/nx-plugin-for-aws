@@ -31,6 +31,9 @@ import { formatFilesInSubtree } from '../../../utils/format.js';
  *   has diverged from the generated shape, is reported via `nextSteps` instead.
  * - Idempotent. `.listen($port, $host)` has two arguments, so it no longer
  *   matches once migrated.
+ * - A file this migration rewrites is reported through `nextSteps` as well,
+ *   naming the new bind address and the `HOST` escape hatch, so the behaviour
+ *   change does not arrive silently in a patch release.
  */
 
 /**
@@ -115,6 +118,13 @@ export default async function migration(
         migrated.replace(LOG_WITHOUT_HOST, LOG_WITH_HOST),
       );
     }
+
+    // A rewritten file is reported too. This ships as a patch, and a local
+    // server reached from a virtual machine or another machine would otherwise
+    // stop answering with nothing said about why.
+    nextSteps.push(
+      `${localServer} now binds the local server to 127.0.0.1, so it accepts connections only from this machine. If you reach it from a virtual machine, a container or another machine, set HOST=0.0.0.0 on the project's serve target to get the old behaviour back.`,
+    );
   }
 
   await formatFilesInSubtree(tree);

@@ -49,7 +49,7 @@ describe('trpc-local-server-loopback-bind', () => {
   it('should bind the vended local server to loopback', async () => {
     addApi('test-api', VENDED_LOCAL_SERVER);
 
-    const result = await migration(tree);
+    await migration(tree);
 
     const migrated = tree.read('apps/test-api/src/local-server.ts', 'utf-8');
     expect(migrated).toContain("const HOST = process.env.HOST || '127.0.0.1'");
@@ -60,6 +60,48 @@ describe('trpc-local-server-loopback-bind', () => {
       'console.log(`Local TRPC server listening on ${HOST}:${PORT}`)',
     );
     expect(migrated).not.toContain('listening on port');
+  });
+
+  it('should tell the user the bind address changed', async () => {
+    addApi('test-api', VENDED_LOCAL_SERVER);
+
+    const result = await migration(tree);
+
+    // This ships as a patch, so a user whose local server is reached from a
+    // virtual machine or another machine has to learn why it stopped
+    // answering, and how to get the old behaviour back.
+    expect(result.nextSteps).toHaveLength(1);
+    expect(result.nextSteps?.[0]).toContain(
+      'apps/test-api/src/local-server.ts',
+    );
+    expect(result.nextSteps?.[0]).toContain('127.0.0.1');
+    expect(result.nextSteps?.[0]).toContain('HOST=0.0.0.0');
+    expect(result.nextSteps?.[0]).toContain('serve target');
+  });
+
+  it('should report every local server it rewrites', async () => {
+    addApi('first-api', VENDED_LOCAL_SERVER);
+    addApi('second-api', VENDED_LOCAL_SERVER);
+
+    const result = await migration(tree);
+
+    expect(result.nextSteps).toHaveLength(2);
+    expect(result.nextSteps?.join('\n')).toContain(
+      'apps/first-api/src/local-server.ts',
+    );
+    expect(result.nextSteps?.join('\n')).toContain(
+      'apps/second-api/src/local-server.ts',
+    );
+  });
+
+  it('should say nothing about a server it left alone', async () => {
+    addApi('migrated-api', VENDED_LOCAL_SERVER);
+    await migration(tree);
+
+    // Second run: the file already binds through HOST, so there is no
+    // behaviour change to report this time.
+    const result = await migration(tree);
+
     expect(result.nextSteps).toEqual([]);
   });
 
