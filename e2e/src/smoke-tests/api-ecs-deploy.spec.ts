@@ -13,6 +13,7 @@ import {
   runInstall,
   tmpProjPath,
 } from '../utils';
+import { assertEcsHostedApiPathIsPrivate } from './api-ecs-deploy-assertions';
 import {
   assertNoLeftovers,
   describeCdkStage,
@@ -42,6 +43,12 @@ import {
  * that the whole private request path works — authorizer, VPC link, load
  * balancer, target group health check and the container's own server — and the
  * unsigned one is the proof that the API is not open.
+ *
+ * Both calls go to the API Gateway URL, so neither says anything about how the
+ * request reaches the task. Three read-only describe calls per API do: the
+ * load balancer's scheme is `internal`, the tasks get no public IP, and the
+ * service's security group has exactly one inbound rule, from the load
+ * balancer's own security group.
  *
  * Everything is destroyed in `finally`, and the leftover check
  * `container-deploy` uses then confirms, with read-only calls, that no stack,
@@ -178,6 +185,17 @@ describe('smoke test - api-ecs-deploy', () => {
       const myApiUrl = output('MyApiUrl');
       await invokeTrpcApi(myApiUrl, 'tRPC ECS API');
       await invokeIamApiNoAuthDenied(myApiUrl, 'tRPC ECS API');
+
+      // Both calls above go to the API Gateway URL, so neither would notice
+      // an internet-facing load balancer, a public task IP or a wider
+      // security group. These describe calls would.
+      await assertEcsHostedApiPathIsPrivate({
+        label: 'MyApi',
+        loadBalancerArn: output('MyApiLoadBalancerArn'),
+        clusterArn: output('MyApiClusterArn'),
+        serviceName: output('MyApiServiceName'),
+        serviceSecurityGroupId: output('MyApiServiceSecurityGroupId'),
+      });
     } catch (e) {
       testError = e;
       throw e;

@@ -132,6 +132,28 @@ export const appRouter = t.router({
 export type AppRouter = typeof appRouter;
 `;
 
+  /**
+   * The call site the api-ecs-deploy e2e lane's stack uses. That stack is a
+   * `.template` file, so nothing else type-checks it: it reads the backend the
+   * shared pattern built, under `$router`, to output the load balancer, cluster,
+   * service and security group the lane then describes.
+   */
+  const usageStub = (ext: string) => `import { Construct } from 'constructs';
+import { IVpc } from 'aws-cdk-lib/aws-ec2';
+import { TestApi } from './app/apis/test-api${ext}';
+
+export const readEcsBackend = (scope: Construct, vpc: IVpc) => {
+  const integrations = TestApi.defaultIntegrations(scope, { vpc }).build();
+  const backend = integrations.$router;
+  return {
+    loadBalancerArn: backend.endpoint.loadBalancer.loadBalancerArn,
+    clusterArn: backend.service.cluster.clusterArn,
+    serviceName: backend.service.service.serviceName,
+    securityGroupId: backend.service.securityGroup.securityGroupId,
+  };
+};
+`;
+
   afterAll(() => {
     rmSync(COMPILE_DIR, { recursive: true, force: true });
   });
@@ -169,6 +191,10 @@ export type AppRouter = typeof appRouter;
       writeFileSync(target, readOrThrow(tree, treePath));
       rootNames.push(target);
     }
+
+    const usagePath = join(srcDir, 'ecs-backend-usage.ts');
+    writeFileSync(usagePath, usageStub(format === 'esm' ? '.js' : ''));
+    rootNames.push(usagePath);
 
     const program = ts.createProgram(rootNames, {
       strict: true,

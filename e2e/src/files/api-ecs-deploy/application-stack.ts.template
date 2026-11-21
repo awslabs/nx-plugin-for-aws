@@ -7,18 +7,46 @@ export class ApplicationStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // One VPC for every API in this stack. One NAT gateway keeps the run under
-    // the default per-region EIP quota while the other deploy jobs run in
-    // parallel.
+    // One VPC for every API in this stack, so the lane creates one NAT
+    // gateway and takes one Elastic IP however many APIs it deploys. One is
+    // the minimum for subnets with egress, and the tasks need egress to pull
+    // their image from ECR and write to CloudWatch Logs.
+    //
+    // The default per-Region Elastic IP quota is five and the other four
+    // deploy lanes each take one, so this lane leaves no headroom. Raising
+    // the quota in the e2e account is the fix. Dropping to `natGateways: 0`
+    // would mean isolated subnets with ECR, Logs and S3 VPC endpoints, which
+    // is not the subnet type the guides document for this construct, so the
+    // lane would stop covering the path a user deploys.
     const vpc = new Vpc(this, 'Vpc', { natGateways: 1 });
 
     // The ECS-hosted tRPC API: a Fargate service, an internal load balancer
     // and the VPC link its HTTP API reaches the load balancer through.
+    // `defaultIntegrations` builds the backend once for the shared pattern and
+    // puts it under `$router`, which is how the test reaches the service and
+    // the load balancer it created.
+    const myApiIntegrations = MyApi.defaultIntegrations(this, { vpc }).build();
     const myApi = new MyApi(this, 'MyApi', {
-      integrations: MyApi.defaultIntegrations(this, { vpc }).build(),
+      integrations: myApiIntegrations,
     });
 
     // What the test calls, signed and unsigned.
     new cdk.CfnOutput(this, 'MyApiUrl', { value: myApi.url });
+
+    // What the test describes afterwards to check the request path is private.
+    // Declared at stack level, so each logical id is exactly the name given.
+    const myApiBackend = myApiIntegrations.$router;
+    new cdk.CfnOutput(this, 'MyApiLoadBalancerArn', {
+      value: myApiBackend.endpoint.loadBalancer.loadBalancerArn,
+    });
+    new cdk.CfnOutput(this, 'MyApiClusterArn', {
+      value: myApiBackend.service.cluster.clusterArn,
+    });
+    new cdk.CfnOutput(this, 'MyApiServiceName', {
+      value: myApiBackend.service.service.serviceName,
+    });
+    new cdk.CfnOutput(this, 'MyApiServiceSecurityGroupId', {
+      value: myApiBackend.service.securityGroup.securityGroupId,
+    });
   }
 }
