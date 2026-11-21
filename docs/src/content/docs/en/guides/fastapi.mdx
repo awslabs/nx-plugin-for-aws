@@ -870,6 +870,8 @@ With `infra` set to `http-ecs`, your API runs as a long-lived uvicorn server in 
 
 The tasks run in private subnets and never get a public IP address. Nothing in this path allows an address range inbound.
 
+By default the service, the load balancer and the VPC link go in the VPC's `PRIVATE_WITH_EGRESS` subnets, which reach AWS through a NAT gateway. Passing `vpcSubnets: { subnetType: SubnetType.PRIVATE_ISOLATED }` to `defaultIntegrations` drops the NAT gateway and its hourly charge, but isolated subnets have no route out, so the VPC then needs four VPC endpoints for the tasks to start at all: interface endpoints for `ecr.api` and `ecr.dkr` to pull the image, an S3 gateway endpoint because the image layers are S3 objects, and an interface endpoint for `logs` so the `awslogs` driver can write. Without them a task cannot pull its image and ECS rolls the deployment back on the circuit breaker without saying why.
+
 The VPC link, the load balancer, its listener, the target group and the bucket the load balancer writes its access logs to are created by one construct, `core/api/ecs-http-endpoint.ts` in `common/constructs`, which every API hosted on ECS shares. Your API's own construct names its container service and routes every operation to that endpoint.
 
 ### What Runs in the Container
@@ -885,7 +887,9 @@ The API Gateway routes still come from your OpenAPI spec, so an operation you ad
 
 Logs and metrics work as they do on Lambda: the container writes to its own CloudWatch log group, and metrics are written in the embedded metric format for CloudWatch Logs to extract.
 
-One thing about metrics is different here, and it is worth knowing before you add your own. `metrics`, the object the <a href="#metrics">Metrics</a> section above tells you to import from `.init`, is a Powertools `Metrics`, and every `Metrics` object in a process shares one metric store. On Lambda one invocation owns that store from start to finish. A uvicorn server handles requests at the same time, so a custom metric one request adds can be written out with another request's. The per-request metrics the API collects itself are not affected: they are published once per request and name only that request's route. If you add your own metrics and need each request kept separate, add them to an `EphemeralMetrics` you create in the request and flush before returning, which keeps a store of its own:
+One thing about metrics is different here, and it is worth knowing before you read a dashboard or add a metric of your own. `metrics`, the object the <a href="#metrics">Metrics</a> section above tells you to import from `.init`, is a Powertools `Metrics`, and every `Metrics` object in a process shares one metric store. On Lambda one invocation owns that store from start to finish. A uvicorn server handles requests at the same time, and both the API's own per-request metrics and any you add go to that one store, so two requests in flight together can have their metrics written out in one document and attributed to whichever route was added first. The other request's document can come out with no `route` dimension at all, holding only the metrics added after the first flush, and Powertools logs `PowertoolsUserWarning: Dimension 'route' has already been added` when it happens. Under light traffic, where requests rarely overlap, you will not see it.
+
+So treat `RequestCount` and `Success` per route as approximate on ECS. If you need a metric attributed to exactly one request, add it to an `EphemeralMetrics` you create in the request and flush before returning, which keeps a store of its own:
 
 ```python
 from aws_lambda_powertools.metrics import EphemeralMetrics, MetricUnit
