@@ -68,9 +68,24 @@ export type UnresolvedReason = 'no-runtimes-listed' | 'held-below-ceiling';
  *   a container-image function would keep running the old interpreter over a
  *   bundle built for the new one.
  *
- * Lift a ceiling by raising it here in the same change that moves the vended
- * base image tags, and, for Python, once `AgentCoreRuntime` publishes the
+ * Lifting a ceiling takes three edits in the same change: raise it here, bump
+ * {@link LAMBDA_RUNTIME_VERSIONS} by hand, and retag the vended Dockerfiles.
+ * Raising the ceiling alone only lets the next version update move the pin, and
+ * until the pin moves `lambda-runtimes.spec.ts` fails on any base image tag that
+ * disagrees with it. For Python, wait until `AgentCoreRuntime` publishes the
  * matching member.
+ *
+ * These runtimes are written by hand where no test can reach them, so they move
+ * in the same change too:
+ *
+ * - `BASE_IMAGES.python` in `versions.ts`, a `docker/library` image rather than
+ *   a Lambda base image, so the base image guard's pattern does not cover it
+ * - the e2e greengrass and dungeon-adventure recipe templates, which write
+ *   `Run: python3.14`, and the dungeon-adventure story agent templates, which
+ *   write `AgentCoreRuntime.PYTHON_3_14`
+ * - `docs/.../get_started/tutorials/dungeon-game/1.mdx` in every locale, which
+ *   names `Runtime.NODEJS_24_X` and `AgentCoreRuntime.PYTHON_3_14`, plus the
+ *   greengrass tutorial and guide pages, which name `python3.14` in prose
  */
 export const LAMBDA_RUNTIME_CEILINGS: Partial<
   Record<ILambdaRuntime, { readonly ceiling: string; readonly reason: string }>
