@@ -5,6 +5,7 @@
 import {
   generateFiles,
   joinPathFragments,
+  logger,
   OverwriteStrategy,
   type Tree,
   updateProjectConfiguration,
@@ -104,7 +105,9 @@ const VALID_TRPC_INTEGRATION_PERMUTATIONS = new Set([
   'http-lambda::isolated',
   'http-lambda::shared',
   // One container service answers every operation, so there is nothing for the
-  // isolated pattern to isolate.
+  // isolated pattern to isolate. `getIntegrationPattern` resolves http-ecs to
+  // shared whatever the caller asked for, so this is the only reachable
+  // http-ecs permutation.
   'http-ecs::shared',
   'none::isolated',
   'none::shared',
@@ -122,6 +125,7 @@ export async function tsTrpcApiGenerator(
     options.infra !== 'none' ? await resolveIac(tree, options.iac) : undefined;
 
   if (options.infra !== 'none') {
+    warnIfEcsIgnoresIntegrationPattern(options);
     validateTrpcInfraAndIntegrationPatternCombination(options);
   }
 
@@ -450,6 +454,22 @@ export async function tsTrpcApiGenerator(
     });
 }
 
+// On ECS one container service answers every operation, so the isolated
+// pattern has nothing to isolate. An explicit `--integrationPattern=isolated`
+// is reported and dropped rather than failing the generator.
+const warnIfEcsIgnoresIntegrationPattern = (
+  options: TsTrpcApiGeneratorSchema,
+) => {
+  if (
+    options.infra === 'http-ecs' &&
+    options.integrationPattern === 'isolated'
+  ) {
+    logger.warn(
+      `infra 'http-ecs' runs one container service that answers every operation, so integrationPattern 'isolated' is ignored and 'shared' is used instead.`,
+    );
+  }
+};
+
 const validateTrpcInfraAndIntegrationPatternCombination = (
   options: TsTrpcApiGeneratorSchema,
 ) => {
@@ -458,10 +478,7 @@ const validateTrpcInfraAndIntegrationPatternCombination = (
 
   if (!VALID_TRPC_INTEGRATION_PERMUTATIONS.has(permutation)) {
     throw new Error(
-      `Invalid tRPC infra/integrationPattern combination: ${options.infra} + ${integrationPattern}.` +
-        (options.infra === 'http-ecs'
-          ? ` One container service answers every operation, so http-ecs needs integrationPattern 'shared'. Pass --integrationPattern=shared, or omit the option: http-ecs defaults to shared.`
-          : ''),
+      `Invalid tRPC infra/integrationPattern combination: ${options.infra} + ${integrationPattern}.`,
     );
   }
 };
@@ -469,13 +486,14 @@ const validateTrpcInfraAndIntegrationPatternCombination = (
 const getIntegrationPattern = (
   options: TsTrpcApiGeneratorSchema,
 ): 'isolated' | 'shared' => {
-  if (options.integrationPattern) {
-    return options.integrationPattern;
+  // One container service answers every operation, leaving the isolated
+  // pattern nothing to isolate, so http-ecs always resolves to shared: both
+  // when the option is omitted (the schema has no default) and when it is set
+  // to isolated, which `warnIfEcsIgnoresIntegrationPattern` reports.
+  if (options.infra === 'http-ecs') {
+    return 'shared';
   }
-  // The schema has no default, so the pattern is resolved from the infra here:
-  // one container service answers every operation, leaving the isolated pattern
-  // nothing to isolate. Without this, --infra=http-ecs alone would fail.
-  return options.infra === 'http-ecs' ? 'shared' : 'isolated';
+  return options.integrationPattern ?? 'isolated';
 };
 
 const getApiGatewayEventType = (

@@ -2,7 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readJson, readProjectConfiguration, type Tree } from '@nx/devkit';
+import {
+  logger,
+  readJson,
+  readProjectConfiguration,
+  type Tree,
+} from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
@@ -1596,13 +1601,41 @@ export const echo = publicProcedure.query(() => ({ message: 'hi' }));
       ).toBe('shared');
     });
 
-    it('should reject the isolated integration pattern', async () => {
-      await expect(
-        tsTrpcApiGenerator(tree, {
-          ...ecsOptions('iam'),
-          integrationPattern: 'isolated',
-        }),
-      ).rejects.toThrow(/http-ecs needs integrationPattern 'shared'/);
+    it('should warn and fall back to shared for the isolated integration pattern', async () => {
+      const warn = vi.spyOn(logger, 'warn');
+
+      await tsTrpcApiGenerator(tree, {
+        ...ecsOptions('iam'),
+        integrationPattern: 'isolated',
+      });
+
+      // The option is reported as ignored rather than rejected.
+      expect(
+        warn.mock.calls
+          .map((call) => String(call[0]))
+          .filter((message) =>
+            message.includes(
+              `integrationPattern 'isolated' is ignored and 'shared' is used instead`,
+            ),
+          ),
+      ).toHaveLength(1);
+
+      // The same output as asking for shared: the project records shared, and
+      // the one container service is vended behind the shared HTTP endpoint.
+      const projectConfig = readProjectConfiguration(tree, '@proj/test-api');
+      expect(
+        (projectConfig.metadata as Record<string, unknown>).integrationPattern,
+      ).toBe('shared');
+      expect(
+        tree.exists(
+          'packages/common/constructs/src/app/services/test-api-container.ts',
+        ),
+      ).toBe(true);
+      expect(
+        tree.exists(
+          'packages/common/constructs/src/core/api/ecs-http-endpoint.ts',
+        ),
+      ).toBe(true);
     });
 
     it('should default the integration pattern to shared', async () => {
