@@ -8,7 +8,7 @@ import type { ProjectConfiguration } from '@nx/devkit';
 import { describe, expect, it } from 'vitest';
 import { addPythonBundleTarget } from './bundle/bundle.js';
 import { requiresPythonToRuffTarget } from './format.js';
-import { compareRuntimeVersions } from './lambda-runtime-resolution.js';
+import { compareRuntimeVersions } from './runtime-resolution.js';
 import {
   AGENT_CORE_RUNTIME_VERSIONS,
   cdkLambdaRuntime,
@@ -74,6 +74,11 @@ describe('vended lambda runtimes', () => {
     expect(cdkLambdaRuntime('python')).toBe(
       `Runtime.PYTHON_${LAMBDA_RUNTIME_VERSIONS.python.replace('.', '_')}`,
     );
+    // Derived from the pin like its three siblings, so the expectation moves with
+    // a legitimate bump — and checked against the member format CDK publishes,
+    // so a pin that produces no such member is still caught here.
+    expect(cdkLambdaRuntime('python')).toMatch(/^Runtime\.PYTHON_\d+_\d+$/);
+    expect(cdkLambdaRuntime('node')).toMatch(/^Runtime\.NODEJS_\d+_X$/);
   });
 
   // A generated Python project resolves its wheels against the uv interpreter, so
@@ -126,6 +131,10 @@ describe('vended lambda runtimes', () => {
   // the managed runtime, and the tag is written in the Dockerfile. Left behind by
   // a runtime bump, the image runs an interpreter the copied bundle was not
   // built for.
+  // Tag equality is deliberate while every vended Lambda image is a plain
+  // `FROM <repo>:<pin>`: a suffixed tag (`:24-slim`) or a named build stage
+  // (`... AS build`) would fail this, the way `sync-embedded-versions.ts` had to
+  // make an explicit allowance for build stages on `BASE_IMAGES`.
   it('should tag the vended lambda base images with the lambda runtimes', () => {
     const expected: Record<string, string> = {
       python: LAMBDA_RUNTIME_VERSIONS.python,
