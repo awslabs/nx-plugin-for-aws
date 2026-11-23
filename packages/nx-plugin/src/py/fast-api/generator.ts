@@ -6,6 +6,7 @@ import {
   type GeneratorCallback,
   generateFiles,
   joinPathFragments,
+  logger,
   OverwriteStrategy,
   type ProjectConfiguration,
   readProjectConfiguration,
@@ -98,6 +99,7 @@ export const pyFastApiProjectGenerator = async (
   schema: PyFastApiProjectGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   assertSupportedNxVersion(tree);
+  warnIfEcsIgnoresIntegrationPattern(schema);
   const integrationPattern = getIntegrationPattern(schema);
 
   // Recorded in the metadata below so the version sync can tell a CDK
@@ -109,17 +111,10 @@ export const pyFastApiProjectGenerator = async (
   // The ECS variant runs the API as a long-lived uvicorn server in a
   // container, which only the CDK provider vends today.
   const isEcs = schema.infra === 'http-ecs';
-  if (isEcs) {
-    if (integrationPattern !== 'shared') {
-      throw new Error(
-        `Invalid FastAPI infra/integrationPattern combination: http-ecs + ${integrationPattern}. One container service answers every operation, so http-ecs needs integrationPattern 'shared'. Pass --integrationPattern=shared, or omit the option: http-ecs defaults to shared.`,
-      );
-    }
-    if (iac !== 'cdk') {
-      throw new Error(
-        `infra 'http-ecs' is only implemented for the cdk IaC provider, and this workspace resolved iac '${iac}'. Pass --iac=cdk, or choose rest-lambda or http-lambda for terraform.`,
-      );
-    }
+  if (isEcs && iac !== 'cdk') {
+    throw new Error(
+      `infra 'http-ecs' is only implemented for the cdk IaC provider, and this workspace resolved iac '${iac}'. Pass --iac=cdk, or choose rest-lambda or http-lambda for terraform.`,
+    );
   }
 
   const { dir, normalizedModuleName, fullyQualifiedName } = getPyProjectDetails(
@@ -403,16 +398,30 @@ export const pyFastApiProjectGenerator = async (
     });
 };
 
+// On ECS one container service answers every operation, so the isolated
+// pattern has nothing to isolate. An explicit `--integrationPattern=isolated`
+// is reported and dropped rather than failing the generator.
+const warnIfEcsIgnoresIntegrationPattern = (
+  schema: PyFastApiProjectGeneratorSchema,
+) => {
+  if (schema.infra === 'http-ecs' && schema.integrationPattern === 'isolated') {
+    logger.warn(
+      `infra 'http-ecs' runs one container service that answers every operation, so integrationPattern 'isolated' is ignored and 'shared' is used instead.`,
+    );
+  }
+};
+
 const getIntegrationPattern = (
   schema: PyFastApiProjectGeneratorSchema,
 ): 'isolated' | 'shared' => {
-  if (schema.integrationPattern) {
-    return schema.integrationPattern;
+  // One container service answers every operation, leaving the isolated
+  // pattern nothing to isolate, so http-ecs always resolves to shared: both
+  // when the option is omitted (the schema has no default) and when it is set
+  // to isolated, which `warnIfEcsIgnoresIntegrationPattern` reports.
+  if (schema.infra === 'http-ecs') {
+    return 'shared';
   }
-  // The schema has no default, so the pattern is resolved from the infra here:
-  // one container service answers every operation, leaving the isolated pattern
-  // nothing to isolate. Without this, --infra=http-ecs alone would fail.
-  return schema.infra === 'http-ecs' ? 'shared' : 'isolated';
+  return schema.integrationPattern ?? 'isolated';
 };
 
 export default pyFastApiProjectGenerator;

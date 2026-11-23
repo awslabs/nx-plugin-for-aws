@@ -6,6 +6,7 @@
 import { parse } from '@iarna/toml';
 import {
   joinPathFragments,
+  logger,
   readProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
@@ -787,13 +788,38 @@ describe('fastapi project generator', () => {
       expect(projectConfig.targets.assemble.dependsOn).toContain('openapi');
     });
 
-    it('should reject the isolated integration pattern', async () => {
-      await expect(
-        pyFastApiProjectGenerator(tree, {
-          ...ecsOptions('iam'),
-          integrationPattern: 'isolated',
-        }),
-      ).rejects.toThrow(/http-ecs needs integrationPattern 'shared'/);
+    it('should warn and fall back to shared for the isolated integration pattern', async () => {
+      const warn = vi.spyOn(logger, 'warn');
+
+      await pyFastApiProjectGenerator(tree, {
+        ...ecsOptions('iam'),
+        integrationPattern: 'isolated',
+      });
+
+      // The option is reported as ignored rather than rejected.
+      expect(
+        warn.mock.calls
+          .map((call) => String(call[0]))
+          .filter((message) =>
+            message.includes(
+              `integrationPattern 'isolated' is ignored and 'shared' is used instead`,
+            ),
+          ),
+      ).toHaveLength(1);
+
+      // The same output as asking for shared: one container service behind the
+      // shared HTTP endpoint, with one integration for every operation.
+      expect(
+        tree.exists(
+          'packages/common/constructs/src/app/services/test-api-container.ts',
+        ),
+      ).toBe(true);
+      expect(
+        tree.read(
+          'packages/common/constructs/src/app/apis/test-api.ts',
+          'utf-8',
+        ),
+      ).toContain("pattern: 'shared'");
     });
 
     it('should default the integration pattern to shared', async () => {
