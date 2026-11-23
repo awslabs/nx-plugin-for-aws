@@ -21,7 +21,15 @@ import { PY_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/vers
 
 [FastAPI](https://fastapi.tiangolo.com/) là một framework để xây dựng API trong Python.
 
-Trình tạo FastAPI tạo một FastAPI mới với cấu hình hạ tầng AWS CDK hoặc Terraform. Backend được tạo sử dụng AWS Lambda để triển khai serverless, được hiển thị thông qua AWS API Gateway API. Nó thiết lập [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) để quan sát, bao gồm logging, AWS X-Ray tracing và Cloudwatch Metrics.
+Trình tạo FastAPI tạo một FastAPI mới với cấu hình hạ tầng AWS CDK hoặc Terraform. Backend được tạo được hiển thị thông qua AWS API Gateway API. Nó thiết lập [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) để quan sát, bao gồm structured logging và CloudWatch metrics.
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Lambda hosting">
+Backend sử dụng AWS Lambda để triển khai serverless, và AWS X-Ray tracing cũng được thiết lập.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="ECS hosting">
+API của bạn chạy như một máy chủ uvicorn tồn tại lâu dài trong một container trên Amazon ECS, đằng sau một API Gateway HTTP API, thay vì trong một Lambda function. Xem <a href="#running-on-amazon-ecs">Running on Amazon ECS</a> để biết những gì thay đổi, bao gồm lý do tại sao X-Ray tracing không tạo ra traces ở đó.
+</OptionFilter>
 
 ## Cách sử dụng
 
@@ -43,7 +51,19 @@ Chọn `rest-lambda` (mặc định) làm `infra` của bạn nếu bạn dự �
 
 :::tip[Integration Pattern]
 Tùy chọn `integrationPattern` mặc định là `isolated`, tạo một Lambda cho mỗi hoạt động FastAPI. Chọn `shared` nếu bạn muốn một Lambda handler được chia sẻ cho toàn bộ API, với các ghi đè tùy chọn cho từng hoạt động.
+
+Với `infra` được đặt thành `http-ecs`, tùy chọn luôn là `shared`, vì một container service trả lời mọi hoạt động.
 :::
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="ECS hosting is experimental">
+:::caution[Thử nghiệm]
+`http-ecs` đang ở giai đoạn thử nghiệm. Đầu ra được tạo của nó có thể thay đổi giữa các bản phát hành mà không có migration để chuyển một workspace hiện có, vì vậy hãy mong đợi phải tự điều chỉnh những thay đổi đó khi bạn nâng cấp.
+
+Nó cần CDK IaC provider: Hỗ trợ Terraform chưa được triển khai, và trình tạo sẽ thất bại với một thông báo nêu rõ cách khắc phục.
+
+`integrationPattern` luôn là `shared` ở đây, vì một container service trả lời mọi hoạt động. Truyền `--integrationPattern=isolated` cùng với `http-ecs` không gây lỗi: trình tạo cảnh báo rằng tùy chọn bị bỏ qua và sử dụng `shared`. Khi chạy trình tạo tương tác, nó hỏi về `integrationPattern` trước `infra`, với `isolated` được chọn trước, vì vậy cảnh báo đó là những gì bạn thấy nếu bạn để nguyên lựa chọn trước và sau đó chọn `http-ecs`.
+:::
+</OptionFilter>
 
 ## Đầu ra của trình tạo
 
@@ -62,6 +82,20 @@ Trình tạo sẽ tạo cấu trúc dự án sau trong thư mục `<directory>/<
   - generate_open_api.py Script để tạo schema OpenAPI từ ứng dụng FastAPI
 
 </FileTree>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="Files that differ when the API runs on ECS">
+Với `infra` được đặt thành `http-ecs`, API chạy như một HTTP server riêng thay vì đằng sau Lambda Web Adapter, vì vậy `run.sh` không được tạo. Thay vào đó, bạn nhận được một thư mục container bên trong module của mình, được đặt tên theo API của bạn:
+
+<FileTree>
+- \<module_name>
+  - \<api_name>_container
+    - main.py Entry point: thêm `GET /health`, ghi ra các metrics mà API thu thập, và khởi động uvicorn trên `HOST` và `PORT`. Bundle, image và target `serve` đều bắt đầu từ file này
+    - Dockerfile Định nghĩa container image
+    - .dockerignore Các file bị loại khỏi ngữ cảnh build image
+</FileTree>
+
+`init.py`, `main.py` và các hoạt động bạn thêm vào chúng đều giống nhau cho mọi giá trị `infra`.
+</OptionFilter>
 
 ### Hạ tầng
 
@@ -101,8 +135,18 @@ Trình tạo thiết lập một số tính năng tự động:
 2. Middleware xử lý lỗi
 3. Tương quan request/response
 4. Thu thập metrics
-5. Triển khai AWS Lambda qua [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) với uvicorn
-6. Streaming an toàn kiểu (chỉ REST API)
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Streaming, which needs a REST API">
+Streaming an toàn kiểu cũng được thiết lập, chỉ dành cho hạ tầng `rest-lambda`.
+</OptionFilter>
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="How the Lambda variants serve the app">
+Ứng dụng được phục vụ trong một Lambda function bởi [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) chạy uvicorn.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="How the ECS variant serves the app">
+Ứng dụng được phục vụ bởi uvicorn trong container, không có Lambda Web Adapter. Xem <a href="#running-on-amazon-ecs">Running on Amazon ECS</a>.
+</OptionFilter>
 
 ### Quan sát với AWS Lambda Powertools
 
@@ -139,6 +183,12 @@ def read_item(item_id: int):
         # Your logic here
         return {"item_id": item_id}
 ```
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="X-Ray produces no traces on ECS">
+:::caution[Không có traces trên ECS]
+Decorator và subsegment ở trên chạy mà không có lỗi trong một container, nhưng không tạo ra traces. Powertools tắt tracer của nó khi không chạy trong Lambda. Xem <a href="#observability">Observability</a> để biết những gì bạn nhận được và những gì cần thêm nếu bạn cần traces.
+:::
+</OptionFilter>
 
 #### Metrics
 
@@ -187,9 +237,17 @@ Khuyến nghị chỉ định response models cho các hoạt động API của 
 
 ### Truy cập người dùng đang gọi
 
+<OptionFilter when={{ infra: 'http-ecs' }} description="Identity on ECS — the authorizer context does not arrive">
+Trên ECS không có Lambda Web Adapter và không có API Gateway request context header: API Gateway không chuyển tiếp các claim của authorizer đến một private load balancer integration. Authorizer vẫn quyết định liệu một request có đến được container hay không, nhưng các handler của bạn không thể đọc người gọi từ request như được viết bên dưới.
+
+Để đọc danh tính của người gọi trong một hoạt động, ánh xạ context của authorizer lên một request header trong API construct của bạn, và đọc header đó từ FastAPI `Request`.
+</OptionFilter>
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Identity on the Lambda variants">
 Khi API của bạn được bảo vệ bởi xác thực, các route handler của bạn thường cần biết ai đang gọi. FastAPI được tạo chạy bên trong AWS Lambda qua [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter), chuyển tiếp request context của API Gateway dưới dạng JSON trên header `x-amzn-request-context`. Bạn có thể đọc nó từ FastAPI `Request` để trích xuất danh tính của người gọi.
 
 Ví dụ, hãy thêm một endpoint `/me` trả về thông tin chi tiết về người dùng đang gọi. Chúng ta sẽ triển khai việc trích xuất như một [FastAPI dependency](https://fastapi.tiangolo.com/tutorial/dependencies/) để nó có thể được tái sử dụng trên các route. Hình dạng của request context — và do đó cách bạn trích xuất danh tính — phụ thuộc vào cả phương thức `auth` bạn đã chọn và liệu bạn đã triển khai REST hay HTTP API.
+</OptionFilter>
 
 <OptionFilter when={{ auth: 'iam' }} description="Identity extraction for IAM-authenticated APIs">
 Đối với xác thực `IAM`, chúng ta tra cứu người gọi trong Cognito bằng cách sử dụng sub được trích xuất từ request context của API Gateway, điều này yêu cầu `boto3`. Thêm nó vào dự án API của bạn:
@@ -444,6 +502,7 @@ Trình tạo FastAPI tạo infrastructure as code CDK hoặc Terraform dựa tr�
 
 <Infrastructure>
 <Fragment slot="cdk">
+<OptionFilter not when={{ infra: 'http-ecs' }} description="CDK usage for the Lambda variants">
 CDK construct để triển khai API của bạn trong thư mục `common/constructs`. Bạn có thể sử dụng điều này trong một ứng dụng CDK:
 
 ```ts {6-8}
@@ -467,6 +526,47 @@ export class ExampleStack extends Stack {
 4. CloudWatch log group
 5. Cấu hình X-Ray tracing
 6. CloudWatch metrics namespace
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="CDK usage when the API runs on ECS — pass the VPC">
+`defaultIntegrations` nhận VPC mà service của bạn chạy trong đó, và xây dựng mọi thứ bên trong nó: ECS service, internal load balancer phía trước nó, và VPC link mà API Gateway đến load balancer đó thông qua. Construct không bao giờ tạo VPC, vì vậy bạn tạo hoặc import một VPC trong stack của mình.
+
+```ts {10,13-15}
+import { MyApi } from '@my-scope/common-constructs';
+import { Stack } from 'aws-cdk-lib';
+import { Vpc } from 'aws-cdk-lib/aws-ec2';
+import { Construct } from 'constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    const vpc = new Vpc(this, 'Vpc', { natGateways: 1 });
+
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this, { vpc }).build(),
+    });
+  }
+}
+```
+
+Để sử dụng một VPC hiện có, tra cứu nó với `Vpc.fromLookup(this, 'Vpc', { vpcId: '<vpc-id>' })` và truyền nó dưới dạng `vpc`.
+
+Truyền `service` để thay đổi container service — `cpu`, `memoryLimitMiB`, `desiredCount`, `environment` của nó, hoặc `grantTaskRole` để cấp quyền cho task role:
+
+```ts
+MyApi.defaultIntegrations(this, {
+  vpc,
+  service: {
+    cpu: 512,
+    memoryLimitMiB: 1024,
+    grantTaskRole: (taskRole) => myTable.grantReadWriteData(taskRole),
+  },
+}).build();
+```
+
+Điều này thiết lập một AWS API Gateway HTTP API với xác thực dựa trên phương thức `auth` bạn đã chọn, một Amazon ECS service chạy container của bạn, một internal load balancer phía trước nó, và VPC link mà API Gateway đến load balancer đó thông qua.
+</OptionFilter>
 
 <Snippet name="api/cors-configuration-cdk-note" />
 
@@ -502,6 +602,12 @@ Kết quả authorizer được cache trong 5 phút, được khóa trên header
 </OptionFilter>
 </Fragment>
 <Fragment slot="terraform">
+<OptionFilter when={{ infra: 'http-ecs' }} description="Terraform is not implemented for ECS hosting">
+:::caution[Chỉ CDK]
+`http-ecs` không được triển khai cho Terraform. Trình tạo sẽ thất bại với một thông báo nói như vậy. Chọn `rest-lambda` hoặc `http-lambda` cho một workspace Terraform.
+:::
+</OptionFilter>
+
 Các module Terraform để triển khai API của bạn nằm trong thư mục `common/terraform`. Bạn có thể sử dụng điều này trong một cấu hình Terraform.
 
 Module API đặt zip triển khai Lambda của nó trong một S3 asset bucket được chia sẻ — xem <Link path="/guides/terraform-project">hướng dẫn hạ tầng Terraform</Link> để biết chi tiết. Khởi tạo module `core/asset-bucket` một lần cho mỗi triển khai và truyền output `bucket_name` của nó vào mọi module API / Lambda qua input `asset_bucket_name`:
@@ -730,15 +836,106 @@ Trình tạo cấu hình một máy chủ phát triển cục bộ mà bạn có
 
 <NxCommands commands={['serve <project-name>']} />
 
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Local server for the Lambda variants">
 Điều này khởi động một máy chủ phát triển FastAPI cục bộ với:
 
 - Tự động tải lại khi thay đổi code
 - Tài liệu API tương tác tại `/docs` hoặc `/redoc`
 - Schema OpenAPI tại `/openapi.json`
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="Local server when the API runs on ECS">
+Điều này khởi động entry point của container, cùng một file mà image chạy, với:
+
+- `GET /health`, trả lời như nó làm cho load balancer
+- Tài liệu API tương tác tại `/docs` hoặc `/redoc`
+- Schema OpenAPI tại `/openapi.json`
+
+Máy chủ bind `127.0.0.1`, vì vậy nó chỉ trả lời trên máy của bạn. Nó không tải lại gì cả: khởi động lại nó để nhận thay đổi code. Để truy cập nó từ một máy khác, một VM hoặc một container, đặt `HOST=0.0.0.0` trên target `serve` — điều này làm cho API có thể truy cập bởi bất cứ thứ gì có thể truy cập máy của bạn, không được xác thực.
+</OptionFilter>
 
 :::note[Tên dự án]
 Tên dự án Python sử dụng dấu gạch dưới, vì vậy một API được tạo với `--name=MyApi` được gọi là `my_api` (hoặc bằng tên đầy đủ của nó, `<scope>.my_api`). Cổng mà máy chủ lắng nghe được gán cho mỗi dự án — đọc nó từ target `serve` trong `project.json` của dự án của bạn.
 :::
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="How ECS hosting works, what it costs and what it limits">
+## Running on Amazon ECS
+
+Với `infra` được đặt thành `http-ecs`, API của bạn chạy như một máy chủ uvicorn tồn tại lâu dài trong một container thay vì trong một Lambda function đằng sau Lambda Web Adapter. Một request đi theo đường dẫn này:
+
+1. Người gọi ký một request đến API Gateway HTTP API, đây là điểm vào công khai duy nhất. Mọi route đều mang authorizer cho `auth` bạn đã chọn, vì vậy một request không được xác thực sẽ bị từ chối tại edge.
+2. API Gateway chuyển tiếp request thông qua một VPC link, đây là đường dẫn riêng của nó vào VPC của bạn.
+3. VPC link đến một internal load balancer. Load balancer không có địa chỉ công khai, và quy tắc inbound duy nhất của nó cho phép security group của VPC link trên listener port.
+4. Load balancer chuyển tiếp request đến một task. Quy tắc inbound duy nhất của các task cho phép security group của load balancer trên container port, vì vậy không có gì khác trong VPC có thể mở kết nối đến chúng.
+
+Các task chạy trong private subnet và không bao giờ nhận được địa chỉ IP công khai. Không có gì trong đường dẫn này cho phép một dải địa chỉ inbound.
+
+Theo mặc định, service, load balancer và VPC link nằm trong các subnet `PRIVATE_WITH_EGRESS` của VPC, đến AWS thông qua một NAT gateway. Truyền `vpcSubnets: { subnetType: SubnetType.PRIVATE_ISOLATED }` vào `defaultIntegrations` loại bỏ NAT gateway và chi phí hàng giờ của nó, nhưng các isolated subnet không có route ra ngoài, vì vậy VPC sau đó cần bốn VPC endpoint để các task khởi động: interface endpoint cho `ecr.api` và `ecr.dkr` để pull image, một S3 gateway endpoint vì các image layer là các S3 object, và một interface endpoint cho `logs` để driver `awslogs` có thể ghi. Không có chúng, một task không thể pull image của nó và ECS roll back triển khai trên circuit breaker mà không nói tại sao.
+
+VPC link, load balancer, listener của nó, target group và bucket mà load balancer ghi access log của nó được tạo bởi một construct, `core/api/ecs-http-endpoint.ts` trong `common/constructs`, mà mọi API được host trên ECS chia sẻ. Construct riêng của API của bạn đặt tên cho container service của nó và định tuyến mọi hoạt động đến endpoint đó.
+
+### Những gì chạy trong Container
+
+`<module_name>/<api_name>_container/main.py` import app từ `main.py` của bạn, vì vậy mọi hoạt động bạn viết được phục vụ chính xác như trên Lambda. Nó thêm hai thứ của riêng nó:
+
+- `GET /health`, mà target group của load balancer và container health check gọi. Nó được khai báo `include_in_schema=False`, vì vậy nó không có trong OpenAPI spec của bạn và do đó không có trong các route API Gateway và các client được tạo. Nó cũng bị loại khỏi request metrics, vì vậy cuộc gọi của target group mỗi 15 giây không được tính là một API request.
+- Một middleware ghi ra các metrics mà middleware riêng của API thu thập. Trên Lambda, handler làm điều đó ở cuối mỗi invocation; máy chủ này tồn tại qua các request, vì vậy nó tự flush chúng.
+
+Các route API Gateway vẫn đến từ OpenAPI spec của bạn, vì vậy một hoạt động bạn thêm được triển khai một khi `nx build` đã tạo lại spec.
+
+### Observability
+
+Log và metrics hoạt động như chúng làm trên Lambda: container ghi vào CloudWatch log group riêng của nó, và metrics được ghi ở định dạng embedded metric để CloudWatch Logs trích xuất.
+
+Một điều về metrics khác ở đây, và đáng biết trước khi bạn đọc dashboard hoặc thêm một metric của riêng bạn. `metrics`, đối tượng mà phần <a href="#metrics">Metrics</a> ở trên nói với bạn để import từ `.init`, là một Powertools `Metrics`, và mọi đối tượng `Metrics` trong một process chia sẻ một metric store. Trên Lambda, một invocation sở hữu store đó từ đầu đến cuối. Một máy chủ uvicorn xử lý các request cùng một lúc, và cả metrics per-request riêng của API và bất kỳ metrics nào bạn thêm đều đi đến store đó, vì vậy hai request đang bay cùng nhau có thể có metrics của chúng được ghi ra trong một document và được gán cho route nào được thêm trước. Document của request khác có thể ra không có dimension `route` nào cả, chỉ giữ các metrics được thêm sau lần flush đầu tiên, và Powertools ghi log `PowertoolsUserWarning: Dimension 'route' has already been added` khi điều đó xảy ra. Dưới lưu lượng nhẹ, nơi các request hiếm khi chồng chéo, bạn sẽ không thấy nó.
+
+Vì vậy, hãy coi `RequestCount` và `Success` theo route là gần đúng trên ECS. Nếu bạn cần một metric được gán cho chính xác một request, thêm nó vào một `EphemeralMetrics` bạn tạo trong request và flush trước khi trả về, giữ một store của riêng nó:
+
+```python
+from aws_lambda_powertools.metrics import EphemeralMetrics, MetricUnit
+
+@app.get("/items/{item_id}")
+def read_item(item_id: int):
+    request_metrics = EphemeralMetrics()
+    request_metrics.add_metric(name="ItemViewed", unit=MetricUnit.Count, value=1)
+    request_metrics.flush_metrics()
+    return {"item_id": item_id}
+```
+
+AWS X-Ray tracing thì không. `@tracer.capture_method` là một no-op bên ngoài Lambda, và cũng không có X-Ray daemon trong task để nhận các segment. Thêm một cái như một sidecar trong container service của bạn nếu bạn cần traces.
+
+Access log của API Gateway HTTP API ghi lại mọi request đến API. Load balancer ghi access log riêng của nó vào một bucket mà construct `EcsHttpEndpoint` tạo, đó là nơi bạn có thể thấy task nào phục vụ một request và nó trả lời gì.
+
+### Image Build và Scanning
+
+Trình tạo container cung cấp các image target, được đặt tên theo API của bạn:
+
+- `<api-name>-container-docker` build một linux/arm64 image, chạy bundle trước để image chứa package của bạn và các dependency của nó.
+- `<api-name>-container-trivy` quét image đó để tìm lỗ hổng.
+
+Xem <Link path="/guides/py-container">Python Container Service</Link> để biết cách image được build, và <Link path="/guides/docker-bundling">Docker Bundling</Link> để biết cách nó được publish tại thời điểm deploy.
+
+### Giới hạn
+
+- **Integration timeout.** API Gateway HTTP API giới hạn một integration ở khoảng 30 giây. Một hoạt động mất nhiều thời gian hơn thế sẽ thất bại tại gateway dù container tiếp tục làm việc bao lâu.
+- **Không có streaming.** Các hoạt động streaming cần hạ tầng `rest-lambda`. Một HTTP API không thể stream một response.
+- **Payload size.** Request và response tuân theo giới hạn 10 MB của API Gateway.
+- **Một service cho mọi hoạt động.** `integrationPattern` là `shared`: có một container service, và mọi route được định tuyến đến nó. Tùy chọn luôn resolve thành `shared` cho hạ tầng này, và `isolated` bị bỏ qua với một cảnh báo.
+
+### Chi phí
+
+Load balancer là chi phí cố định mới so với Lambda, nơi bạn trả tiền cho mỗi request và không có gì khi idle. Các con số hàng tháng gần đúng ở us-east-1, trước khi truyền dữ liệu:
+
+| Mục | Khoảng |
+| --- | --- |
+| Internal load balancer | $16 cộng với load balancer capacity unit |
+| Fargate task, 0.25 vCPU / 0.5 GB arm64 | $7 mỗi task |
+| NAT gateway, nếu VPC của bạn có một cái | $33 |
+| VPC link | không có phí hàng giờ |
+| S3 storage cho access log của load balancer | cent mỗi GB một tháng |
+
+Vì vậy, một service một task có giá khoảng $23 một tháng trước bất kỳ traffic nào, và nhiều hơn nếu VPC bạn truyền vào có NAT gateway. Access log tăng theo traffic: thêm một lifecycle rule vào `endpoint.accessLogsBucket` để hết hạn chúng. Kiểm tra các trang giá [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) và [AWS Fargate](https://aws.amazon.com/fargate/pricing/) để biết giá hiện tại trong Region của bạn.
+</OptionFilter>
 
 ## Gọi FastAPI của bạn
 
