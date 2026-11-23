@@ -3,7 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import conventional from '@commitlint/config-conventional';
 import { execSync } from 'child_process';
+import fastGlob from 'fast-glob';
 import {
   cpSync,
   mkdirSync,
@@ -20,38 +22,18 @@ import {
   parsePipRequirementsLine,
   VersionOperator,
 } from 'pip-requirements-js';
-import fastGlob from 'fast-glob';
 import { parseDocument } from 'yaml';
-import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
-import conventional from '@commitlint/config-conventional';
 import commitlintConfig from '../commitlint.config.js';
 import {
   resolveAgentCoreRuntimes,
   unresolvedAgentCoreRuntimeWarning,
 } from '../packages/nx-plugin/src/utils/agent-core-runtime-resolution.js';
 import {
-  type RuntimeResolution,
   resolveLambdaRuntimes,
   unresolvedRuntimeWarning,
 } from '../packages/nx-plugin/src/utils/lambda-runtime-resolution';
-import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-migration/nx-package-updates';
-import { registerNxPackageUpdates } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
-import {
-  AGENT_CORE_RUNTIME_VERSIONS,
-  EXACT_DEPENDENCY_PINS,
-  type IJavaVersion,
-  type IMiseVersion,
-  JAVA_ARTIFACTS,
-  JAVA_VERSIONS,
-  LAMBDA_RUNTIME_VERSIONS,
-  LOCKSTEP_GROUPS,
-  MISE_TOOLS,
-  MISE_VERSIONS,
-  PY_VERSIONS,
-  TERRAFORM_VERSIONS,
-  TS_VERSIONS,
-  VENDORED_VERSIONS,
-} from '../packages/nx-plugin/src/utils/versions';
+import type { RuntimeResolution } from '../packages/nx-plugin/src/utils/runtime-resolution.js';
+import { applyVersionEntryRewrite } from '../packages/nx-plugin/src/utils/version-entry-rewrite';
 import {
   type DependencyLookup,
   memoizeLookup,
@@ -71,6 +53,24 @@ import {
   type ReportChange,
   type VersionChange,
 } from '../packages/nx-plugin/src/utils/version-lockstep/report';
+import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-migration/nx-package-updates';
+import { registerNxPackageUpdates } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
+import {
+  AGENT_CORE_RUNTIME_VERSIONS,
+  EXACT_DEPENDENCY_PINS,
+  type IJavaVersion,
+  type IMiseVersion,
+  JAVA_ARTIFACTS,
+  JAVA_VERSIONS,
+  LAMBDA_RUNTIME_VERSIONS,
+  LOCKSTEP_GROUPS,
+  MISE_TOOLS,
+  MISE_VERSIONS,
+  PY_VERSIONS,
+  TERRAFORM_VERSIONS,
+  TS_VERSIONS,
+  VENDORED_VERSIONS,
+} from '../packages/nx-plugin/src/utils/versions';
 import { refreshShadcnTemplates } from './update-versions/shadcn';
 
 /**
@@ -273,7 +273,6 @@ const getUpdatedPythonVersions = (tmpDir: string): Record<string, string> => {
   return updatedVersions;
 };
 
-
 /**
  * Compares two `major.minor.patch` version strings.
  * @returns positive if a > b, negative if a < b, zero if equal
@@ -364,7 +363,7 @@ const applyUpdatedVersions = async (
   currentVersions: Record<string, string>,
   updatedVersions: Record<string, string>,
   versionsFilePath: string,
-  _versionConstantName: string,
+  versionConstantName: string,
 ): Promise<VersionChange[]> => {
   const changes: VersionChange[] = [];
 
@@ -377,20 +376,18 @@ const applyUpdatedVersions = async (
     if (oldVersion !== newVersion) {
       changes.push({ name: depName, oldVersion, newVersion });
 
-      // Use GritQL to rewrite the property value.
-      // Keys are either bare identifiers (e.g. boto3) or string literals (e.g. '@aws-sdk/client-dynamodb')
-      // depending on whether the name is a valid JS identifier.
-      const isIdentifier = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(depName);
-      const pattern = isIdentifier
-        ? `\`${depName}: '${oldVersion}'\` => \`${depName}: '${newVersion}'\``
-        : `\`'${depName}': '${oldVersion}'\` => \`'${depName}': '${newVersion}'\``;
-
-      try {
-        await applyGritQL(tree, versionsFilePath, pattern);
-        console.log(`Updated ${depName} to ${newVersion}`);
-      } catch (error) {
-        console.warn(`Could not update ${depName}:`, error);
-      }
+      // Rewrite the property value scoped to the constant the entry belongs to,
+      // so a key another constant shares is left alone. A rewrite that moves
+      // nothing throws rather than warning: the change is already in `changes`,
+      // which is the PR body, so carrying on would report a bump the file does
+      // not have.
+      await applyVersionEntryRewrite(tree, versionsFilePath, {
+        constantName: versionConstantName,
+        name: depName,
+        oldVersion,
+        newVersion,
+      });
+      console.log(`Updated ${depName} to ${newVersion}`);
     }
   }
 
@@ -454,11 +451,16 @@ const updateGitSecrets = async (
     'packages/nx-plugin/src/preset/git-secrets-files/git-secrets-dir/git-secrets';
   tree.write(vendoredPath, scriptContent);
 
-  // Update the version in versions.ts using GritQL
-  await applyGritQL(
+  // Update the version in versions.ts, scoped to the constant that holds it
+  await applyVersionEntryRewrite(
     tree,
     'packages/nx-plugin/src/utils/versions.ts',
-    `\`'git-secrets': '${currentVersion}'\` => \`'git-secrets': '${latestVersion}'\``,
+    {
+      constantName: 'VENDORED_VERSIONS',
+      name: 'git-secrets',
+      oldVersion: currentVersion,
+      newVersion: latestVersion,
+    },
   );
 
   return {

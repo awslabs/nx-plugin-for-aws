@@ -8,7 +8,9 @@ import type { ProjectConfiguration } from '@nx/devkit';
 import { describe, expect, it } from 'vitest';
 import { addPythonBundleTarget } from './bundle/bundle.js';
 import { requiresPythonToRuffTarget } from './format.js';
+import { compareRuntimeVersions } from './runtime-resolution.js';
 import {
+  AGENT_CORE_RUNTIME_VERSIONS,
   cdkLambdaRuntime,
   LAMBDA_RUNTIME_VERSIONS,
   pyenvPythonVersion,
@@ -69,7 +71,14 @@ describe('vended lambda runtimes', () => {
     expect(terraformLambdaRuntime('python')).toBe(
       `python${LAMBDA_RUNTIME_VERSIONS.python}`,
     );
-    expect(cdkLambdaRuntime('python')).toBe('Runtime.PYTHON_3_14');
+    expect(cdkLambdaRuntime('python')).toBe(
+      `Runtime.PYTHON_${LAMBDA_RUNTIME_VERSIONS.python.replace('.', '_')}`,
+    );
+    // Derived from the pin like its three siblings, so the expectation moves with
+    // a legitimate bump — and checked against the member format CDK publishes,
+    // so a pin that produces no such member is still caught here.
+    expect(cdkLambdaRuntime('python')).toMatch(/^Runtime\.PYTHON_\d+_\d+$/);
+    expect(cdkLambdaRuntime('node')).toMatch(/^Runtime\.NODEJS_\d+_X$/);
   });
 
   // A generated Python project resolves its wheels against the uv interpreter, so
@@ -103,6 +112,47 @@ describe('vended lambda runtimes', () => {
     expect(commands.join('\n')).toContain(
       `--python-version ${LAMBDA_RUNTIME_VERSIONS.python}`,
     );
+  });
+
+  // The Python interpreter the arm64 bundle installs wheels for comes from the
+  // Lambda pin, and the same bundle is what an AgentCore code package ships. A
+  // Lambda pin ahead of AgentCore's newest Python therefore deploys cp3XX wheels
+  // to an older interpreter, which fails only once the agent runs.
+  it('should not target a python newer than the AgentCore runtime', () => {
+    expect(
+      compareRuntimeVersions(
+        LAMBDA_RUNTIME_VERSIONS.python,
+        AGENT_CORE_RUNTIME_VERSIONS.python,
+      ),
+    ).toBeLessThanOrEqual(0);
+  });
+
+  // A container-image function runs the interpreter its base image carries, not
+  // the managed runtime, and the tag is written in the Dockerfile. Left behind by
+  // a runtime bump, the image runs an interpreter the copied bundle was not
+  // built for.
+  // Tag equality is deliberate while every vended Lambda image is a plain
+  // `FROM <repo>:<pin>`: a suffixed tag (`:24-slim`) or a named build stage
+  // (`... AS build`) would fail this, the way `sync-embedded-versions.ts` had to
+  // make an explicit allowance for build stages on `BASE_IMAGES`.
+  it('should tag the vended lambda base images with the lambda runtimes', () => {
+    const expected: Record<string, string> = {
+      python: LAMBDA_RUNTIME_VERSIONS.python,
+      nodejs: LAMBDA_RUNTIME_VERSIONS.node,
+    };
+    const offenders: string[] = [];
+
+    for (const rel of templateFiles()) {
+      for (const [, language, tag] of read(rel).matchAll(
+        /public\.ecr\.aws\/lambda\/(python|nodejs):([\w.-]+)/g,
+      )) {
+        if (tag !== expected[language]) {
+          offenders.push(`${rel}: ${language}:${tag}`);
+        }
+      }
+    }
+
+    expect(offenders).toEqual([]);
   });
 
   // A `_LATEST` alias resolves against whatever `aws-cdk-lib` is pinned, so its
