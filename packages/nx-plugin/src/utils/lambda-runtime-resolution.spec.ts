@@ -5,11 +5,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   compareRuntimeVersions,
+  LAMBDA_RUNTIME_CEILINGS,
   resolveLambdaRuntimes,
   runtimeIdentifierVersion,
   unresolvedRuntimeWarning,
 } from './lambda-runtime-resolution.js';
-import { LAMBDA_RUNTIME_VERSIONS } from './versions.js';
+import { type ILambdaRuntime, LAMBDA_RUNTIME_VERSIONS } from './versions.js';
 
 /** A slice of `Runtime.ALL` names, as `aws-cdk-lib` publishes them. */
 const CDK_RUNTIMES = [
@@ -77,8 +78,9 @@ describe('lambda runtime resolution', () => {
 
   describe('holding a runtime below its ceiling', () => {
     // `Runtime.ALL` lists runtimes that are not generally available: aws-cdk-lib
-    // 2.276.0 added `nodejs26.x` and `python3.15` ten days before Lambda made
-    // them GA. The ceiling decides in this repo when a runtime moves.
+    // added `python3.15` in 2.276.0 and `nodejs26.x` in 2.277.0, both days
+    // before Lambda made them GA. The ceiling decides in this repo when a
+    // runtime moves.
     const CEILINGS = { node: { ceiling: '24', reason: 'the vended image' } };
 
     it('should keep the pin when CDK lists a runtime above the ceiling', () => {
@@ -125,6 +127,26 @@ describe('lambda runtime resolution', () => {
       });
 
       expect(versions.node).toBe('25');
+    });
+
+    // A ceiling below the pin it caps does nothing, because the hold never moves
+    // a runtime backwards: the pin stays and only the hold warning appears. Such
+    // a ceiling reads as a hold to the next version it would cap, so the shipped
+    // ones are checked against the pins instead of being taken on trust.
+    it('should ship no ceiling below the runtime it caps', () => {
+      const inert: string[] = [];
+
+      for (const language of Object.keys(
+        LAMBDA_RUNTIME_VERSIONS,
+      ) as ILambdaRuntime[]) {
+        const held = LAMBDA_RUNTIME_CEILINGS[language];
+        const pin = LAMBDA_RUNTIME_VERSIONS[language];
+        if (held && compareRuntimeVersions(held.ceiling, pin) < 0) {
+          inert.push(`${language}: ceiling ${held.ceiling} below pin ${pin}`);
+        }
+      }
+
+      expect(inert).toEqual([]);
     });
   });
 

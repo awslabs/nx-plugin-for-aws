@@ -71,7 +71,9 @@ describe('vended lambda runtimes', () => {
     expect(terraformLambdaRuntime('python')).toBe(
       `python${LAMBDA_RUNTIME_VERSIONS.python}`,
     );
-    expect(cdkLambdaRuntime('python')).toBe('Runtime.PYTHON_3_14');
+    expect(cdkLambdaRuntime('python')).toBe(
+      `Runtime.PYTHON_${LAMBDA_RUNTIME_VERSIONS.python.replace('.', '_')}`,
+    );
   });
 
   // A generated Python project resolves its wheels against the uv interpreter, so
