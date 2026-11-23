@@ -4,7 +4,7 @@ description: tRPCのリファレンスドキュメント
 generator: ts#api
 when:
   framework: [trpc]
-  infra: [rest-lambda, http-lambda]
+  infra: [rest-lambda, http-lambda, http-ecs]
 ---
 import { FileTree, Tabs, TabItem, CardGrid } from '@astrojs/starlight/components';
 import Astro from '@astrojs/react';
@@ -21,7 +21,17 @@ import { TS_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/vers
 
 [tRPC](https://trpc.io/)は、TypeScriptでエンドツーエンドの型安全性を持つAPIを構築するためのフレームワークです。tRPCを使用すると、API操作の入力と出力の更新がクライアントコードに即座に反映され、プロジェクトを再ビルドすることなくIDEで確認できます。
 
-tRPC APIジェネレーターは、AWS CDKまたはTerraformインフラストラクチャのセットアップを含む新しいtRPC APIを作成します。生成されたバックエンドは、サーバーレスデプロイメントにAWS Lambdaを使用し、AWS API Gateway APIを介して公開され、[Zod](https://zod.dev/)を使用したスキーマ検証が含まれます。また、ロギング、AWS X-Rayトレーシング、CloudWatch Metricsを含む可観測性のために[AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/)をセットアップします。
+tRPC APIジェネレーターは、AWS CDKまたはTerraformインフラストラクチャのセットアップを含む新しいtRPC APIを作成します。生成されたバックエンドは、AWS API Gateway APIを介して公開され、[Zod](https://zod.dev/)を使用したスキーマ検証が含まれます。また、構造化ロギングとCloudWatch Metricsを含む可観測性のために[AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/)をセットアップします。
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Lambdaホスティング">
+AWS X-Rayトレーシングもセットアップされます。
+
+プロシージャはAWS Lambda上で実行されるため、管理するサーバーはなく、提供するリクエストに対してのみ支払いが発生します。
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="ECSホスティング">
+プロシージャは、API Gateway HTTP APIの背後にあるAmazon ECS上のコンテナで長時間実行されるHTTPサーバーとして実行されます。X-Rayトレーシングがそこでトレースを生成しない理由を含め、何が変わるかについては<a href="#running-on-amazon-ecs">Running on Amazon ECS</a>を参照してください。
+</OptionFilter>
 
 ## 使用方法
 
@@ -43,7 +53,19 @@ tRPC APIジェネレーターは、AWS CDKまたはTerraformインフラスト�
 
 :::tip[統合パターン]
 `integrationPattern`オプションはデフォルトで`isolated`に設定されており、tRPCプロシージャごとに1つのLambdaを作成します。API全体で単一の共有Lambdaハンドラーを使用し、プロシージャごとのオプションのオーバーライドを行いたい場合は、`shared`を選択してください。
+
+`infra`を`http-ecs`に設定すると、1つのコンテナサービスがすべての操作に応答するため、オプションは常に`shared`になります。
 :::
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="ECSホスティングは実験的">
+:::caution[実験的]
+`http-ecs`は実験的です。生成される出力は、既存のワークスペースを移行せずにリリース間で変更される可能性があるため、アップグレード時にこれらの変更を自分で調整することを期待してください。
+
+CDK IaCプロバイダーが必要です: Terraformサポートはまだ実装されておらず、ジェネレーターは修正を示すメッセージで失敗します。
+
+`integrationPattern`は、1つのコンテナサービスがすべての操作に応答するため、ここでは常に`shared`です。`http-ecs`と一緒に`--integrationPattern=isolated`を渡しても失敗しません: ジェネレーターはオプションが無視されることを警告し、`shared`を使用します。ジェネレーターを対話的に実行すると、`infra`の前に`integrationPattern`を尋ね、`isolated`が事前選択されているため、事前選択をそのままにして`http-ecs`を選択すると、その警告が表示されます。
+:::
+</OptionFilter>
 
 ## ジェネレーターの出力
 
@@ -81,6 +103,21 @@ tRPC APIジェネレーターは、AWS CDKまたはTerraformインフラスト�
   - .gitignore Ignores the project's build output
 
 </FileTree>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="APIがECS上で実行される場合に異なるファイル">
+`infra`を`http-ecs`に設定すると、APIはLambdaハンドラーではなくHTTPサーバーとして実行されるため、`src/handler.ts`と`src/local-server.ts`は生成されません。その代わりに、APIにちなんで名付けられたコンテナフォルダが作成されます:
+
+<FileTree>
+  - src
+    - \<api-name>-container/
+      - server.ts The `node:http` server: `GET /health`, and the tRPC standalone adapter for every procedure
+      - index.ts Entry point that reads `PORT` and `HOST` and starts the server. The bundle, the image and the `serve` target all start from this file
+      - Dockerfile Container image definition
+      - .dockerignore Files left out of the image build context
+</FileTree>
+
+ルーター、プロシージャ、スキーマ、ミドルウェア、クライアントは、すべての`infra`値で同じです。
+</OptionFilter>
 
 ### インフラストラクチャ
 
@@ -134,7 +171,15 @@ Zodは、`.merge`、`.pick`、`.omit`などのスキーマを組み合わせた�
 
 ### ルーターとプロシージャ
 
-tRPCルーターは`src/router.ts`で定義され、すべてのプロシージャを登録します。各プロシージャは、期待される入力、出力、および実装を定義します。Lambdaハンドラーのエントリーポイントは`src/handler.ts`にあり、リクエストをルーターに転送します。
+tRPCルーターは`src/router.ts`で定義され、すべてのプロシージャを登録します。各プロシージャは、期待される入力、出力、および実装を定義します。
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Lambdaエントリーポイント">
+Lambdaハンドラーのエントリーポイントは`src/handler.ts`にあり、リクエストをルーターに転送します。
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="コンテナエントリーポイント">
+エントリーポイントは`src/<api-name>-container/server.ts`で、コンテナが実行するHTTPサーバーであり、リクエストをルーターに転送します。
+</OptionFilter>
 
 生成されたサンプルルーターには、`echo`という単一の操作があります:
 
@@ -299,13 +344,19 @@ export const echo = publicProcedure
 
 詳細については、[AWS Lambda Powertoolsトレーサードキュメント](https://docs.powertools.aws.dev/lambda/typescript/latest/core/tracer/)を参照してください。
 
+<OptionFilter when={{ infra: 'http-ecs' }} description="X-RayはECS上でトレースを生成しない">
+:::caution[ECS上ではトレースなし]
+上記の呼び出しはコンテナ内でエラーなく実行されますが、トレースは生成されません。PowertoolsはLambda外で実行されている場合にトレーサーをオフにするため、`getSegment()`はどこにも送信されないプレースホルダーサブセグメントを返します。何が得られるか、およびトレースが必要な場合に何を追加するかについては、<a href="#observability">Observability</a>を参照してください。
+:::
+</OptionFilter>
+
 ### カスタムミドルウェアの実装
 
 ミドルウェアを実装することで、プロシージャに提供されるコンテキストに追加の値を追加できます。
 
 例として、`src/middleware/identity.ts`でAPIの呼び出し元ユーザーに関する詳細を抽出するミドルウェアを実装してみましょう。
 
-<OptionFilter when={{ auth: 'iam' }} description="IAM認証APIの識別ミドルウェアの例">
+<OptionFilter when={{ auth: 'iam', infra: ['rest-lambda', 'http-lambda'] }} description="Lambda上のIAM認証APIの識別ミドルウェアの例">
 この例では、`IAM`認証の識別ミドルウェアについて説明します。API Gatewayイベントから抽出されたsubを使用して、Cognitoで呼び出し元を検索します。
 
 検索にはCognito Identity Providerクライアントを使用しますが、これは生成されたtRPC APIの依存関係ではありません。まず、APIプロジェクトにインストールします:
@@ -490,7 +541,7 @@ export const createIdentityPlugin = () => {
 </Tabs>
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'cognito' }} description="Cognito認証APIの識別ミドルウェアの例">
+<OptionFilter when={{ auth: 'cognito', infra: ['rest-lambda', 'http-lambda'] }} description="Lambda上のCognito認証APIの識別ミドルウェアの例">
 `auth: 'cognito'`でデプロイすると、API Gateway Cognitoオーソライザーは、呼び出し元が`Authorization`ヘッダーで提供するJWTを検証し、検証されたクレームをLambdaイベントに配置します。ミドルウェアはこれらのクレームを読み取るだけです — 追加のAWS SDK呼び出しも、手動のJWT検証も必要ありません。
 
 まず、コンテキストに追加する内容を定義します:
@@ -641,7 +692,7 @@ tRPC APIジェネレーターは、選択した`iac`に基づいてCDKまたはT
 <Fragment slot="cdk">
 APIをデプロイするためのCDKコンストラクトは、`common/constructs`フォルダにあります。これをCDKアプリケーションで使用できます。例:
 
-<OptionFilter when={{ auth: ['iam', 'custom'] }} description="IAMまたはカスタム認証のCDK使用法">
+<OptionFilter when={{ auth: ['iam', 'custom'], infra: ['rest-lambda', 'http-lambda'] }} description="Lambda上のIAMまたはカスタム認証のCDK使用法">
 ```ts {6-8}
 import { MyApi } from '@my-scope/common-constructs';
 
@@ -662,7 +713,7 @@ export class ExampleStack extends Stack {
 :::
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'cognito' }} description="Cognito認証でのCDK使用法 — 識別コンストラクトを渡す">
+<OptionFilter when={{ auth: 'cognito', infra: ['rest-lambda', 'http-lambda'] }} description="Cognito認証でのCDK使用法 — 識別コンストラクトを渡す">
 ```ts {6,10}
 import { MyApi, UserIdentity } from '@my-scope/common-constructs';
 
@@ -682,11 +733,63 @@ export class ExampleStack extends Stack {
 `UserIdentity`コンストラクトは、<Link path="/guides/react-website-auth">`ts#website#auth`ジェネレーター</Link>を使用して生成できます。
 </OptionFilter>
 
+<OptionFilter when={{ infra: 'http-ecs' }} description="APIがECS上で実行される場合のCDK使用法 — VPCを渡す">
+`defaultIntegrations`は、サービスが実行されるVPCを受け取り、その中にすべてを構築します: ECSサービス、その前にある内部ロードバランサー、およびAPI Gatewayがそのロードバランサーに到達するVPCリンク。コンストラクトはVPCを作成しないため、スタックで作成またはインポートします。
+
+```ts {10,13-15}
+import { MyApi } from '@my-scope/common-constructs';
+import { Stack } from 'aws-cdk-lib';
+import { Vpc } from 'aws-cdk-lib/aws-ec2';
+import { Construct } from 'constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    const vpc = new Vpc(this, 'Vpc', { natGateways: 1 });
+
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this, { vpc }).build(),
+    });
+  }
+}
+```
+
+既存のVPCを使用するには、`Vpc.fromLookup(this, 'Vpc', { vpcId: '<vpc-id>' })`で検索し、`vpc`として渡します。
+
+コンテナサービス自体を変更するには`service`を渡します — その`cpu`、`memoryLimitMiB`、`desiredCount`、`environment`、またはタスクロールに権限を付与する`grantTaskRole`:
+
+```ts
+MyApi.defaultIntegrations(this, {
+  vpc,
+  service: {
+    cpu: 512,
+    memoryLimitMiB: 1024,
+    grantTaskRole: (taskRole) => myTable.grantReadWriteData(taskRole),
+  },
+}).build();
+```
+
+`auth`を`cognito`に設定した場合、上記のCognitoの例のように、コンストラクトに`identity`も渡します。
+</OptionFilter>
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Lambdaバリアントがデプロイするもの">
 これにより、AWS API Gateway RESTまたはHTTP API、ビジネスロジック用のAWS Lambda関数、および選択した`auth`メソッドに基づく認証を含むAPIインフラストラクチャがセットアップされます。
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="ECSバリアントがデプロイするもの">
+これにより、選択した`auth`メソッドに基づく認証を持つAWS API Gateway HTTP API、コンテナを実行するAmazon ECSサービス、その前にある内部ロードバランサー、およびAPI Gatewayがそのロードバランサーに到達するVPCリンクがセットアップされます。
+</OptionFilter>
 
 <Snippet name="api/cors-configuration-cdk-note" />
 </Fragment>
 <Fragment slot="terraform">
+<OptionFilter when={{ infra: 'http-ecs' }} description="TerraformはECSホスティングには実装されていません">
+:::caution[CDKのみ]
+`http-ecs`はTerraformには実装されていません。ジェネレーターはそのことを示すメッセージで失敗します。Terraformワークスペースには`rest-lambda`または`http-lambda`を選択してください。
+:::
+</OptionFilter>
+
 APIをデプロイするためのTerraformモジュールは、`common/terraform`フォルダにあります。これをTerraform構成で使用できます。
 
 APIモジュールは、Lambda デプロイメントzipを共有S3アセットバケットにステージングします — 詳細については、<Link path="/guides/terraform-project">Terraformインフラストラクチャガイド</Link>を参照してください。デプロイメントごとに`core/asset-bucket`モジュールを1回インスタンス化し、その`bucket_name`出力を`asset_bucket_name`入力を介してすべてのAPI / Lambdaモジュールに渡します:
@@ -891,13 +994,88 @@ IAMポリシーに使用できるAPIモジュールの主要な出力は次の�
 
 <Snippet name="ts-bundle" />
 
+<OptionFilter when={{ infra: 'http-ecs' }} description="ECSホスティングの仕組み、コスト、制限">
+## Running on Amazon ECS
+
+`infra`を`http-ecs`に設定すると、プロシージャはLambda関数ではなく、コンテナ内の長時間実行されるHTTPサーバーとして実行されます。リクエストは次のパスを取ります:
+
+1. 呼び出し元は、唯一のパブリックエントリーポイントであるAPI Gateway HTTP APIへのリクエストに署名します。すべてのルートは選択した`auth`のオーソライザーを持つため、認証されていないリクエストはエッジで拒否されます。
+2. API Gatewayは、VPCへのプライベートパスであるVPCリンクを介してリクエストを転送します。
+3. VPCリンクは内部ロードバランサーに到達します。ロードバランサーにはパブリックアドレスがなく、唯一のインバウンドルールはリスナーポートでVPCリンクのセキュリティグループを許可します。
+4. ロードバランサーはリクエストをタスクに転送します。タスクの唯一のインバウンドルールは、コンテナポートでロードバランサーのセキュリティグループを許可するため、VPC内の他のものはそれらへの接続を開くことができません。
+
+タスクはプライベートサブネットで実行され、パブリックIPアドレスを取得することはありません。このパスでは、アドレス範囲のインバウンドを許可するものはありません。
+
+デフォルトでは、サービス、ロードバランサー、VPCリンクは、NATゲートウェイを介してAWSに到達するVPCの`PRIVATE_WITH_EGRESS`サブネットに配置されます。`defaultIntegrations`に`vpcSubnets: { subnetType: SubnetType.PRIVATE_ISOLATED }`を渡すと、NATゲートウェイとその時間料金が削除されますが、分離されたサブネットには外部へのルートがないため、タスクが起動するためにVPCには4つのVPCエンドポイントが必要です: イメージをプルするための`ecr.api`と`ecr.dkr`のインターフェースエンドポイント、イメージレイヤーがS3オブジェクトであるためのS3ゲートウェイエンドポイント、および`awslogs`ドライバーが書き込めるようにするための`logs`のインターフェースエンドポイント。これらがないと、タスクはイメージをプルできず、ECSは理由を言わずにサーキットブレーカーでデプロイメントをロールバックします。
+
+VPCリンク、ロードバランサー、そのリスナー、ターゲットグループ、およびロードバランサーがアクセスログを書き込むバケットは、`common/constructs`の`core/api/ecs-http-endpoint.ts`という1つのコンストラクトによって作成され、ECS上でホストされるすべてのAPIが共有します。API独自のコンストラクトは、コンテナサービスに名前を付け、すべての操作をそのエンドポイントにルーティングします。
+
+### コンテナで実行されるもの
+
+`src/<api-name>-container/server.ts`は、2つのジョブを持つ`node:http`サーバーです。`GET /health`は`{"status":"ok"}`を返し、これはロードバランサーのターゲットグループとコンテナヘルスチェックが呼び出すものです。他のすべてのリクエストは、ルーターに対して解決する[tRPC standalone adapter](https://trpc.io/docs/server/adapters/standalone)に送られます。
+
+コンテナにはAPI Gatewayイベントがないため、プロシージャコンテキストには`event`、`context`、`info`フィールドがありません: `http-ecs`の場合、提供される`IMiddlewareContext`はミドルウェアがそこに配置するもののみを指定します。オーソライザーは、リクエストがコンテナに到達するかどうかを決定しますが、そのクレームはリクエストと一緒に到着しないため、上記の識別ミドルウェアの例は適用されません。プロシージャで呼び出し元の識別情報を読み取るには、APIコンストラクトでオーソライザーのコンテキストをリクエストヘッダーにマップし、そのヘッダーを読み取ります。
+
+### 可観測性
+
+ログとメトリクスはLambda上と同じように機能します: コンテナは独自のCloudWatchロググループに書き込み、メトリクスプラグインは各リクエストのメトリクスを埋め込みメトリック形式でCloudWatch Logsが抽出するために公開します。
+
+メトリクスプラグインは各リクエストのメトリクスオブジェクトを構築し、`opts.ctx.metrics`としてプロシージャに渡すため、1つのリクエストが追加したメトリクスは別のリクエストと一緒に公開されることはありません。これは、1つの呼び出しが最初から最後までメトリクスを所有するLambda上よりもここで重要です; このサーバーは同時にリクエストを処理します。独自の`Metrics`オブジェクトではなく、`opts.ctx.metrics`を介して独自のメトリクスを追加してください。独自のオブジェクトは、プロセス内のすべてのリクエストで1つのストアを共有します。
+
+AWS X-Rayトレーシングは機能しません。PowertoolsはLambda外でトレーサーをオフにし、タスクにセグメントを受信するX-Rayデーモンがないため、`opts.ctx.tracer`呼び出しはエラーなく実行されますが、トレースは生成されません。必要な場合は、コンテナサービスにサイドカーとしてデーモンを追加してください。
+
+API Gateway HTTP APIのアクセスログは、APIに到達するすべてのリクエストを記録します。ロードバランサーは、`EcsHttpEndpoint`コンストラクトが作成するバケットに独自のアクセスログを書き込みます。これは、どのタスクがリクエストを処理し、何を応答したかを確認できる場所です。
+
+### イメージのビルドとスキャン
+
+コンテナジェネレーターは、APIにちなんで名付けられたイメージターゲットを提供します:
+
+- `<api-name>-container-docker`は、linux/arm64イメージをビルドし、最初に`bundle`を実行してイメージがバンドルされたサーバーを保持するようにします。
+- `<api-name>-container-trivy`は、そのイメージの脆弱性をスキャンします。
+
+イメージのビルド方法については<Link path="/guides/ts-container">TypeScript Container Service</Link>を、デプロイ時の公開方法については<Link path="/guides/docker-bundling">Docker Bundling</Link>を参照してください。
+
+### 制限
+
+- **統合タイムアウト。** API Gateway HTTP APIは、統合を約30秒に制限します。それより長くかかるプロシージャは、コンテナがどれだけ長く動作していても、ゲートウェイで失敗します。
+- **ストリーミングなし。** tRPCサブスクリプションには`rest-lambda`インフラストラクチャが必要です。HTTP APIはレスポンスをストリーミングできません。
+- **ペイロードサイズ。** リクエストとレスポンスは、API Gatewayの10 MB制限に従います。
+- **すべての操作に対して1つのサービス。** `integrationPattern`は`shared`です: 1つのコンテナサービスがあり、すべてのルートがそれにルーティングされます。このインフラストラクチャでは、オプションは常に`shared`に解決され、`isolated`は警告とともに無視されます。
+
+### コスト
+
+ロードバランサーは、リクエストごとに支払い、アイドル時には何も支払わないLambdaと比較した場合の新しい固定コストです。データ転送前のus-east-1での大まかな月額数値:
+
+| 項目 | おおよそ |
+| --- | --- |
+| 内部ロードバランサー | $16 + ロードバランサーキャパシティユニット |
+| Fargateタスク、0.25 vCPU / 0.5 GB arm64 | タスクあたり$7 |
+| NATゲートウェイ、VPCに1つある場合 | $33 |
+| VPCリンク | 時間料金なし |
+| ロードバランサーのアクセスログ用のS3ストレージ | 月あたりGBあたり数セント |
+
+したがって、1タスクサービスは、トラフィックがない状態で月額約$23かかり、渡すVPCにNATゲートウェイがある場合はさらに多くなります。アクセスログはトラフィックとともに増加します: `endpoint.accessLogsBucket`にライフサイクルルールを追加して期限切れにします。お住まいのリージョンの現在の価格については、[Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/)および[AWS Fargate](https://aws.amazon.com/fargate/pricing/)の価格ページを確認してください。
+</OptionFilter>
+
 ## ローカルtRPCサーバー
 
 `serve`ターゲットを使用して、APIのローカルサーバーを実行できます。例:
 
 <NxCommands commands={['serve my-api']} />
 
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Lambdaバリアントのローカルサーバーエントリーポイント">
 ローカルサーバーのエントリーポイントは`src/local-server.ts`です。
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="APIがECS上で実行される場合のローカルサーバーエントリーポイント">
+ローカルサーバーのエントリーポイントは`src/<api-name>-container/index.ts`で、コンテナが実行するのと同じファイルです。`HOST`のアドレスでリッスンし、デフォルトは`127.0.0.1`なので、ローカルサーバーは自分のマシンからの接続のみを受け入れます。イメージは`HOST=0.0.0.0`を設定するため、サーバーはタスク自身のネットワークインターフェースでリッスンし、タスクのセキュリティグループが誰が接続できるかを決定します。
+
+ヘルスルートでサーバーが起動していることを確認します。これはステータス200と`{"status":"ok"}`を返します:
+
+```bash
+curl http://localhost:2022/health
+```
+</OptionFilter>
 
 これにより、APIに変更を加えると自動的にリロードされます。
 

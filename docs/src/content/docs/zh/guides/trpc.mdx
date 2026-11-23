@@ -4,7 +4,7 @@ description: tRPC 参考文档
 generator: ts#api
 when:
   framework: [trpc]
-  infra: [rest-lambda, http-lambda]
+  infra: [rest-lambda, http-lambda, http-ecs]
 ---
 import { FileTree, Tabs, TabItem, CardGrid } from '@astrojs/starlight/components';
 import Astro from '@astrojs/react';
@@ -21,7 +21,17 @@ import { TS_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/vers
 
 [tRPC](https://trpc.io/) 是一个用于在 TypeScript 中构建具有端到端类型安全的 API 的框架。使用 tRPC，对 API 操作输入和输出的更新会立即反映在客户端代码中，并在您的 IDE 中可见，无需重新构建项目。
 
-tRPC API 生成器创建一个新的 tRPC API，并设置 AWS CDK 或 Terraform 基础设施。生成的后端使用 AWS Lambda 进行无服务器部署，通过 AWS API Gateway API 公开，并包括使用 [Zod](https://zod.dev/) 的模式验证。它设置了 [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) 以实现可观测性，包括日志记录、AWS X-Ray 跟踪和 Cloudwatch 指标。
+tRPC API 生成器创建一个新的 tRPC API，并设置 AWS CDK 或 Terraform 基础设施。生成的后端通过 AWS API Gateway API 公开，并包括使用 [Zod](https://zod.dev/) 的模式验证。它设置了 [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) 以实现可观测性，包括结构化日志记录和 CloudWatch 指标。
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Lambda 托管">
+AWS X-Ray 跟踪也已设置。
+
+您的过程在 AWS Lambda 上运行，因此无需管理服务器，您只需为所服务的请求付费。
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="ECS 托管">
+您的过程作为长期运行的 HTTP 服务器在 Amazon ECS 上的容器中运行，位于 API Gateway HTTP API 后面。请参阅 <a href="#running-on-amazon-ecs">在 Amazon ECS 上运行</a>了解这会改变什么，包括为什么 X-Ray 跟踪在那里不产生跟踪。
+</OptionFilter>
 
 ## 用法
 
@@ -43,7 +53,19 @@ tRPC API 生成器创建一个新的 tRPC API，并设置 AWS CDK 或 Terraform 
 
 :::tip[集成模式]
 `integrationPattern` 选项默认为 `isolated`，这会为每个 tRPC 过程创建一个 Lambda。如果您更喜欢为整个 API 使用单个共享的 Lambda 处理程序，并可选择按过程覆盖，请选择 `shared`。
+
+当 `infra` 设置为 `http-ecs` 时，该选项始终为 `shared`，因为一个容器服务回答每个操作。
 :::
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="ECS 托管是实验性的">
+:::caution[实验性]
+`http-ecs` 是实验性的。其生成的输出可能会在版本之间发生变化，而没有迁移来将现有工作区迁移过去，因此在升级时请自行协调这些更改。
+
+它需要 CDK IaC 提供程序：Terraform 支持尚未实现，生成器会失败并显示一条消息说明修复方法。
+
+`integrationPattern` 在这里始终为 `shared`，因为一个容器服务回答每个操作。将 `--integrationPattern=isolated` 与 `http-ecs` 一起传递不会失败：生成器会警告该选项被忽略并使用 `shared`。以交互方式运行生成器时，它会在 `infra` 之前询问 `integrationPattern`，并预选 `isolated`，因此如果您保持预选不变然后选择 `http-ecs`，您会看到该警告。
+:::
+</OptionFilter>
 
 ## 生成器输出
 
@@ -81,6 +103,21 @@ tRPC API 生成器创建一个新的 tRPC API，并设置 AWS CDK 或 Terraform 
   - .gitignore Ignores the project's build output
 
 </FileTree>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="当 API 在 ECS 上运行时不同的文件">
+当 `infra` 设置为 `http-ecs` 时，API 作为 HTTP 服务器而不是 Lambda 处理程序运行，因此不会生成 `src/handler.ts` 和 `src/local-server.ts`。取而代之的是一个以您的 API 命名的容器文件夹：
+
+<FileTree>
+  - src
+    - \<api-name>-container/
+      - server.ts The `node:http` server: `GET /health`, and the tRPC standalone adapter for every procedure
+      - index.ts Entry point that reads `PORT` and `HOST` and starts the server. The bundle, the image and the `serve` target all start from this file
+      - Dockerfile Container image definition
+      - .dockerignore Files left out of the image build context
+</FileTree>
+
+您的路由器、过程、模式、中间件和客户端对于每个 `infra` 值都是相同的。
+</OptionFilter>
 
 ### 基础设施
 
@@ -134,7 +171,15 @@ Zod 提供了强大的实用程序来组合或派生模式，例如 `.merge`、`
 
 ### 路由器和过程
 
-您的 tRPC 路由器在 `src/router.ts` 中定义，它注册所有过程。每个过程定义预期的输入、输出和实现。Lambda 处理程序入口点在 `src/handler.ts` 中，它将请求转发到您的路由器。
+您的 tRPC 路由器在 `src/router.ts` 中定义，它注册所有过程。每个过程定义预期的输入、输出和实现。
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Lambda 入口点">
+Lambda 处理程序入口点在 `src/handler.ts` 中，它将请求转发到您的路由器。
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="容器入口点">
+入口点是 `src/<api-name>-container/server.ts`，容器运行的 HTTP 服务器，它将请求转发到您的路由器。
+</OptionFilter>
 
 为您生成的示例路由器有一个名为 `echo` 的操作：
 
@@ -299,13 +344,19 @@ export const echo = publicProcedure
 
 有关更多信息，请参阅 [AWS Lambda Powertools Tracer 文档](https://docs.powertools.aws.dev/lambda/typescript/latest/core/tracer/)。
 
+<OptionFilter when={{ infra: 'http-ecs' }} description="X-Ray 在 ECS 上不产生跟踪">
+:::caution[ECS 上无跟踪]
+上述调用在容器中运行不会出错，但不会产生跟踪。Powertools 在不在 Lambda 中运行时会关闭其跟踪器，因此 `getSegment()` 返回一个永远不会发送到任何地方的占位符子段。请参阅 <a href="#observability">可观测性</a>了解您能得到什么，以及如果需要跟踪应该添加什么。
+:::
+</OptionFilter>
+
 ### 实现自定义中间件
 
 您可以通过实现中间件向提供给过程的上下文添加其他值。
 
 例如，让我们在 `src/middleware/identity.ts` 中实现一些中间件来从我们的 API 中提取有关调用用户的一些详细信息。
 
-<OptionFilter when={{ auth: 'iam' }} description="IAM 身份验证 API 的身份中间件示例">
+<OptionFilter when={{ auth: 'iam', infra: ['rest-lambda', 'http-lambda'] }} description="Lambda 上 IAM 身份验证 API 的身份中间件示例">
 此示例演示了 `IAM` 身份验证的身份中间件。我们使用从 API Gateway 事件中提取的 sub 在 Cognito 中查找调用者。
 
 查找使用 Cognito Identity Provider 客户端，它不是生成的 tRPC API 的依赖项。首先将其安装到您的 API 项目中：
@@ -490,7 +541,7 @@ export const createIdentityPlugin = () => {
 </Tabs>
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'cognito' }} description="Cognito 身份验证 API 的身份中间件示例">
+<OptionFilter when={{ auth: 'cognito', infra: ['rest-lambda', 'http-lambda'] }} description="Lambda 上 Cognito 身份验证 API 的身份中间件示例">
 当您使用 `auth: 'cognito'` 部署时，API Gateway Cognito 授权器会验证调用者在 `Authorization` 标头中提供的 JWT，并将验证的声明放在 Lambda 事件上。我们的中间件只是读取这些声明 — 无需额外的 AWS SDK 调用，无需手动 JWT 验证。
 
 首先，我们定义要添加到上下文的内容：
@@ -641,7 +692,7 @@ tRPC API 生成器根据您选择的 `iac` 创建 CDK 或 Terraform 基础设施
 <Fragment slot="cdk">
 用于部署 API 的 CDK 构造位于 `common/constructs` 文件夹中。您可以在 CDK 应用程序中使用它，例如：
 
-<OptionFilter when={{ auth: ['iam', 'custom'] }} description="IAM 或自定义身份验证的 CDK 用法">
+<OptionFilter when={{ auth: ['iam', 'custom'], infra: ['rest-lambda', 'http-lambda'] }} description="Lambda 上 IAM 或自定义身份验证的 CDK 用法">
 ```ts {6-8}
 import { MyApi } from '@my-scope/common-constructs';
 
@@ -662,7 +713,7 @@ export class ExampleStack extends Stack {
 :::
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'cognito' }} description="使用 Cognito 身份验证的 CDK 用法 — 传递身份构造">
+<OptionFilter when={{ auth: 'cognito', infra: ['rest-lambda', 'http-lambda'] }} description="使用 Cognito 身份验证的 CDK 用法 — 传递身份构造">
 ```ts {6,10}
 import { MyApi, UserIdentity } from '@my-scope/common-constructs';
 
@@ -682,11 +733,63 @@ export class ExampleStack extends Stack {
 `UserIdentity` 构造可以使用 <Link path="/guides/react-website-auth">`ts#website#auth` 生成器</Link>生成。
 </OptionFilter>
 
+<OptionFilter when={{ infra: 'http-ecs' }} description="当 API 在 ECS 上运行时的 CDK 用法 — 传递 VPC">
+`defaultIntegrations` 接受您的服务运行的 VPC，并在其中构建所有内容：ECS 服务、其前面的内部负载均衡器，以及 API Gateway 通过 VPC 链接到达该负载均衡器。构造从不创建 VPC，因此您在堆栈中创建或导入一个。
+
+```ts {10,13-15}
+import { MyApi } from '@my-scope/common-constructs';
+import { Stack } from 'aws-cdk-lib';
+import { Vpc } from 'aws-cdk-lib/aws-ec2';
+import { Construct } from 'constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    const vpc = new Vpc(this, 'Vpc', { natGateways: 1 });
+
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this, { vpc }).build(),
+    });
+  }
+}
+```
+
+要使用现有 VPC，请使用 `Vpc.fromLookup(this, 'Vpc', { vpcId: '<vpc-id>' })` 查找它并将其作为 `vpc` 传递。
+
+传递 `service` 以更改容器服务本身 — 其 `cpu`、`memoryLimitMiB`、`desiredCount`、`environment`，或 `grantTaskRole` 以授予任务角色权限：
+
+```ts
+MyApi.defaultIntegrations(this, {
+  vpc,
+  service: {
+    cpu: 512,
+    memoryLimitMiB: 1024,
+    grantTaskRole: (taskRole) => myTable.grantReadWriteData(taskRole),
+  },
+}).build();
+```
+
+当 `auth` 设置为 `cognito` 时，还要像上面的 Cognito 示例那样将 `identity` 传递给构造。
+</OptionFilter>
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Lambda 变体部署的内容">
 这会设置您的 API 基础设施，包括 AWS API Gateway REST 或 HTTP API、用于业务逻辑的 AWS Lambda 函数，以及基于您选择的 `auth` 方法的身份验证。
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="ECS 变体部署的内容">
+这会设置一个 AWS API Gateway HTTP API，其身份验证基于您选择的 `auth` 方法，一个运行您的容器的 Amazon ECS 服务，其前面的内部负载均衡器，以及 API Gateway 通过 VPC 链接到达该负载均衡器。
+</OptionFilter>
 
 <Snippet name="api/cors-configuration-cdk-note" />
 </Fragment>
 <Fragment slot="terraform">
+<OptionFilter when={{ infra: 'http-ecs' }} description="Terraform 未为 ECS 托管实现">
+:::caution[仅限 CDK]
+`http-ecs` 未为 Terraform 实现。生成器会失败并显示一条消息说明这一点。为 Terraform 工作区选择 `rest-lambda` 或 `http-lambda`。
+:::
+</OptionFilter>
+
 用于部署 API 的 Terraform 模块位于 `common/terraform` 文件夹中。您可以在 Terraform 配置中使用它。
 
 API 模块将其 Lambda 部署 zip 暂存在共享的 S3 资产存储桶中 — 有关详细信息，请参阅 <Link path="/guides/terraform-project">Terraform 基础设施指南</Link>。每个部署实例化一次 `core/asset-bucket` 模块，并通过 `asset_bucket_name` 输入将其 `bucket_name` 输出传递到每个 API / Lambda 模块：
@@ -891,13 +994,88 @@ resource "aws_iam_role_policy_attachment" "api_invoke_access_existing" {
 
 <Snippet name="ts-bundle" />
 
+<OptionFilter when={{ infra: 'http-ecs' }} description="ECS 托管的工作原理、成本和限制">
+## 在 Amazon ECS 上运行
+
+当 `infra` 设置为 `http-ecs` 时，您的过程作为长期运行的 HTTP 服务器在容器中运行，而不是在 Lambda 函数中运行。请求采用以下路径：
+
+1. 调用者对 API Gateway HTTP API 签署请求，这是唯一的公共入口点。每个路由都带有您选择的 `auth` 的授权器，因此未经身份验证的请求会在边缘被拒绝。
+2. API Gateway 通过 VPC 链接转发请求，这是它进入您的 VPC 的私有路径。
+3. VPC 链接到达内部负载均衡器。负载均衡器没有公共地址，其唯一的入站规则允许 VPC 链接的安全组在侦听器端口上。
+4. 负载均衡器将请求转发到任务。任务的唯一入站规则允许负载均衡器的安全组在容器端口上，因此 VPC 中的其他任何内容都无法打开与它们的连接。
+
+任务在私有子网中运行，永远不会获得公共 IP 地址。此路径中没有任何内容允许地址范围入站。
+
+默认情况下，服务、负载均衡器和 VPC 链接位于 VPC 的 `PRIVATE_WITH_EGRESS` 子网中，这些子网通过 NAT 网关到达 AWS。将 `vpcSubnets: { subnetType: SubnetType.PRIVATE_ISOLATED }` 传递给 `defaultIntegrations` 会删除 NAT 网关及其每小时费用，但隔离子网没有出站路由，因此 VPC 需要四个 VPC 端点才能启动任务：用于 `ecr.api` 和 `ecr.dkr` 的接口端点以拉取镜像，一个 S3 网关端点因为镜像层是 S3 对象，以及一个用于 `logs` 的接口端点以便 `awslogs` 驱动程序可以写入。没有它们，任务无法拉取其镜像，ECS 会在断路器上回滚部署而不说明原因。
+
+VPC 链接、负载均衡器、其侦听器、目标组以及负载均衡器写入其访问日志的存储桶由一个构造创建，即 `common/constructs` 中的 `core/api/ecs-http-endpoint.ts`，每个托管在 ECS 上的 API 都共享它。您的 API 自己的构造命名其容器服务并将每个操作路由到该端点。
+
+### 容器中运行的内容
+
+`src/<api-name>-container/server.ts` 是一个 `node:http` 服务器，有两个任务。`GET /health` 回答 `{"status":"ok"}`，这是负载均衡器的目标组和容器健康检查调用的内容。每个其他请求都转到 [tRPC standalone adapter](https://trpc.io/docs/server/adapters/standalone)，它根据您的路由器解析它。
+
+容器中没有 API Gateway 事件，因此过程上下文不携带 `event`、`context` 或 `info` 字段：对于 `http-ecs`，提供的 `IMiddlewareContext` 仅命名中间件放在那里的内容。授权器仍然决定请求是否到达容器，但其声明不会随请求一起到达，因此上面的身份中间件示例不适用。要在过程中读取调用者的身份，请将授权器的上下文映射到 API 构造中的请求标头并读取该标头。
+
+### 可观测性
+
+日志和指标的工作方式与在 Lambda 上相同：容器写入其自己的 CloudWatch 日志组，指标插件以嵌入式指标格式发布每个请求的指标，供 CloudWatch Logs 提取。
+
+指标插件为每个请求构建一个指标对象并将其作为 `opts.ctx.metrics` 传递给您的过程，因此一个请求添加的指标永远不会与另一个请求的指标一起发布。这在这里比在 Lambda 上更重要，在 Lambda 上，一次调用从头到尾拥有指标；此服务器同时处理请求。通过 `opts.ctx.metrics` 添加您自己的指标，而不是您自己的 `Metrics` 对象，后者会在进程中的每个请求之间共享一个存储。
+
+AWS X-Ray 跟踪不会。Powertools 在 Lambda 之外关闭其跟踪器，并且任务中没有 X-Ray 守护程序来接收段，因此 `opts.ctx.tracer` 调用运行不会出错并且不会产生跟踪。如果需要它们，请在容器服务中添加一个守护程序作为 sidecar。
+
+API Gateway HTTP API 的访问日志记录到达 API 的每个请求。负载均衡器将其自己的访问日志写入 `EcsHttpEndpoint` 构造创建的存储桶，您可以在其中查看哪个任务为请求提供服务以及它回答了什么。
+
+### 镜像构建和扫描
+
+容器生成器提供镜像目标，以您的 API 命名：
+
+- `<api-name>-container-docker` 构建 linux/arm64 镜像，首先运行 `bundle`，以便镜像保存捆绑的服务器。
+- `<api-name>-container-trivy` 扫描该镜像的漏洞。
+
+请参阅 <Link path="/guides/ts-container">TypeScript Container Service</Link> 了解镜像的构建方式，以及 <Link path="/guides/docker-bundling">Docker Bundling</Link> 了解它在部署时的发布方式。
+
+### 限制
+
+- **集成超时。** API Gateway HTTP API 将集成限制在大约 30 秒。无论容器工作多长时间，超过该时间的过程都会在网关处失败。
+- **无流式传输。** tRPC 订阅需要 `rest-lambda` 基础设施。HTTP API 无法流式传输响应。
+- **有效负载大小。** 请求和响应遵循 API Gateway 的 10 MB 限制。
+- **每个操作一个服务。** `integrationPattern` 是 `shared`：有一个容器服务，每个路由都路由到它。该选项始终解析为此基础设施的 `shared`，并且 `isolated` 会被忽略并发出警告。
+
+### 成本
+
+与 Lambda 相比，负载均衡器是新的固定成本，在 Lambda 中您按请求付费，空闲时不付费。us-east-1 中的大致月度数字，在数据传输之前：
+
+| 项目 | 大约 |
+| --- | --- |
+| 内部负载均衡器 | $16 加上负载均衡器容量单位 |
+| Fargate 任务，0.25 vCPU / 0.5 GB arm64 | 每个任务 $7 |
+| NAT 网关，如果您的 VPC 有一个 | $33 |
+| VPC 链接 | 无每小时费用 |
+| 负载均衡器访问日志的 S3 存储 | 每月每 GB 几美分 |
+
+因此，一个单任务服务在任何流量之前每月花费大约 $23，如果您传入的 VPC 有 NAT 网关，则更多。访问日志随流量增长：向 `endpoint.accessLogsBucket` 添加生命周期规则以使它们过期。查看 [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) 和 [AWS Fargate](https://aws.amazon.com/fargate/pricing/) 定价页面以了解您所在区域的当前价格。
+</OptionFilter>
+
 ## 本地 tRPC 服务器
 
 您可以使用 `serve` 目标为您的 API 运行本地服务器，例如：
 
 <NxCommands commands={['serve my-api']} />
 
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Lambda 变体的本地服务器入口点">
 本地服务器的入口点是 `src/local-server.ts`。
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="当 API 在 ECS 上运行时的本地服务器入口点">
+本地服务器的入口点是 `src/<api-name>-container/index.ts`，与容器运行的文件相同。它侦听 `HOST` 中的地址，默认为 `127.0.0.1`，因此本地服务器仅接受来自您自己机器的连接。镜像设置 `HOST=0.0.0.0`，以便服务器侦听任务自己的网络接口，任务的安全组决定谁可以连接。
+
+使用其健康路由检查服务器是否启动，该路由返回状态 200 和 `{"status":"ok"}`：
+
+```bash
+curl http://localhost:2022/health
+```
+</OptionFilter>
 
 当您对 API 进行更改时，它会自动重新加载。
 

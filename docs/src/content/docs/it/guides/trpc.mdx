@@ -4,7 +4,7 @@ description: Documentazione di riferimento per tRPC
 generator: ts#api
 when:
   framework: [trpc]
-  infra: [rest-lambda, http-lambda]
+  infra: [rest-lambda, http-lambda, http-ecs]
 ---
 import { FileTree, Tabs, TabItem, CardGrid } from '@astrojs/starlight/components';
 import Astro from '@astrojs/react';
@@ -21,7 +21,17 @@ import { TS_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/vers
 
 [tRPC](https://trpc.io/) è un framework per la creazione di API in TypeScript con type safety end-to-end. Utilizzando tRPC, gli aggiornamenti agli input e output delle operazioni API si riflettono immediatamente nel codice client e sono visibili nel tuo IDE senza la necessità di ricostruire il progetto.
 
-Il generatore di API tRPC crea una nuova API tRPC con configurazione dell'infrastruttura AWS CDK o Terraform. Il backend generato utilizza AWS Lambda per il deployment serverless, esposto tramite un'API AWS API Gateway, e include la validazione dello schema utilizzando [Zod](https://zod.dev/). Configura [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) per l'osservabilità, inclusi logging, tracing AWS X-Ray e metriche Cloudwatch.
+Il generatore di API tRPC crea una nuova API tRPC con configurazione dell'infrastruttura AWS CDK o Terraform. Il backend generato è esposto tramite un'API AWS API Gateway e include la validazione dello schema utilizzando [Zod](https://zod.dev/). Configura [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) per l'osservabilità, inclusi logging strutturato e metriche CloudWatch.
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Lambda hosting">
+Anche il tracing AWS X-Ray è configurato.
+
+Le tue procedure vengono eseguite su AWS Lambda, quindi non c'è alcun server da gestire e paghi solo per le richieste che servi.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="ECS hosting">
+Le tue procedure vengono eseguite come server HTTP di lunga durata in un container su Amazon ECS, dietro un'API Gateway HTTP API. Vedi <a href="#running-on-amazon-ecs">Running on Amazon ECS</a> per cosa cambia, incluso il motivo per cui il tracing X-Ray non produce tracce lì.
+</OptionFilter>
 
 ## Utilizzo
 
@@ -43,7 +53,19 @@ Seleziona `rest-lambda` (predefinito) come `infra` se desideri utilizzare [tRPC 
 
 :::tip[Pattern di Integrazione]
 L'opzione `integrationPattern` è predefinita su `isolated`, che crea un Lambda per procedura tRPC. Seleziona `shared` se preferisci un singolo handler Lambda condiviso per l'intera API, con override opzionali per procedura.
+
+Con `infra` impostato su `http-ecs` l'opzione è sempre `shared`, poiché un singolo servizio container risponde a ogni operazione.
 :::
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="ECS hosting is experimental">
+:::caution[Sperimentale]
+`http-ecs` è sperimentale. Il suo output generato può cambiare tra le versioni senza una migrazione per portare avanti un workspace esistente, quindi aspettati di riconciliare queste modifiche tu stesso quando aggiorni.
+
+Ha bisogno del provider IaC CDK: il supporto Terraform non è ancora implementato e il generatore fallisce con un messaggio che indica la soluzione.
+
+`integrationPattern` è sempre `shared` qui, poiché un singolo servizio container risponde a ogni operazione. Passare `--integrationPattern=isolated` insieme a `http-ecs` non fallisce: il generatore avverte che l'opzione viene ignorata e usa `shared`. Eseguendo il generatore in modo interattivo, chiede `integrationPattern` prima di `infra`, con `isolated` preselezionato, quindi quell'avviso è ciò che vedi se lasci la preselezione invariata e poi scegli `http-ecs`.
+:::
+</OptionFilter>
 
 ## Output del Generatore
 
@@ -81,6 +103,21 @@ Il generatore creerà la seguente struttura di progetto nella directory `<direct
   - .gitignore Ignores the project's build output
 
 </FileTree>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="Files that differ when the API runs on ECS">
+Con `infra` impostato su `http-ecs` l'API viene eseguita come server HTTP anziché come handler Lambda, quindi `src/handler.ts` e `src/local-server.ts` non vengono generati. Al loro posto ottieni una cartella container denominata come la tua API:
+
+<FileTree>
+  - src
+    - \<api-name>-container/
+      - server.ts The `node:http` server: `GET /health`, and the tRPC standalone adapter for every procedure
+      - index.ts Entry point that reads `PORT` and `HOST` and starts the server. The bundle, the image and the `serve` target all start from this file
+      - Dockerfile Container image definition
+      - .dockerignore Files left out of the image build context
+</FileTree>
+
+Il tuo router, le procedure, lo schema, il middleware e il client sono gli stessi per ogni valore di `infra`.
+</OptionFilter>
 
 ### Infrastruttura
 
@@ -134,7 +171,15 @@ Zod fornisce potenti utility per combinare o derivare schemi come `.merge`, `.pi
 
 ### Router e Procedure
 
-Il tuo router tRPC è definito in `src/router.ts`, che registra tutte le procedure. Ogni procedura definisce l'input, l'output e l'implementazione previsti. Il punto di ingresso dell'handler Lambda è in `src/handler.ts`, che inoltra le richieste al tuo router.
+Il tuo router tRPC è definito in `src/router.ts`, che registra tutte le procedure. Ogni procedura definisce l'input, l'output e l'implementazione previsti.
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="The Lambda entry point">
+Il punto di ingresso dell'handler Lambda è in `src/handler.ts`, che inoltra le richieste al tuo router.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="The container entry point">
+Il punto di ingresso è `src/<api-name>-container/server.ts`, il server HTTP che il container esegue, che inoltra le richieste al tuo router.
+</OptionFilter>
 
 Il router di esempio generato per te ha una singola operazione, chiamata `echo`:
 
@@ -299,13 +344,19 @@ export const echo = publicProcedure
 
 Per maggiori informazioni, consulta la [documentazione AWS Lambda Powertools Tracer](https://docs.powertools.aws.dev/lambda/typescript/latest/core/tracer/).
 
+<OptionFilter when={{ infra: 'http-ecs' }} description="X-Ray produces no traces on ECS">
+:::caution[Nessuna traccia su ECS]
+Le chiamate sopra vengono eseguite senza errori in un container, ma non producono tracce. Powertools disattiva il suo tracer quando non è in esecuzione in Lambda, quindi `getSegment()` restituisce un subsegment placeholder che non viene mai inviato da nessuna parte. Vedi <a href="#observability">Observability</a> per cosa ottieni e cosa aggiungere se hai bisogno di tracce.
+:::
+</OptionFilter>
+
 ### Implementare Middleware Personalizzato
 
 Puoi aggiungere valori aggiuntivi al contesto fornito alle procedure implementando middleware.
 
 Come esempio, implementiamo del middleware per estrarre alcuni dettagli sull'utente chiamante dalla nostra API in `src/middleware/identity.ts`.
 
-<OptionFilter when={{ auth: 'iam' }} description="Identity middleware example for IAM-authenticated APIs">
+<OptionFilter when={{ auth: 'iam', infra: ['rest-lambda', 'http-lambda'] }} description="Identity middleware example for IAM-authenticated APIs on Lambda">
 Questo esempio illustra il middleware di identità per l'autenticazione `IAM`. Cerchiamo il chiamante in Cognito utilizzando il sub estratto dall'evento API Gateway.
 
 La ricerca utilizza il client Cognito Identity Provider, che non è una dipendenza di un'API tRPC generata. Installalo prima nel tuo progetto API:
@@ -490,7 +541,7 @@ export const createIdentityPlugin = () => {
 </Tabs>
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'cognito' }} description="Identity middleware example for Cognito-authenticated APIs">
+<OptionFilter when={{ auth: 'cognito', infra: ['rest-lambda', 'http-lambda'] }} description="Identity middleware example for Cognito-authenticated APIs on Lambda">
 Quando effettui il deploy con `auth: 'cognito'`, l'authorizer Cognito di API Gateway verifica il JWT che il chiamante fornisce nell'header `Authorization` e posiziona i claims verificati sull'evento Lambda. Il nostro middleware legge semplicemente quei claims — nessuna chiamata AWS SDK extra, nessuna verifica JWT manuale.
 
 Prima, definiamo cosa aggiungeremo al contesto:
@@ -641,7 +692,7 @@ Il generatore di API tRPC crea infrastruttura come codice CDK o Terraform in bas
 <Fragment slot="cdk">
 Il costrutto CDK per il deploy della tua API si trova nella cartella `common/constructs`. Puoi utilizzarlo in un'applicazione CDK, per esempio:
 
-<OptionFilter when={{ auth: ['iam', 'custom'] }} description="CDK usage for IAM or Custom authentication">
+<OptionFilter when={{ auth: ['iam', 'custom'], infra: ['rest-lambda', 'http-lambda'] }} description="CDK usage for IAM or Custom authentication on Lambda">
 ```ts {6-8}
 import { MyApi } from '@my-scope/common-constructs';
 
@@ -662,7 +713,7 @@ I risultati dell'authorizer vengono memorizzati nella cache per 5 minuti, con ch
 :::
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'cognito' }} description="CDK usage with Cognito authentication — pass the identity construct">
+<OptionFilter when={{ auth: 'cognito', infra: ['rest-lambda', 'http-lambda'] }} description="CDK usage with Cognito authentication — pass the identity construct">
 ```ts {6,10}
 import { MyApi, UserIdentity } from '@my-scope/common-constructs';
 
@@ -682,11 +733,63 @@ export class ExampleStack extends Stack {
 Il costrutto `UserIdentity` può essere generato utilizzando il <Link path="/guides/react-website-auth">generatore `ts#website#auth`</Link>.
 </OptionFilter>
 
+<OptionFilter when={{ infra: 'http-ecs' }} description="CDK usage when the API runs on ECS — pass the VPC">
+`defaultIntegrations` prende il VPC in cui viene eseguito il tuo servizio e costruisce tutto al suo interno: il servizio ECS, il load balancer interno davanti ad esso e il VPC link attraverso cui API Gateway raggiunge quel load balancer. Il costrutto non crea mai un VPC, quindi crei o importi uno nel tuo stack.
+
+```ts {10,13-15}
+import { MyApi } from '@my-scope/common-constructs';
+import { Stack } from 'aws-cdk-lib';
+import { Vpc } from 'aws-cdk-lib/aws-ec2';
+import { Construct } from 'constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    const vpc = new Vpc(this, 'Vpc', { natGateways: 1 });
+
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this, { vpc }).build(),
+    });
+  }
+}
+```
+
+Per utilizzare un VPC esistente, cercalo con `Vpc.fromLookup(this, 'Vpc', { vpcId: '<vpc-id>' })` e passalo come `vpc`.
+
+Passa `service` per modificare il servizio container stesso — il suo `cpu`, `memoryLimitMiB`, `desiredCount`, `environment`, o `grantTaskRole` per dare un permesso al task role:
+
+```ts
+MyApi.defaultIntegrations(this, {
+  vpc,
+  service: {
+    cpu: 512,
+    memoryLimitMiB: 1024,
+    grantTaskRole: (taskRole) => myTable.grantReadWriteData(taskRole),
+  },
+}).build();
+```
+
+Con `auth` impostato su `cognito`, passa anche `identity` al costrutto come fa l'esempio Cognito sopra.
+</OptionFilter>
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="What the Lambda variants deploy">
 Questo configura l'infrastruttura della tua API, inclusa un'API AWS API Gateway REST o HTTP, funzioni AWS Lambda per la logica di business e autenticazione basata sul tuo metodo `auth` scelto.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="What the ECS variant deploys">
+Questo configura un'API AWS API Gateway HTTP con autenticazione basata sul tuo metodo `auth` scelto, un servizio Amazon ECS che esegue il tuo container, un load balancer interno davanti ad esso e il VPC link attraverso cui API Gateway raggiunge quel load balancer.
+</OptionFilter>
 
 <Snippet name="api/cors-configuration-cdk-note" />
 </Fragment>
 <Fragment slot="terraform">
+<OptionFilter when={{ infra: 'http-ecs' }} description="Terraform is not implemented for ECS hosting">
+:::caution[Solo CDK]
+`http-ecs` non è implementato per Terraform. Il generatore fallisce con un messaggio che lo dice. Scegli `rest-lambda` o `http-lambda` per un workspace Terraform.
+:::
+</OptionFilter>
+
 I moduli Terraform per il deploy della tua API si trovano nella cartella `common/terraform`. Puoi usarli in una configurazione Terraform.
 
 Il modulo API prepara il suo zip di deployment Lambda in un bucket S3 di asset condiviso — vedi la <Link path="/guides/terraform-project">guida all'infrastruttura Terraform</Link> per i dettagli. Istanzia il modulo `core/asset-bucket` una volta per deployment e passa il suo output `bucket_name` in ogni modulo API / Lambda tramite l'input `asset_bucket_name`:
@@ -891,13 +994,88 @@ Gli output chiave dal modulo API che puoi utilizzare per le policy IAM sono:
 
 <Snippet name="ts-bundle" />
 
+<OptionFilter when={{ infra: 'http-ecs' }} description="How ECS hosting works, what it costs and what it limits">
+## Running on Amazon ECS
+
+Con `infra` impostato su `http-ecs`, le tue procedure vengono eseguite come server HTTP di lunga durata in un container anziché in una funzione Lambda. Una richiesta segue questo percorso:
+
+1. Un chiamante firma una richiesta all'API Gateway HTTP API, che è l'unico punto di ingresso pubblico. Ogni route porta l'authorizer per l'`auth` che hai scelto, quindi una richiesta non autenticata viene rifiutata al bordo.
+2. API Gateway inoltra la richiesta attraverso un VPC link, che è il suo percorso privato nel tuo VPC.
+3. Il VPC link raggiunge un load balancer interno. Il load balancer non ha indirizzo pubblico e la sua unica regola in entrata consente il security group del VPC link sulla porta del listener.
+4. Il load balancer inoltra la richiesta a un task. L'unica regola in entrata dei task consente il security group del load balancer sulla porta del container, quindi nient'altro nel VPC può aprire una connessione ad essi.
+
+I task vengono eseguiti in subnet private e non ottengono mai un indirizzo IP pubblico. Niente in questo percorso consente un intervallo di indirizzi in entrata.
+
+Per impostazione predefinita il servizio, il load balancer e il VPC link vanno nelle subnet `PRIVATE_WITH_EGRESS` del VPC, che raggiungono AWS attraverso un NAT gateway. Passare `vpcSubnets: { subnetType: SubnetType.PRIVATE_ISOLATED }` a `defaultIntegrations` elimina il NAT gateway e il suo costo orario, ma le subnet isolate non hanno una route in uscita, quindi il VPC ha poi bisogno di quattro VPC endpoint affinché i task si avviino: endpoint di interfaccia per `ecr.api` e `ecr.dkr` per estrarre l'immagine, un endpoint gateway S3 perché i layer dell'immagine sono oggetti S3, e un endpoint di interfaccia per `logs` in modo che il driver `awslogs` possa scrivere. Senza di essi un task non può estrarre la sua immagine e ECS riporta indietro il deployment sul circuit breaker senza dire perché.
+
+Il VPC link, il load balancer, il suo listener, il target group e il bucket in cui il load balancer scrive i suoi access log sono creati da un costrutto, `core/api/ecs-http-endpoint.ts` in `common/constructs`, che ogni API ospitata su ECS condivide. Il costrutto della tua API nomina il suo servizio container e instrada ogni operazione a quell'endpoint.
+
+### What Runs in the Container
+
+`src/<api-name>-container/server.ts` è un server `node:http` con due compiti. `GET /health` risponde `{"status":"ok"}`, che è ciò che chiamano il target group del load balancer e il health check del container. Ogni altra richiesta va al [tRPC standalone adapter](https://trpc.io/docs/server/adapters/standalone), che la risolve rispetto al tuo router.
+
+Non c'è evento API Gateway nel container, quindi il contesto della procedura non porta alcun campo `event`, `context` o `info`: per `http-ecs` l'`IMiddlewareContext` fornito nomina solo ciò che il middleware ci mette. L'authorizer decide ancora se una richiesta raggiunge il container, ma i suoi claims non arrivano con la richiesta, quindi gli esempi di middleware di identità sopra non si applicano. Per leggere l'identità del chiamante in una procedura, mappa il contesto dell'authorizer su un header di richiesta nel tuo costrutto API e leggi quell'header.
+
+### Observability
+
+Log e metriche funzionano come su Lambda: il container scrive nel suo gruppo di log CloudWatch e il plugin delle metriche pubblica le metriche di ogni richiesta nel formato di metrica incorporato affinché CloudWatch Logs le estragga.
+
+Il plugin delle metriche costruisce un oggetto metriche per ogni richiesta e lo passa alle tue procedure come `opts.ctx.metrics`, quindi una metrica che una richiesta aggiunge non viene mai pubblicata con quella di un'altra. Questo conta di più qui che su Lambda, dove un'invocazione possiede le metriche dall'inizio alla fine; questo server gestisce le richieste contemporaneamente. Aggiungi le tue metriche attraverso `opts.ctx.metrics` piuttosto che un oggetto `Metrics` tuo, che condividerebbe un archivio attraverso ogni richiesta nel processo.
+
+Il tracing AWS X-Ray no. Powertools disattiva il suo tracer fuori da Lambda e non c'è daemon X-Ray nel task per ricevere segmenti, quindi le chiamate `opts.ctx.tracer` vengono eseguite senza errori e non producono tracce. Aggiungi un daemon come sidecar nel tuo servizio container se ne hai bisogno.
+
+Il log di accesso dell'API Gateway HTTP API registra ogni richiesta che raggiunge l'API. Il load balancer scrive i suoi access log in un bucket che il costrutto `EcsHttpEndpoint` crea, che è dove puoi vedere quale task ha servito una richiesta e cosa ha risposto.
+
+### Image Build and Scanning
+
+Il generatore di container fornisce i target dell'immagine, denominati come la tua API:
+
+- `<api-name>-container-docker` costruisce un'immagine linux/arm64, eseguendo prima `bundle` in modo che l'immagine contenga il server bundled.
+- `<api-name>-container-trivy` scansiona quell'immagine per vulnerabilità.
+
+Vedi <Link path="/guides/ts-container">TypeScript Container Service</Link> per come viene costruita l'immagine e <Link path="/guides/docker-bundling">Docker Bundling</Link> per come viene pubblicata al momento del deploy.
+
+### Limits
+
+- **Integration timeout.** Le API Gateway HTTP API limitano un'integrazione a circa 30 secondi. Una procedura che impiega più tempo di quello fallisce al gateway per quanto a lungo il container continui a lavorare.
+- **No streaming.** Le subscriptions tRPC necessitano dell'infrastruttura `rest-lambda`. Un'HTTP API non può trasmettere una risposta in streaming.
+- **Payload size.** Richieste e risposte seguono il limite di 10 MB di API Gateway.
+- **One service for every operation.** `integrationPattern` è `shared`: c'è un servizio container e ogni route è instradata ad esso. L'opzione si risolve sempre in `shared` per questa infrastruttura e `isolated` viene ignorato con un avviso.
+
+### Cost
+
+Il load balancer è il nuovo costo fisso rispetto a Lambda, dove paghi per richiesta e niente quando inattivo. Cifre mensili approssimative in us-east-1, prima del trasferimento dati:
+
+| Elemento | Approssimativamente |
+| --- | --- |
+| Load balancer interno | $16 più unità di capacità del load balancer |
+| Task Fargate, 0.25 vCPU / 0.5 GB arm64 | $7 per task |
+| NAT gateway, se il tuo VPC ne ha uno | $33 |
+| VPC link | nessun costo orario |
+| Storage S3 per gli access log del load balancer | centesimi per GB al mese |
+
+Quindi un servizio a un task costa circa $23 al mese prima di qualsiasi traffico, e di più se il VPC che passi ha un NAT gateway. Gli access log crescono con il traffico: aggiungi una regola del ciclo di vita a `endpoint.accessLogsBucket` per farli scadere. Controlla le pagine dei prezzi di [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) e [AWS Fargate](https://aws.amazon.com/fargate/pricing/) per i prezzi correnti nella tua Region.
+</OptionFilter>
+
 ## Server tRPC Locale
 
 Puoi utilizzare il target `serve` per eseguire un server locale per la tua API, per esempio:
 
 <NxCommands commands={['serve my-api']} />
 
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Local server entry point for the Lambda variants">
 Il punto di ingresso per il server locale è `src/local-server.ts`.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="Local server entry point when the API runs on ECS">
+Il punto di ingresso per il server locale è `src/<api-name>-container/index.ts`, lo stesso file che esegue il container. Ascolta sull'indirizzo in `HOST`, che per impostazione predefinita è `127.0.0.1`, quindi il server locale accetta connessioni solo dalla tua macchina. L'immagine imposta `HOST=0.0.0.0` in modo che il server ascolti sull'interfaccia di rete del task, dove il security group del task decide chi può connettersi.
+
+Verifica che il server sia attivo con la sua route di health, che restituisce status 200 e `{"status":"ok"}`:
+
+```bash
+curl http://localhost:2022/health
+```
+</OptionFilter>
 
 Questo si ricaricherà automaticamente quando apporti modifiche alla tua API.
 

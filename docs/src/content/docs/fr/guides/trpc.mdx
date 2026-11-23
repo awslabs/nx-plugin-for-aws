@@ -4,7 +4,7 @@ description: Documentation de référence pour tRPC
 generator: ts#api
 when:
   framework: [trpc]
-  infra: [rest-lambda, http-lambda]
+  infra: [rest-lambda, http-lambda, http-ecs]
 ---
 import { FileTree, Tabs, TabItem, CardGrid } from '@astrojs/starlight/components';
 import Astro from '@astrojs/react';
@@ -21,7 +21,17 @@ import { TS_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/vers
 
 [tRPC](https://trpc.io/) est un framework pour créer des API en TypeScript avec une sécurité de type de bout en bout. Avec tRPC, les mises à jour des entrées et sorties des opérations d'API sont immédiatement reflétées dans le code client et sont visibles dans votre IDE sans avoir besoin de reconstruire votre projet.
 
-Le générateur d'API tRPC crée une nouvelle API tRPC avec une configuration d'infrastructure AWS CDK ou Terraform. Le backend généré utilise AWS Lambda pour un déploiement serverless, exposé via une API AWS API Gateway, et inclut la validation de schéma avec [Zod](https://zod.dev/). Il configure [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) pour l'observabilité, incluant la journalisation, le traçage AWS X-Ray et les métriques Cloudwatch.
+Le générateur d'API tRPC crée une nouvelle API tRPC avec une configuration d'infrastructure AWS CDK ou Terraform. Le backend généré est exposé via une API AWS API Gateway, et inclut la validation de schéma avec [Zod](https://zod.dev/). Il configure [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) pour l'observabilité, incluant la journalisation structurée et les métriques CloudWatch.
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Lambda hosting">
+Le traçage AWS X-Ray est également configuré.
+
+Vos procédures s'exécutent sur AWS Lambda, il n'y a donc pas de serveur à gérer et vous ne payez que pour les requêtes que vous servez.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="ECS hosting">
+Vos procédures s'exécutent en tant que serveur HTTP de longue durée dans un conteneur sur Amazon ECS, derrière une API Gateway HTTP API. Voir <a href="#running-on-amazon-ecs">Exécution sur Amazon ECS</a> pour ce que cela change, y compris pourquoi le traçage X-Ray ne produit aucune trace là-bas.
+</OptionFilter>
 
 ## Utilisation
 
@@ -43,7 +53,19 @@ Sélectionnez `rest-lambda` (par défaut) comme `infra` si vous souhaitez utilis
 
 :::tip[Modèle d'intégration]
 L'option `integrationPattern` est définie par défaut sur `isolated`, ce qui crée un Lambda par procédure tRPC. Sélectionnez `shared` si vous préférez un seul gestionnaire Lambda partagé pour toute l'API, avec des remplacements optionnels par procédure.
+
+Avec `infra` défini sur `http-ecs`, l'option est toujours `shared`, car un seul service de conteneur répond à chaque opération.
 :::
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="ECS hosting is experimental">
+:::caution[Expérimental]
+`http-ecs` est expérimental. Sa sortie générée peut changer entre les versions sans migration pour transporter un espace de travail existant, alors attendez-vous à réconcilier ces changements vous-même lorsque vous mettez à niveau.
+
+Il nécessite le fournisseur IaC CDK : le support Terraform n'est pas encore implémenté, et le générateur échoue avec un message nommant la correction.
+
+`integrationPattern` est toujours `shared` ici, car un seul service de conteneur répond à chaque opération. Passer `--integrationPattern=isolated` avec `http-ecs` n'échoue pas : le générateur avertit que l'option est ignorée et utilise `shared`. En exécutant le générateur de manière interactive, il demande `integrationPattern` avant `infra`, avec `isolated` présélectionné, donc cet avertissement est ce que vous voyez si vous laissez la présélection seule et choisissez ensuite `http-ecs`.
+:::
+</OptionFilter>
 
 ## Sortie du générateur
 
@@ -81,6 +103,21 @@ Le générateur créera la structure de projet suivante dans le répertoire `<di
   - .gitignore Ignores the project's build output
 
 </FileTree>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="Files that differ when the API runs on ECS">
+Avec `infra` défini sur `http-ecs`, l'API s'exécute en tant que serveur HTTP plutôt qu'en tant que gestionnaire Lambda, donc `src/handler.ts` et `src/local-server.ts` ne sont pas générés. À leur place, vous obtenez un dossier de conteneur nommé d'après votre API :
+
+<FileTree>
+  - src
+    - \<api-name>-container/
+      - server.ts The `node:http` server: `GET /health`, and the tRPC standalone adapter for every procedure
+      - index.ts Entry point that reads `PORT` and `HOST` and starts the server. The bundle, the image and the `serve` target all start from this file
+      - Dockerfile Container image definition
+      - .dockerignore Files left out of the image build context
+</FileTree>
+
+Votre routeur, vos procédures, votre schéma, votre middleware et votre client sont les mêmes pour chaque valeur `infra`.
+</OptionFilter>
 
 ### Infrastructure
 
@@ -134,7 +171,15 @@ Zod fournit des utilitaires puissants pour combiner ou dériver des schémas tel
 
 ### Routeur et procédures
 
-Votre routeur tRPC est défini dans `src/router.ts`, qui enregistre toutes les procédures. Chaque procédure définit l'entrée, la sortie et l'implémentation attendues. Le point d'entrée du gestionnaire Lambda se trouve dans `src/handler.ts`, qui transmet les requêtes à votre routeur.
+Votre routeur tRPC est défini dans `src/router.ts`, qui enregistre toutes les procédures. Chaque procédure définit l'entrée, la sortie et l'implémentation attendues.
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="The Lambda entry point">
+Le point d'entrée du gestionnaire Lambda se trouve dans `src/handler.ts`, qui transmet les requêtes à votre routeur.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="The container entry point">
+Le point d'entrée est `src/<api-name>-container/server.ts`, le serveur HTTP que le conteneur exécute, qui transmet les requêtes à votre routeur.
+</OptionFilter>
 
 Le routeur exemple généré pour vous a une seule opération, appelée `echo` :
 
@@ -299,13 +344,19 @@ export const echo = publicProcedure
 
 Pour plus d'informations, veuillez vous référer à la [documentation AWS Lambda Powertools Tracer](https://docs.powertools.aws.dev/lambda/typescript/latest/core/tracer/).
 
+<OptionFilter when={{ infra: 'http-ecs' }} description="X-Ray produces no traces on ECS">
+:::caution[Aucune trace sur ECS]
+Les appels ci-dessus s'exécutent sans erreur dans un conteneur, mais ne produisent aucune trace. Powertools désactive son traceur lorsqu'il ne s'exécute pas dans Lambda, donc `getSegment()` retourne un sous-segment de substitution qui n'est jamais envoyé nulle part. Voir <a href="#observability">Observabilité</a> pour ce que vous obtenez, et ce qu'il faut ajouter si vous avez besoin de traces.
+:::
+</OptionFilter>
+
 ### Implémenter un middleware personnalisé
 
 Vous pouvez ajouter des valeurs supplémentaires au contexte fourni aux procédures en implémentant un middleware.
 
 À titre d'exemple, implémentons un middleware pour extraire des détails sur l'utilisateur appelant notre API dans `src/middleware/identity.ts`.
 
-<OptionFilter when={{ auth: 'iam' }} description="Identity middleware example for IAM-authenticated APIs">
+<OptionFilter when={{ auth: 'iam', infra: ['rest-lambda', 'http-lambda'] }} description="Identity middleware example for IAM-authenticated APIs on Lambda">
 Cet exemple présente un middleware d'identité pour l'authentification `IAM`. Nous recherchons l'appelant dans Cognito en utilisant le sub extrait de l'événement API Gateway.
 
 La recherche utilise le client Cognito Identity Provider, qui n'est pas une dépendance d'une API tRPC générée. Installez-le d'abord dans votre projet d'API :
@@ -490,7 +541,7 @@ export const createIdentityPlugin = () => {
 </Tabs>
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'cognito' }} description="Identity middleware example for Cognito-authenticated APIs">
+<OptionFilter when={{ auth: 'cognito', infra: ['rest-lambda', 'http-lambda'] }} description="Identity middleware example for Cognito-authenticated APIs on Lambda">
 Lorsque vous déployez avec `auth: 'cognito'`, l'autorisateur Cognito d'API Gateway vérifie le JWT que l'appelant fournit dans l'en-tête `Authorization` et place les revendications vérifiées sur l'événement Lambda. Notre middleware lit simplement ces revendications — pas d'appels SDK AWS supplémentaires, pas de vérification JWT manuelle.
 
 Tout d'abord, nous définissons ce que nous ajouterons au contexte :
@@ -641,7 +692,7 @@ Le générateur d'API tRPC crée une infrastructure en tant que code CDK ou Terr
 <Fragment slot="cdk">
 Le construct CDK pour déployer votre API se trouve dans le dossier `common/constructs`. Vous pouvez le consommer dans une application CDK, par exemple :
 
-<OptionFilter when={{ auth: ['iam', 'custom'] }} description="CDK usage for IAM or Custom authentication">
+<OptionFilter when={{ auth: ['iam', 'custom'], infra: ['rest-lambda', 'http-lambda'] }} description="CDK usage for IAM or Custom authentication on Lambda">
 ```ts {6-8}
 import { MyApi } from '@my-scope/common-constructs';
 
@@ -662,7 +713,7 @@ Les résultats de l'autorisateur sont mis en cache pendant 5 minutes, indexés s
 :::
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'cognito' }} description="CDK usage with Cognito authentication — pass the identity construct">
+<OptionFilter when={{ auth: 'cognito', infra: ['rest-lambda', 'http-lambda'] }} description="CDK usage with Cognito authentication — pass the identity construct">
 ```ts {6,10}
 import { MyApi, UserIdentity } from '@my-scope/common-constructs';
 
@@ -682,11 +733,63 @@ export class ExampleStack extends Stack {
 Le construct `UserIdentity` peut être généré en utilisant le <Link path="/guides/react-website-auth">générateur `ts#website#auth`</Link>.
 </OptionFilter>
 
+<OptionFilter when={{ infra: 'http-ecs' }} description="CDK usage when the API runs on ECS — pass the VPC">
+`defaultIntegrations` prend le VPC dans lequel votre service s'exécute, et construit tout à l'intérieur : le service ECS, l'équilibreur de charge interne devant lui, et le lien VPC par lequel API Gateway atteint cet équilibreur de charge. Le construct ne crée jamais de VPC, vous devez donc en créer ou en importer un dans votre stack.
+
+```ts {10,13-15}
+import { MyApi } from '@my-scope/common-constructs';
+import { Stack } from 'aws-cdk-lib';
+import { Vpc } from 'aws-cdk-lib/aws-ec2';
+import { Construct } from 'constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    const vpc = new Vpc(this, 'Vpc', { natGateways: 1 });
+
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this, { vpc }).build(),
+    });
+  }
+}
+```
+
+Pour utiliser un VPC existant, recherchez-le avec `Vpc.fromLookup(this, 'Vpc', { vpcId: '<vpc-id>' })` et passez-le comme `vpc`.
+
+Passez `service` pour modifier le service de conteneur lui-même — son `cpu`, `memoryLimitMiB`, `desiredCount`, `environment`, ou `grantTaskRole` pour donner une permission au rôle de tâche :
+
+```ts
+MyApi.defaultIntegrations(this, {
+  vpc,
+  service: {
+    cpu: 512,
+    memoryLimitMiB: 1024,
+    grantTaskRole: (taskRole) => myTable.grantReadWriteData(taskRole),
+  },
+}).build();
+```
+
+Avec `auth` défini sur `cognito`, passez également `identity` au construct comme le fait l'exemple Cognito ci-dessus.
+</OptionFilter>
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="What the Lambda variants deploy">
 Cela configure votre infrastructure d'API, incluant une API AWS API Gateway REST ou HTTP, des fonctions AWS Lambda pour la logique métier, et l'authentification basée sur votre méthode `auth` choisie.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="What the ECS variant deploys">
+Cela configure une API AWS API Gateway HTTP avec authentification basée sur votre méthode `auth` choisie, un service Amazon ECS exécutant votre conteneur, un équilibreur de charge interne devant lui, et le lien VPC par lequel API Gateway atteint cet équilibreur de charge.
+</OptionFilter>
 
 <Snippet name="api/cors-configuration-cdk-note" />
 </Fragment>
 <Fragment slot="terraform">
+<OptionFilter when={{ infra: 'http-ecs' }} description="Terraform is not implemented for ECS hosting">
+:::caution[CDK uniquement]
+`http-ecs` n'est pas implémenté pour Terraform. Le générateur échoue avec un message le disant. Choisissez `rest-lambda` ou `http-lambda` pour un espace de travail Terraform.
+:::
+</OptionFilter>
+
 Les modules Terraform pour déployer votre API se trouvent dans le dossier `common/terraform`. Vous pouvez les utiliser dans une configuration Terraform.
 
 Le module API stocke son zip de déploiement Lambda dans un bucket S3 d'assets partagé — voir le <Link path="/guides/terraform-project">guide d'infrastructure Terraform</Link> pour plus de détails. Instanciez le module `core/asset-bucket` une fois par déploiement et passez sa sortie `bucket_name` dans chaque module API / Lambda via l'entrée `asset_bucket_name` :
@@ -891,13 +994,88 @@ Les sorties clés du module API que vous pouvez utiliser pour les politiques IAM
 
 <Snippet name="ts-bundle" />
 
+<OptionFilter when={{ infra: 'http-ecs' }} description="How ECS hosting works, what it costs and what it limits">
+## Exécution sur Amazon ECS
+
+Avec `infra` défini sur `http-ecs`, vos procédures s'exécutent en tant que serveur HTTP de longue durée dans un conteneur plutôt que dans une fonction Lambda. Une requête suit ce chemin :
+
+1. Un appelant signe une requête vers l'API Gateway HTTP API, qui est le seul point d'entrée public. Chaque route porte l'autorisateur pour l'`auth` que vous avez choisi, donc une requête non authentifiée est rejetée à la périphérie.
+2. API Gateway transmet la requête via un lien VPC, qui est son chemin privé dans votre VPC.
+3. Le lien VPC atteint un équilibreur de charge interne. L'équilibreur de charge n'a pas d'adresse publique, et sa seule règle entrante autorise le groupe de sécurité du lien VPC sur le port d'écoute.
+4. L'équilibreur de charge transmet la requête à une tâche. La seule règle entrante des tâches autorise le groupe de sécurité de l'équilibreur de charge sur le port du conteneur, donc rien d'autre dans le VPC ne peut ouvrir une connexion vers elles.
+
+Les tâches s'exécutent dans des sous-réseaux privés et n'obtiennent jamais d'adresse IP publique. Rien dans ce chemin n'autorise une plage d'adresses entrante.
+
+Par défaut, le service, l'équilibreur de charge et le lien VPC vont dans les sous-réseaux `PRIVATE_WITH_EGRESS` du VPC, qui atteignent AWS via une passerelle NAT. Passer `vpcSubnets: { subnetType: SubnetType.PRIVATE_ISOLATED }` à `defaultIntegrations` supprime la passerelle NAT et ses frais horaires, mais les sous-réseaux isolés n'ont pas de route sortante, donc le VPC a alors besoin de quatre points de terminaison VPC pour que les tâches démarrent : des points de terminaison d'interface pour `ecr.api` et `ecr.dkr` pour extraire l'image, un point de terminaison de passerelle S3 car les couches d'image sont des objets S3, et un point de terminaison d'interface pour `logs` afin que le pilote `awslogs` puisse écrire. Sans eux, une tâche ne peut pas extraire son image et ECS annule le déploiement sur le disjoncteur sans dire pourquoi.
+
+Le lien VPC, l'équilibreur de charge, son écouteur, le groupe cible et le bucket dans lequel l'équilibreur de charge écrit ses journaux d'accès sont créés par un seul construct, `core/api/ecs-http-endpoint.ts` dans `common/constructs`, que chaque API hébergée sur ECS partage. Le construct propre de votre API nomme son service de conteneur et route chaque opération vers ce point de terminaison.
+
+### Ce qui s'exécute dans le conteneur
+
+`src/<api-name>-container/server.ts` est un serveur `node:http` avec deux tâches. `GET /health` répond `{"status":"ok"}`, ce que le groupe cible de l'équilibreur de charge et la vérification de santé du conteneur appellent. Toute autre requête va à l'[adaptateur autonome tRPC](https://trpc.io/docs/server/adapters/standalone), qui la résout par rapport à votre routeur.
+
+Il n'y a pas d'événement API Gateway dans le conteneur, donc le contexte de procédure ne porte aucun champ `event`, `context` ou `info` : pour `http-ecs`, l'`IMiddlewareContext` fourni ne nomme que ce que le middleware y met. L'autorisateur décide toujours si une requête atteint le conteneur, mais ses revendications n'arrivent pas avec la requête, donc les exemples de middleware d'identité ci-dessus ne s'appliquent pas. Pour lire l'identité de l'appelant dans une procédure, mappez le contexte de l'autorisateur sur un en-tête de requête dans votre construct d'API et lisez cet en-tête.
+
+### Observabilité
+
+Les journaux et les métriques fonctionnent comme sur Lambda : le conteneur écrit dans son propre groupe de journaux CloudWatch, et le plugin de métriques publie les métriques de chaque requête au format de métrique intégré pour que CloudWatch Logs les extraie.
+
+Le plugin de métriques construit un objet de métriques pour chaque requête et le transmet à vos procédures en tant que `opts.ctx.metrics`, donc une métrique qu'une requête ajoute n'est jamais publiée avec celle d'une autre. Cela compte plus ici que sur Lambda, où une invocation possède les métriques du début à la fin ; ce serveur gère les requêtes en même temps. Ajoutez vos propres métriques via `opts.ctx.metrics` plutôt qu'un objet `Metrics` propre, qui partagerait un magasin à travers chaque requête dans le processus.
+
+Le traçage AWS X-Ray ne fonctionne pas. Powertools désactive son traceur en dehors de Lambda, et il n'y a pas de démon X-Ray dans la tâche pour recevoir les segments, donc les appels `opts.ctx.tracer` s'exécutent sans erreur et ne produisent aucune trace. Ajoutez un démon en tant que sidecar dans votre service de conteneur si vous en avez besoin.
+
+Le journal d'accès de l'API Gateway HTTP API enregistre chaque requête qui atteint l'API. L'équilibreur de charge écrit ses propres journaux d'accès dans un bucket que le construct `EcsHttpEndpoint` crée, c'est là que vous pouvez voir quelle tâche a servi une requête et ce qu'elle a répondu.
+
+### Construction et analyse d'image
+
+Le générateur de conteneur fournit les cibles d'image, nommées d'après votre API :
+
+- `<api-name>-container-docker` construit une image linux/arm64, en exécutant d'abord `bundle` pour que l'image contienne le serveur groupé.
+- `<api-name>-container-trivy` analyse cette image pour les vulnérabilités.
+
+Voir <Link path="/guides/ts-container">TypeScript Container Service</Link> pour comment l'image est construite, et <Link path="/guides/docker-bundling">Docker Bundling</Link> pour comment elle est publiée au moment du déploiement.
+
+### Limites
+
+- **Délai d'intégration.** Les API Gateway HTTP plafonnent une intégration à environ 30 secondes. Une procédure qui prend plus de temps que cela échoue à la passerelle, peu importe combien de temps le conteneur continue de travailler.
+- **Pas de streaming.** Les subscriptions tRPC nécessitent l'infrastructure `rest-lambda`. Une API HTTP ne peut pas diffuser une réponse.
+- **Taille de charge utile.** Les requêtes et les réponses suivent la limite de 10 Mo d'API Gateway.
+- **Un service pour chaque opération.** `integrationPattern` est `shared` : il y a un service de conteneur, et chaque route y est routée. L'option se résout toujours à `shared` pour cette infrastructure, et `isolated` est ignoré avec un avertissement.
+
+### Coût
+
+L'équilibreur de charge est le nouveau coût fixe par rapport à Lambda, où vous payez par requête et rien en inactivité. Chiffres mensuels approximatifs dans us-east-1, avant transfert de données :
+
+| Élément | Approximativement |
+| --- | --- |
+| Équilibreur de charge interne | 16 $ plus unités de capacité d'équilibreur de charge |
+| Tâche Fargate, 0,25 vCPU / 0,5 GB arm64 | 7 $ par tâche |
+| Passerelle NAT, si votre VPC en a une | 33 $ |
+| Lien VPC | pas de frais horaires |
+| Stockage S3 pour les journaux d'accès de l'équilibreur de charge | centimes par Go par mois |
+
+Donc un service à une tâche coûte environ 23 $ par mois avant tout trafic, et plus si le VPC que vous passez a une passerelle NAT. Les journaux d'accès augmentent avec le trafic : ajoutez une règle de cycle de vie à `endpoint.accessLogsBucket` pour les faire expirer. Consultez les pages de tarification [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) et [AWS Fargate](https://aws.amazon.com/fargate/pricing/) pour les prix actuels dans votre région.
+</OptionFilter>
+
 ## Serveur tRPC local
 
 Vous pouvez utiliser la cible `serve` pour exécuter un serveur local pour votre API, par exemple :
 
 <NxCommands commands={['serve my-api']} />
 
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Local server entry point for the Lambda variants">
 Le point d'entrée du serveur local est `src/local-server.ts`.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="Local server entry point when the API runs on ECS">
+Le point d'entrée du serveur local est `src/<api-name>-container/index.ts`, le même fichier que le conteneur exécute. Il écoute sur l'adresse dans `HOST`, qui est par défaut `127.0.0.1`, donc le serveur local n'accepte les connexions que depuis votre propre machine. L'image définit `HOST=0.0.0.0` pour que le serveur écoute sur l'interface réseau propre de la tâche, où le groupe de sécurité de la tâche décide qui peut se connecter.
+
+Vérifiez que le serveur est actif avec sa route de santé, qui retourne le statut 200 et `{"status":"ok"}` :
+
+```bash
+curl http://localhost:2022/health
+```
+</OptionFilter>
 
 Cela se rechargera automatiquement lorsque vous apporterez des modifications à votre API.
 
