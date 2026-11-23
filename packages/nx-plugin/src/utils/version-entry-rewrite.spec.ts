@@ -162,5 +162,22 @@ describe('version entry rewrite', () => {
 
       expect(tree.read('versions.ts', 'utf-8')).toBe(VERSIONS_FILE);
     });
+
+    // An entry already at the version asked for has nothing to move, and GritQL
+    // counts rewriting a string into itself as no change. Without this a caller
+    // that skipped its own old-equals-new check would fail the weekly run over a
+    // version that is already right.
+    it('should do nothing when the versions are equal', async () => {
+      await expect(
+        applyVersionEntryRewrite(tree, 'versions.ts', {
+          constantName: 'LAMBDA_RUNTIME_VERSIONS',
+          name: 'python',
+          oldVersion: '3.14',
+          newVersion: '3.14',
+        }),
+      ).resolves.toBeUndefined();
+
+      expect(tree.read('versions.ts', 'utf-8')).toBe(VERSIONS_FILE);
+    });
   });
 });

@@ -59,20 +59,32 @@ export const versionEntryRewrite = ({
  * A GritQL pattern that matches nothing is not an error, so without this check a
  * rewrite that found no entry left the file untouched while the caller had
  * already recorded the bump for the PR body — a version the PR claims to have
- * moved, in a file where it has not. The check is on the file text rather than on
- * the constant's presence because both ways of missing produce that same lie: a
- * constant renamed in `versions.ts` without the caller's name being updated, and
- * a key or current version the constant does not hold.
+ * moved, in a file where it has not. `applyGritQL` reports whether it wrote new
+ * content, which answers both ways of missing: a constant renamed in
+ * `versions.ts` without the caller's name being updated, and a key or current
+ * version the constant does not hold.
+ *
+ * An entry whose versions are equal has nothing to move, so it returns before
+ * the rewrite. GritQL treats rewriting a string into itself as no change, so
+ * without this a caller that skipped its own old-equals-new check would fail the
+ * whole weekly run over a version that is already where it should be.
  */
 export const applyVersionEntryRewrite = async (
   tree: Tree,
   versionsFilePath: string,
   entry: VersionEntryRewrite,
 ): Promise<void> => {
-  const before = tree.read(versionsFilePath, 'utf-8');
-  await applyGritQL(tree, versionsFilePath, versionEntryRewrite(entry));
+  if (entry.oldVersion === entry.newVersion) {
+    return;
+  }
 
-  if (tree.read(versionsFilePath, 'utf-8') === before) {
+  const changed = await applyGritQL(
+    tree,
+    versionsFilePath,
+    versionEntryRewrite(entry),
+  );
+
+  if (!changed) {
     throw new Error(
       `Could not move ${entry.constantName}.${entry.name} from ${entry.oldVersion} to ${entry.newVersion}: the rewrite matched nothing in ${versionsFilePath}. Check that the constant is declared there and still holds that key at that version.`,
     );

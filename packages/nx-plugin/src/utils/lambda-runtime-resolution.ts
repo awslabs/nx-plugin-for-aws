@@ -72,8 +72,7 @@ export type UnresolvedReason = 'no-runtimes-listed' | 'held-below-ceiling';
  * {@link LAMBDA_RUNTIME_VERSIONS} by hand, and retag the vended Dockerfiles.
  * Raising the ceiling alone only lets the next version update move the pin, and
  * until the pin moves `lambda-runtimes.spec.ts` fails on any base image tag that
- * disagrees with it. For Python, wait until `AgentCoreRuntime` publishes the
- * matching member.
+ * disagrees with it. Each entry's `liftWhen` names the event to wait for.
  *
  * These runtimes are written by hand where no test can reach them, so they move
  * in the same change too:
@@ -87,18 +86,36 @@ export type UnresolvedReason = 'no-runtimes-listed' | 'held-below-ceiling';
  *   names `Runtime.NODEJS_24_X` and `AgentCoreRuntime.PYTHON_3_14`, plus the
  *   greengrass tutorial and guide pages, which name `python3.14` in prose
  */
+/**
+ * A ceiling, why it is there, and what ends it.
+ *
+ * `liftWhen` is the external event the hold waits on, and it reaches the weekly
+ * PR body through {@link unresolvedRuntimeWarning}, so a reader can tell whether
+ * the hold has outlived its reason without opening this file. Shaped after
+ * `VersionHold` in `version-lockstep/hold.ts`, which reports Python and
+ * Terraform holds the same way.
+ */
+export interface LambdaRuntimeCeiling {
+  readonly ceiling: string;
+  readonly reason: string;
+  readonly liftWhen: string;
+}
+
 export const LAMBDA_RUNTIME_CEILINGS: Partial<
-  Record<ILambdaRuntime, { readonly ceiling: string; readonly reason: string }>
+  Record<ILambdaRuntime, LambdaRuntimeCeiling>
 > = {
   node: {
     ceiling: '24',
     reason:
       'the vended TypeScript Dockerfile still names public.ecr.aws/lambda/nodejs:24',
+    liftWhen:
+      'public.ecr.aws/lambda/nodejs:26 is published, so the vended Dockerfile can be retagged in the same change',
   },
   python: {
     ceiling: '3.14',
     reason:
       'AgentCore Runtime has no Python 3.15, and the AgentCore code package ships the Lambda-targeted bundle',
+    liftWhen: 'AgentCoreRuntime publishes PYTHON_3_15',
   },
 };
 
@@ -112,6 +129,8 @@ export interface RuntimeResolution {
     readonly reason: UnresolvedReason;
     /** For a held language, why it is held. */
     readonly detail?: string;
+    /** For a held language, the event that ends the hold. */
+    readonly liftWhen?: string;
   }[];
 }
 
@@ -167,6 +186,7 @@ export const resolveLambdaRuntimes = (
             kept: current,
             reason: 'held-below-ceiling',
             detail: held.reason,
+            liftWhen: held.liftWhen,
           });
           return [
             language,
@@ -192,5 +212,5 @@ export const unresolvedRuntimeWarning = (
   entry: RuntimeResolution['unresolved'][number],
 ): string =>
   entry.reason === 'held-below-ceiling'
-    ? `Holding the ${entry.language} runtime at ${entry.kept} although aws-cdk-lib lists a newer one: ${entry.detail}`
+    ? `Holding the ${entry.language} runtime at ${entry.kept} although aws-cdk-lib lists a newer one: ${entry.detail}${entry.liftWhen ? `. Lift when ${entry.liftWhen}` : ''}`
     : `Found no ${entry.language} runtime in the aws-cdk-lib runtime list, so it keeps its pinned runtime (${entry.kept})`;

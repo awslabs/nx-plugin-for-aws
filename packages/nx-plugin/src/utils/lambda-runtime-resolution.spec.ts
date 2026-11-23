@@ -81,7 +81,13 @@ describe('lambda runtime resolution', () => {
     // added `python3.15` in 2.276.0 and `nodejs26.x` in 2.277.0, both days
     // before Lambda made them GA. The ceiling decides in this repo when a
     // runtime moves.
-    const CEILINGS = { node: { ceiling: '24', reason: 'the vended image' } };
+    const CEILINGS = {
+      node: {
+        ceiling: '24',
+        reason: 'the vended image',
+        liftWhen: 'the newer image is published',
+      },
+    };
 
     it('should keep the pin when CDK lists a runtime above the ceiling', () => {
       const { versions, unresolved } = resolveLambdaRuntimes(
@@ -96,12 +102,14 @@ describe('lambda runtime resolution', () => {
           kept: LAMBDA_RUNTIME_VERSIONS.node,
           reason: 'held-below-ceiling',
           detail: 'the vended image',
+          liftWhen: 'the newer image is published',
         },
       ]);
     });
 
     // Surfaced in the PR body, so a hold that has outlived its reason is visible
-    // without reading the resolver.
+    // without reading the resolver — carrying the lift condition as well as the
+    // reason, the way a Python or Terraform hold reports it.
     it('should warn with the reason the runtime is held', () => {
       const { unresolved } = resolveLambdaRuntimes(['nodejs26.x'], CEILINGS);
 
@@ -109,6 +117,9 @@ describe('lambda runtime resolution', () => {
         'the vended image',
       );
       expect(unresolvedRuntimeWarning(unresolved[0])).toContain('node');
+      expect(unresolvedRuntimeWarning(unresolved[0])).toContain(
+        'Lift when the newer image is published',
+      );
     });
 
     it('should still move a language with no ceiling', () => {
@@ -123,7 +134,11 @@ describe('lambda runtime resolution', () => {
 
     it('should move up to the ceiling but no further', () => {
       const { versions } = resolveLambdaRuntimes(['nodejs26.x'], {
-        node: { ceiling: '25', reason: 'tested no further' },
+        node: {
+          ceiling: '25',
+          reason: 'tested no further',
+          liftWhen: '26 is tested',
+        },
       });
 
       expect(versions.node).toBe('25');
