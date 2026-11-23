@@ -7,6 +7,7 @@ import {
   readJson,
   readProjectConfiguration,
   type Tree,
+  updateProjectConfiguration,
 } from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
@@ -1574,6 +1575,35 @@ export const echo = publicProcedure.query(() => ({ message: 'hi' }));
       // The image build targets ts#container vends are kept.
       expect(projectConfig.targets['test-api-container-docker']).toBeDefined();
       expect(projectConfig.targets['test-api-container-trivy']).toBeDefined();
+    });
+
+    // The project's own serve target replaces ts#container's, so its dev
+    // dependency goes with it. Anything else another component put on `dev`
+    // has to survive that, or re-running the generator would stop a local
+    // database or sidecar from starting with the server.
+    it('should keep a dev dependency another component added when re-run', async () => {
+      await tsTrpcApiGenerator(tree, ecsOptions('iam'));
+
+      // What a connection generator adds: the local database the API's
+      // clients read starts alongside the server.
+      const withConnection = readProjectConfiguration(tree, '@proj/test-api');
+      withConnection.targets.dev.dependsOn = [
+        { projects: ['@proj/my-table'], target: 'dev' },
+      ];
+      updateProjectConfiguration(tree, '@proj/test-api', withConnection);
+
+      await tsTrpcApiGenerator(tree, ecsOptions('iam'));
+
+      const projectConfig = readProjectConfiguration(tree, '@proj/test-api');
+      expect(projectConfig.targets.dev.dependsOn).toEqual([
+        { projects: ['@proj/my-table'], target: 'dev' },
+      ]);
+      // ts#container's serve target is still dropped, from the project and
+      // from `dev`, so only one copy of the server starts.
+      expect(projectConfig.targets['test-api-container-serve']).toBeUndefined();
+      expect(projectConfig.targets.dev.options.commands).toEqual([
+        'tsx --watch src/test-api-container/index.ts',
+      ]);
     });
 
     it('should bundle the container entry point rather than a Lambda handler', async () => {
