@@ -65,14 +65,66 @@ describe('lambda runtime resolution', () => {
     });
 
     it('should compare majors numerically rather than as text', () => {
-      const { versions } = resolveLambdaRuntimes([
-        'nodejs9.x',
-        'nodejs100.x',
-        'python3.9',
-        'python3.100',
-      ]);
+      // No ceilings, so the comparison is what decides the result.
+      const { versions } = resolveLambdaRuntimes(
+        ['nodejs9.x', 'nodejs100.x', 'python3.9', 'python3.100'],
+        {},
+      );
 
       expect(versions).toEqual({ node: '100', python: '3.100' });
+    });
+  });
+
+  describe('holding a runtime below its ceiling', () => {
+    // `Runtime.ALL` lists runtimes that are not generally available: aws-cdk-lib
+    // 2.276.0 added `nodejs26.x` and `python3.15` ten days before Lambda made
+    // them GA. The ceiling decides in this repo when a runtime moves.
+    const CEILINGS = { node: { ceiling: '24', reason: 'the vended image' } };
+
+    it('should keep the pin when CDK lists a runtime above the ceiling', () => {
+      const { versions, unresolved } = resolveLambdaRuntimes(
+        ['nodejs26.x', 'python3.14'],
+        CEILINGS,
+      );
+
+      expect(versions.node).toBe(LAMBDA_RUNTIME_VERSIONS.node);
+      expect(unresolved).toEqual([
+        {
+          language: 'node',
+          kept: LAMBDA_RUNTIME_VERSIONS.node,
+          reason: 'held-below-ceiling',
+          detail: 'the vended image',
+        },
+      ]);
+    });
+
+    // Surfaced in the PR body, so a hold that has outlived its reason is visible
+    // without reading the resolver.
+    it('should warn with the reason the runtime is held', () => {
+      const { unresolved } = resolveLambdaRuntimes(['nodejs26.x'], CEILINGS);
+
+      expect(unresolvedRuntimeWarning(unresolved[0])).toContain(
+        'the vended image',
+      );
+      expect(unresolvedRuntimeWarning(unresolved[0])).toContain('node');
+    });
+
+    it('should still move a language with no ceiling', () => {
+      const { versions, unresolved } = resolveLambdaRuntimes(
+        ['nodejs26.x', 'python3.99'],
+        CEILINGS,
+      );
+
+      expect(versions.python).toBe('3.99');
+      expect(unresolved.map((entry) => entry.language)).toEqual(['node']);
+    });
+
+    it('should move up to the ceiling but no further', () => {
+      const { versions } = resolveLambdaRuntimes(['nodejs26.x'], {
+        node: { ceiling: '25', reason: 'tested no further' },
+      });
+
+      expect(versions.node).toBe('25');
     });
   });
 

@@ -8,7 +8,9 @@ import type { ProjectConfiguration } from '@nx/devkit';
 import { describe, expect, it } from 'vitest';
 import { addPythonBundleTarget } from './bundle/bundle.js';
 import { requiresPythonToRuffTarget } from './format.js';
+import { compareRuntimeVersions } from './lambda-runtime-resolution.js';
 import {
+  AGENT_CORE_RUNTIME_VERSIONS,
   cdkLambdaRuntime,
   LAMBDA_RUNTIME_VERSIONS,
   pyenvPythonVersion,
@@ -103,6 +105,43 @@ describe('vended lambda runtimes', () => {
     expect(commands.join('\n')).toContain(
       `--python-version ${LAMBDA_RUNTIME_VERSIONS.python}`,
     );
+  });
+
+  // The Python interpreter the arm64 bundle installs wheels for comes from the
+  // Lambda pin, and the same bundle is what an AgentCore code package ships. A
+  // Lambda pin ahead of AgentCore's newest Python therefore deploys cp3XX wheels
+  // to an older interpreter, which fails only once the agent runs.
+  it('should not target a python newer than the AgentCore runtime', () => {
+    expect(
+      compareRuntimeVersions(
+        LAMBDA_RUNTIME_VERSIONS.python,
+        AGENT_CORE_RUNTIME_VERSIONS.python,
+      ),
+    ).toBeLessThanOrEqual(0);
+  });
+
+  // A container-image function runs the interpreter its base image carries, not
+  // the managed runtime, and the tag is written in the Dockerfile. Left behind by
+  // a runtime bump, the image runs an interpreter the copied bundle was not
+  // built for.
+  it('should tag the vended lambda base images with the lambda runtimes', () => {
+    const expected: Record<string, string> = {
+      python: LAMBDA_RUNTIME_VERSIONS.python,
+      nodejs: LAMBDA_RUNTIME_VERSIONS.node,
+    };
+    const offenders: string[] = [];
+
+    for (const rel of templateFiles()) {
+      for (const [, language, tag] of read(rel).matchAll(
+        /public\.ecr\.aws\/lambda\/(python|nodejs):([\w.-]+)/g,
+      )) {
+        if (tag !== expected[language]) {
+          offenders.push(`${rel}: ${language}:${tag}`);
+        }
+      }
+    }
+
+    expect(offenders).toEqual([]);
   });
 
   // A `_LATEST` alias resolves against whatever `aws-cdk-lib` is pinned, so its

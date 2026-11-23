@@ -44,7 +44,48 @@ export const runtimeIdentifierVersion = (
 };
 
 /** Why a language's runtime could not be resolved. */
-export type UnresolvedReason = 'no-runtimes-listed';
+export type UnresolvedReason = 'no-runtimes-listed' | 'held-below-ceiling';
+
+/**
+ * Lambda runtimes deliberately kept below what `aws-cdk-lib` offers, and why.
+ *
+ * `Runtime.ALL` turned out not to be the generally-available list this
+ * resolution assumed: `aws-cdk-lib` added `python3.15` in 2.276.0 (2026-11-10)
+ * and `nodejs26.x` in 2.277.0 (2026-11-13), both while still in Lambda public
+ * preview, and they only reached general availability on 2026-11-20. So a
+ * ceiling is needed to decide in this repo when a runtime moves, rather than
+ * inheriting the decision from a dependency bump.
+ *
+ * Both entries are held on the same change, because moving either needs work no
+ * weekly bump does:
+ *
+ * - The Python interpreter the arm64 bundle installs wheels for comes from
+ *   {@link LAMBDA_RUNTIME_VERSIONS}.`python` (`bundle.ts`), and that same bundle
+ *   is what an AgentCore code package ships. AgentCore Runtime's newest Python
+ *   is 3.14, so a Lambda pin of 3.15 builds cp315 wheels for a cp314 runtime.
+ * - The vended Dockerfiles name their base image tag literally
+ *   (`public.ecr.aws/lambda/python:3.14`, `public.ecr.aws/lambda/nodejs:24`), so
+ *   a container-image function would keep running the old interpreter over a
+ *   bundle built for the new one.
+ *
+ * Lift a ceiling by raising it here in the same change that moves the vended
+ * base image tags, and, for Python, once `AgentCoreRuntime` publishes the
+ * matching member.
+ */
+export const LAMBDA_RUNTIME_CEILINGS: Partial<
+  Record<ILambdaRuntime, { readonly ceiling: string; readonly reason: string }>
+> = {
+  node: {
+    ceiling: '24',
+    reason:
+      'the vended TypeScript Dockerfile still names public.ecr.aws/lambda/nodejs:24',
+  },
+  python: {
+    ceiling: '3.14',
+    reason:
+      'AgentCore Runtime has no Python 3.15, and the AgentCore code package ships the Lambda-targeted bundle',
+  },
+};
 
 export interface RuntimeResolution {
   /** Runtime version per language, holding the current pin where unresolved. */
@@ -54,6 +95,8 @@ export interface RuntimeResolution {
     readonly language: string;
     readonly kept: string;
     readonly reason: UnresolvedReason;
+    /** For a held language, why it is held. */
+    readonly detail?: string;
   }[];
 }
 
@@ -61,17 +104,19 @@ export interface RuntimeResolution {
  * The latest managed runtime for each language in {@link LAMBDA_RUNTIME_VERSIONS},
  * from the runtime identifiers `aws-cdk-lib` publishes.
  *
- * `Runtime.ALL` is a curated list of the runtimes CDK supports, so a runtime still
- * in public preview does not appear — which is what makes it a usable source for a
- * generally-available runtime. Never moves a runtime backwards: a pin ahead of
- * what CDK offers stays.
+ * `Runtime.ALL` is a curated list of the runtimes CDK supports, but it is not
+ * limited to generally-available ones, so {@link LAMBDA_RUNTIME_CEILINGS} caps
+ * each language at the newest runtime this repo has vetted. Never moves a
+ * runtime backwards: a pin ahead of what CDK offers stays.
  *
- * A language the list says nothing about keeps its current pin and is reported
- * through `unresolved`, so a failure costs this bump alone rather than the whole
- * version update.
+ * A language the list says nothing about, or whose newest listed runtime is
+ * above its ceiling, keeps its current pin and is reported through `unresolved`,
+ * so a failure or a hold costs this bump alone rather than the whole version
+ * update.
  */
 export const resolveLambdaRuntimes = (
   identifiers: readonly string[],
+  ceilings: typeof LAMBDA_RUNTIME_CEILINGS = LAMBDA_RUNTIME_CEILINGS,
 ): RuntimeResolution => {
   const unresolved: RuntimeResolution['unresolved'][number][] = [];
 
@@ -97,6 +142,25 @@ export const resolveLambdaRuntimes = (
           compareRuntimeVersions(version, best) > 0 ? version : best,
         );
 
+        // Reported whenever the list offers something the ceiling refuses, so a
+        // hold that has outlived its reason is visible in every PR body rather
+        // than only in this file.
+        const held = ceilings[language];
+        if (held && compareRuntimeVersions(latest, held.ceiling) > 0) {
+          unresolved.push({
+            language,
+            kept: current,
+            reason: 'held-below-ceiling',
+            detail: held.reason,
+          });
+          return [
+            language,
+            compareRuntimeVersions(held.ceiling, current) > 0
+              ? held.ceiling
+              : current,
+          ];
+        }
+
         return [
           language,
           compareRuntimeVersions(latest, current) > 0 ? latest : current,
@@ -112,4 +176,6 @@ export const resolveLambdaRuntimes = (
 export const unresolvedRuntimeWarning = (
   entry: RuntimeResolution['unresolved'][number],
 ): string =>
-  `Found no ${entry.language} runtime in the aws-cdk-lib runtime list, so it keeps its pinned runtime (${entry.kept})`;
+  entry.reason === 'held-below-ceiling'
+    ? `Holding the ${entry.language} runtime at ${entry.kept} although aws-cdk-lib lists a newer one: ${entry.detail}`
+    : `Found no ${entry.language} runtime in the aws-cdk-lib runtime list, so it keeps its pinned runtime (${entry.kept})`;
