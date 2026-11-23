@@ -2,6 +2,8 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import type { Tree } from '@nx/devkit';
+import { applyGritQL } from './ast.js';
 
 /**
  * The GritQL rewrite the version update applies to move one entry of a versions
@@ -48,4 +50,31 @@ export const versionEntryRewrite = ({
 }: VersionEntryRewrite): string => {
   const key = isIdentifier(name) ? name : `'${name}'`;
   return `\`const ${constantName} = $entries\` where $entries <: contains \`${key}: '${oldVersion}'\` => \`${key}: '${newVersion}'\``;
+};
+
+/**
+ * Applies {@link versionEntryRewrite} to the versions file, and throws when the
+ * rewrite moved nothing.
+ *
+ * A GritQL pattern that matches nothing is not an error, so without this check a
+ * rewrite that found no entry left the file untouched while the caller had
+ * already recorded the bump for the PR body — a version the PR claims to have
+ * moved, in a file where it has not. The check is on the file text rather than on
+ * the constant's presence because both ways of missing produce that same lie: a
+ * constant renamed in `versions.ts` without the caller's name being updated, and
+ * a key or current version the constant does not hold.
+ */
+export const applyVersionEntryRewrite = async (
+  tree: Tree,
+  versionsFilePath: string,
+  entry: VersionEntryRewrite,
+): Promise<void> => {
+  const before = tree.read(versionsFilePath, 'utf-8');
+  await applyGritQL(tree, versionsFilePath, versionEntryRewrite(entry));
+
+  if (tree.read(versionsFilePath, 'utf-8') === before) {
+    throw new Error(
+      `Could not move ${entry.constantName}.${entry.name} from ${entry.oldVersion} to ${entry.newVersion}: the rewrite matched nothing in ${versionsFilePath}. Check that the constant is declared there and still holds that key at that version.`,
+    );
+  }
 };

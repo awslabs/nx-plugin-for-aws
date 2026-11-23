@@ -28,13 +28,12 @@ import {
   resolveAgentCoreRuntimes,
   unresolvedAgentCoreRuntimeWarning,
 } from '../packages/nx-plugin/src/utils/agent-core-runtime-resolution.js';
-import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
 import {
   type RuntimeResolution,
   resolveLambdaRuntimes,
   unresolvedRuntimeWarning,
 } from '../packages/nx-plugin/src/utils/lambda-runtime-resolution';
-import { versionEntryRewrite } from '../packages/nx-plugin/src/utils/version-entry-rewrite';
+import { applyVersionEntryRewrite } from '../packages/nx-plugin/src/utils/version-entry-rewrite';
 import {
   type DependencyLookup,
   memoizeLookup,
@@ -377,21 +376,18 @@ const applyUpdatedVersions = async (
     if (oldVersion !== newVersion) {
       changes.push({ name: depName, oldVersion, newVersion });
 
-      // Use GritQL to rewrite the property value, scoped to the constant the
-      // entry belongs to so a key another constant shares is left alone.
-      const pattern = versionEntryRewrite({
+      // Rewrite the property value scoped to the constant the entry belongs to,
+      // so a key another constant shares is left alone. A rewrite that moves
+      // nothing throws rather than warning: the change is already in `changes`,
+      // which is the PR body, so carrying on would report a bump the file does
+      // not have.
+      await applyVersionEntryRewrite(tree, versionsFilePath, {
         constantName: versionConstantName,
         name: depName,
         oldVersion,
         newVersion,
       });
-
-      try {
-        await applyGritQL(tree, versionsFilePath, pattern);
-        console.log(`Updated ${depName} to ${newVersion}`);
-      } catch (error) {
-        console.warn(`Could not update ${depName}:`, error);
-      }
+      console.log(`Updated ${depName} to ${newVersion}`);
     }
   }
 
@@ -455,11 +451,16 @@ const updateGitSecrets = async (
     'packages/nx-plugin/src/preset/git-secrets-files/git-secrets-dir/git-secrets';
   tree.write(vendoredPath, scriptContent);
 
-  // Update the version in versions.ts using GritQL
-  await applyGritQL(
+  // Update the version in versions.ts, scoped to the constant that holds it
+  await applyVersionEntryRewrite(
     tree,
     'packages/nx-plugin/src/utils/versions.ts',
-    `\`'git-secrets': '${currentVersion}'\` => \`'git-secrets': '${latestVersion}'\``,
+    {
+      constantName: 'VENDORED_VERSIONS',
+      name: 'git-secrets',
+      oldVersion: currentVersion,
+      newVersion: latestVersion,
+    },
   );
 
   return {

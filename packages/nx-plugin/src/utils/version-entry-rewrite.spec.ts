@@ -7,7 +7,10 @@ import type { Tree } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { applyGritQL } from './ast.js';
-import { versionEntryRewrite } from './version-entry-rewrite.js';
+import {
+  applyVersionEntryRewrite,
+  versionEntryRewrite,
+} from './version-entry-rewrite.js';
 
 /**
  * The declaration forms `versions.ts` uses, including the two runtime constants
@@ -99,8 +102,9 @@ describe('version entry rewrite', () => {
     expect(updated).toContain("minimatch: '11.0.9'");
   });
 
-  // A constant the file does not hold must change nothing, so a rename shows up
-  // as a version that stopped moving rather than as an edit somewhere else.
+  // A rewrite that matches nothing is not a GritQL error, so the pattern alone
+  // leaves the file untouched; `applyVersionEntryRewrite` is what turns that
+  // into a failure.
   it('should change nothing when the constant is not in the file', async () => {
     const updated = await rewrite(
       versionEntryRewrite({
@@ -112,5 +116,51 @@ describe('version entry rewrite', () => {
     );
 
     expect(updated).toBe(VERSIONS_FILE);
+  });
+
+  describe('applied to the versions file', () => {
+    it('should write the new version of a matching entry', async () => {
+      await applyVersionEntryRewrite(tree, 'versions.ts', {
+        constantName: 'LAMBDA_RUNTIME_VERSIONS',
+        name: 'python',
+        oldVersion: '3.14',
+        newVersion: '3.15',
+      });
+
+      expect(tree.read('versions.ts', 'utf-8')).toContain(
+        "node: '24',\n  python: '3.15',",
+      );
+    });
+
+    // Without this the caller records the bump for the PR body and nothing
+    // writes it, so the PR claims a version the file does not hold. A constant
+    // renamed in `versions.ts` is how that happens.
+    it('should throw when the constant is not in the file', async () => {
+      await expect(
+        applyVersionEntryRewrite(tree, 'versions.ts', {
+          constantName: 'NOT_A_CONSTANT',
+          name: 'python',
+          oldVersion: '3.14',
+          newVersion: '3.15',
+        }),
+      ).rejects.toThrow('NOT_A_CONSTANT.python');
+
+      expect(tree.read('versions.ts', 'utf-8')).toBe(VERSIONS_FILE);
+    });
+
+    // The other way of matching nothing: the constant is there, but not at the
+    // version the caller read.
+    it('should throw when the entry is not at the version it names', async () => {
+      await expect(
+        applyVersionEntryRewrite(tree, 'versions.ts', {
+          constantName: 'LAMBDA_RUNTIME_VERSIONS',
+          name: 'python',
+          oldVersion: '3.12',
+          newVersion: '3.15',
+        }),
+      ).rejects.toThrow('LAMBDA_RUNTIME_VERSIONS.python');
+
+      expect(tree.read('versions.ts', 'utf-8')).toBe(VERSIONS_FILE);
+    });
   });
 });
