@@ -3,7 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import conventional from '@commitlint/config-conventional';
 import { execSync } from 'child_process';
+import fastGlob from 'fast-glob';
 import {
   cpSync,
   mkdirSync,
@@ -20,38 +22,19 @@ import {
   parsePipRequirementsLine,
   VersionOperator,
 } from 'pip-requirements-js';
-import fastGlob from 'fast-glob';
 import { parseDocument } from 'yaml';
-import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
-import conventional from '@commitlint/config-conventional';
 import commitlintConfig from '../commitlint.config.js';
 import {
   resolveAgentCoreRuntimes,
   unresolvedAgentCoreRuntimeWarning,
 } from '../packages/nx-plugin/src/utils/agent-core-runtime-resolution.js';
+import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
 import {
   type RuntimeResolution,
   resolveLambdaRuntimes,
   unresolvedRuntimeWarning,
 } from '../packages/nx-plugin/src/utils/lambda-runtime-resolution';
-import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-migration/nx-package-updates';
-import { registerNxPackageUpdates } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
-import {
-  AGENT_CORE_RUNTIME_VERSIONS,
-  EXACT_DEPENDENCY_PINS,
-  type IJavaVersion,
-  type IMiseVersion,
-  JAVA_ARTIFACTS,
-  JAVA_VERSIONS,
-  LAMBDA_RUNTIME_VERSIONS,
-  LOCKSTEP_GROUPS,
-  MISE_TOOLS,
-  MISE_VERSIONS,
-  PY_VERSIONS,
-  TERRAFORM_VERSIONS,
-  TS_VERSIONS,
-  VENDORED_VERSIONS,
-} from '../packages/nx-plugin/src/utils/versions';
+import { versionEntryRewrite } from '../packages/nx-plugin/src/utils/version-entry-rewrite';
 import {
   type DependencyLookup,
   memoizeLookup,
@@ -71,6 +54,24 @@ import {
   type ReportChange,
   type VersionChange,
 } from '../packages/nx-plugin/src/utils/version-lockstep/report';
+import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-migration/nx-package-updates';
+import { registerNxPackageUpdates } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
+import {
+  AGENT_CORE_RUNTIME_VERSIONS,
+  EXACT_DEPENDENCY_PINS,
+  type IJavaVersion,
+  type IMiseVersion,
+  JAVA_ARTIFACTS,
+  JAVA_VERSIONS,
+  LAMBDA_RUNTIME_VERSIONS,
+  LOCKSTEP_GROUPS,
+  MISE_TOOLS,
+  MISE_VERSIONS,
+  PY_VERSIONS,
+  TERRAFORM_VERSIONS,
+  TS_VERSIONS,
+  VENDORED_VERSIONS,
+} from '../packages/nx-plugin/src/utils/versions';
 import { refreshShadcnTemplates } from './update-versions/shadcn';
 
 /**
@@ -273,7 +274,6 @@ const getUpdatedPythonVersions = (tmpDir: string): Record<string, string> => {
   return updatedVersions;
 };
 
-
 /**
  * Compares two `major.minor.patch` version strings.
  * @returns positive if a > b, negative if a < b, zero if equal
@@ -364,7 +364,7 @@ const applyUpdatedVersions = async (
   currentVersions: Record<string, string>,
   updatedVersions: Record<string, string>,
   versionsFilePath: string,
-  _versionConstantName: string,
+  versionConstantName: string,
 ): Promise<VersionChange[]> => {
   const changes: VersionChange[] = [];
 
@@ -377,13 +377,14 @@ const applyUpdatedVersions = async (
     if (oldVersion !== newVersion) {
       changes.push({ name: depName, oldVersion, newVersion });
 
-      // Use GritQL to rewrite the property value.
-      // Keys are either bare identifiers (e.g. boto3) or string literals (e.g. '@aws-sdk/client-dynamodb')
-      // depending on whether the name is a valid JS identifier.
-      const isIdentifier = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(depName);
-      const pattern = isIdentifier
-        ? `\`${depName}: '${oldVersion}'\` => \`${depName}: '${newVersion}'\``
-        : `\`'${depName}': '${oldVersion}'\` => \`'${depName}': '${newVersion}'\``;
+      // Use GritQL to rewrite the property value, scoped to the constant the
+      // entry belongs to so a key another constant shares is left alone.
+      const pattern = versionEntryRewrite({
+        constantName: versionConstantName,
+        name: depName,
+        oldVersion,
+        newVersion,
+      });
 
       try {
         await applyGritQL(tree, versionsFilePath, pattern);
