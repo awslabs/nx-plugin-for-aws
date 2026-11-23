@@ -29,10 +29,10 @@ import {
   unresolvedAgentCoreRuntimeWarning,
 } from '../packages/nx-plugin/src/utils/agent-core-runtime-resolution.js';
 import {
-  type RuntimeResolution,
   resolveLambdaRuntimes,
   unresolvedRuntimeWarning,
 } from '../packages/nx-plugin/src/utils/lambda-runtime-resolution';
+import type { RuntimeResolution } from '../packages/nx-plugin/src/utils/runtime-resolution.js';
 import { applyVersionEntryRewrite } from '../packages/nx-plugin/src/utils/version-entry-rewrite';
 import {
   type DependencyLookup,

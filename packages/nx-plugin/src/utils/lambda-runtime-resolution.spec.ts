@@ -4,12 +4,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  compareRuntimeVersions,
   LAMBDA_RUNTIME_CEILINGS,
   resolveLambdaRuntimes,
   runtimeIdentifierVersion,
   unresolvedRuntimeWarning,
 } from './lambda-runtime-resolution.js';
+import { compareRuntimeVersions } from './runtime-resolution.js';
 import { type ILambdaRuntime, LAMBDA_RUNTIME_VERSIONS } from './versions.js';
 
 /** A slice of `Runtime.ALL` names, as `aws-cdk-lib` publishes them. */
@@ -132,17 +132,9 @@ describe('lambda runtime resolution', () => {
       expect(unresolved.map((entry) => entry.language)).toEqual(['node']);
     });
 
-    it('should move up to the ceiling but no further', () => {
-      const { versions } = resolveLambdaRuntimes(['nodejs26.x'], {
-        node: {
-          ceiling: '25',
-          reason: 'tested no further',
-          liftWhen: '26 is tested',
-        },
-      });
-
-      expect(versions.node).toBe('25');
-    });
+    // A ceiling above the pin, and the version a held note names, are covered in
+    // `runtime-resolution.spec.ts`, where the pins are a fixture rather than the
+    // live ones this resolver reads.
 
     // A ceiling below the pin it caps does nothing, because the hold never moves
     // a runtime backwards: the pin stays and only the hold warning appears. Such
