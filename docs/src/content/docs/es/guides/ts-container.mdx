@@ -129,7 +129,7 @@ El servidor también tiene una ruta de ejemplo que reemplazas con tus propias ru
 
 ## Construir y Escanear la Imagen
 
-El target `<name>-docker` construye una imagen linux/arm64 de tu servicio. Ejecuta primero el target `bundle`, por lo que la imagen contiene el servidor empaquetado. Luego copia el `Dockerfile` y `.dockerignore` en la carpeta de salida del bundle, `dist/<project root>/bundle/container/<name>`, y construye la imagen con esa carpeta como contexto de construcción (los archivos que la construcción de la imagen puede leer). Usa el motor de contenedores con el que tu workspace está configurado, `docker` o [Finch](https://runfinch.com/). El target se ejecuta como parte del target agregado `docker`, que construye cada imagen en el proyecto.
+El target `<name>-docker` construye una imagen de tu servicio para la arquitectura de CPU en la opción `architecture`, `linux/arm64` o `linux/amd64`. Ejecuta primero el target `bundle`, por lo que la imagen contiene el servidor empaquetado. Luego copia el `Dockerfile` y `.dockerignore` en la carpeta de salida del bundle, `dist/<project root>/bundle/container/<name>`, y construye la imagen con esa carpeta como contexto de construcción (los archivos que la construcción de la imagen puede leer). Usa el motor de contenedores con el que tu workspace está configurado, `docker` o [Finch](https://runfinch.com/). El target se ejecuta como parte del target agregado `docker`, que construye cada imagen en el proyecto.
 
 <NxCommands commands={['run your-project:container-docker']} />
 
@@ -361,6 +361,31 @@ secrets     = { API_KEY = aws_secretsmanager_secret.api_key.arn }
 
 </Fragment>
 </Infrastructure>
+
+#### Arquitectura de CPU
+
+La opción `architecture` establece la CPU en la que se ejecutan las tareas y la plataforma para la que se construye la imagen: `ARM64` o `X86_64`. ARM64 se ejecuta en procesadores [AWS Graviton](https://aws.amazon.com/ec2/graviton/), que AWS Fargate factura a una tarifa más baja por vCPU y por GB de memoria que X86_64. Consulta [Precios de AWS Fargate](https://aws.amazon.com/fargate/pricing/) para las tarifas en tu región.
+
+Omite la opción y el generador usa la arquitectura de la máquina en la que lo ejecutas, por lo que `nx run your-project:container-docker` construye de forma nativa y no necesita emulador. Volver a ejecutar el generador mantiene la arquitectura que generó la primera vez, sin importar en qué máquina lo vuelvas a ejecutar, porque esa arquitectura ya está en tu definición de tarea desplegada.
+
+La arquitectura se fija cuando el servicio se genera por primera vez. El generador nunca reescribe la infraestructura que proporcionó, por lo que mover un servicio existente a la otra arquitectura requiere dos pasos:
+
+1. Cambia la arquitectura en el código proporcionado. En CDK, la línea `architecture:` en `packages/common/constructs/src/app/services/<name>.ts`. En Terraform, `cpu_architecture` en el bloque `module "ecs_service"` de `packages/common/terraform/src/app/services/<name>/<name>.tf`.
+2. Vuelve a ejecutar el generador con `--architecture` establecido en el mismo valor, para que el target `<name>-docker` construya para él.
+
+Luego vuelve a desplegar. Si pasas una arquitectura que difiere de la que el generador registró, advierte y nombra el archivo que tienes que cambiar.
+
+Hacer el paso 2 y olvidar el paso 1 falla de manera diferente por proveedor, y ninguna falla es ruidosa. En Terraform, la definición de tarea mantiene la arquitectura antigua mientras que la imagen que Terraform empuja tiene la nueva, por lo que la tarea no se inicia. En CDK, la imagen desplegada se construye desde el constructo proporcionado, por lo que el servicio sigue ejecutándose en la arquitectura antigua y la imagen que construiste y escaneaste localmente es la otra, que nunca se despliega.
+
+`architecture` también es una prop del constructo de servicio proporcionado, por lo que un stack puede pasar una diferente para una sola instanciación. Eso cambia lo que se despliega pero no lo que construyen los targets `<name>-docker` y `<name>-trivy`, así que mantén los dos sincronizados tú mismo.
+
+Construir una imagen ARM64 en una máquina x86_64, o una imagen X86_64 en una máquina arm64, falla con `exec format error` a menos que instales un emulador. El generador te advierte cuando la arquitectura que está a punto de generar no es la que ejecuta tu máquina. Consulta <Link path="/troubleshooting/docker">Solución de Problemas de Docker</Link>.
+
+| Configuración | Prop CDK | Variable Terraform | Predeterminado |
+| --- | --- | --- | --- |
+| Arquitectura de CPU | `architecture` | `cpu_architecture` | `'ARM64'` |
+
+El generador escribe la arquitectura que eligió en el constructo y módulo de tu servicio, por lo que ese valor predeterminado se aplica solo cuando usas el constructo genérico `EcsService` o el módulo `ecs-service` tú mismo.
 
 #### Dimensionamiento y Escalado
 

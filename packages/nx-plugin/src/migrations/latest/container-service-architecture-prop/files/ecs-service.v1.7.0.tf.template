@@ -1,0 +1,395 @@
+# Reusable ECS service module: an AWS Fargate service in an existing VPC, with no load balancer and no inbound rule.
+
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "<%- awsProviderVersion %>"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "<%- randomProviderVersion %>"
+    }
+  }
+}
+
+data "aws_region" "current" {}
+
+data "aws_caller_identity" "current" {}
+
+data "aws_partition" "current" {}
+
+resource "random_id" "suffix" {
+  byte_length = 4
+}
+
+locals {
+  name           = "${var.service_name}-${random_id.suffix.hex}"
+  partition      = data.aws_partition.current.partition
+  region         = data.aws_region.current.region
+  account_id     = data.aws_caller_identity.current.account_id
+  create_cluster = var.cluster_arn == null
+  cluster_arn    = local.create_cluster ? aws_ecs_cluster.this[0].arn : var.cluster_arn
+  cluster_name   = element(split("/", local.cluster_arn), 1)
+  container_name = "app"
+
+  log_group_name = "/aws/ecs/${local.name}"
+
+  # ECS Container Insights writes performance events to this log group.
+  container_insights_log_group_name = "/aws/ecs/containerinsights/${local.name}/performance"
+
+  ssm_secret_arns = distinct([
+    for arn in values(var.secrets) : arn if can(regex("^arn:[^:]+:ssm:", arn))
+  ])
+  secretsmanager_secret_arns = distinct([
+    for arn in values(var.secrets) : join(":", slice(split(":", arn), 0, min(7, length(split(":", arn)))))
+    if !can(regex("^arn:[^:]+:ssm:", arn))
+  ])
+
+  container_health_check = var.health_check_command == null ? {} : {
+    healthCheck = {
+      command     = var.health_check_command
+      interval    = 30
+      timeout     = 5
+      retries     = 3
+      startPeriod = 30
+    }
+  }
+}
+
+resource "aws_kms_key" "logs" {
+  description             = "Encrypts the ${local.name} service log groups"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "EnableIamUserPermissions"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:${local.partition}:iam::${local.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowCloudWatchLogs"
+        Effect = "Allow"
+        Principal = {
+          Service = "logs.${local.region}.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnLike = {
+            "kms:EncryptionContext:aws:logs:arn" = [
+              "arn:${local.partition}:logs:${local.region}:${local.account_id}:log-group:${local.log_group_name}",
+              "arn:${local.partition}:logs:${local.region}:${local.account_id}:log-group:${local.container_insights_log_group_name}"
+            ]
+          }
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_cloudwatch_log_group" "service" {
+  name              = local.log_group_name
+  retention_in_days = var.log_retention_days
+  kms_key_id        = aws_kms_key.logs.arn
+
+  tags = var.tags
+}
+
+# Created before the cluster so that ECS writes to it, and destroy removes it.
+resource "aws_cloudwatch_log_group" "container_insights" {
+  count = local.create_cluster ? 1 : 0
+
+  name              = local.container_insights_log_group_name
+  retention_in_days = var.log_retention_days
+  kms_key_id        = aws_kms_key.logs.arn
+
+  tags = var.tags
+}
+
+resource "aws_ecs_cluster" "this" {
+  count = local.create_cluster ? 1 : 0
+
+  name = local.name
+
+  setting {
+    name  = "containerInsights"
+    value = "enabled"
+  }
+
+  tags = var.tags
+
+  depends_on = [aws_cloudwatch_log_group.container_insights]
+}
+
+resource "aws_iam_role" "execution" {
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.account_id
+          }
+          ArnLike = {
+            "aws:SourceArn" = "arn:${local.partition}:ecs:${local.region}:${local.account_id}:*"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy" "execution" {
+  name = "ExecutionPolicy"
+  role = aws_iam_role.execution.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = concat(
+      [
+        {
+          Sid      = "ServiceLogs"
+          Effect   = "Allow"
+          Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+          Resource = ["${aws_cloudwatch_log_group.service.arn}:*"]
+        },
+      ],
+      var.image_repository_arn == null ? [] : [
+        {
+          Sid    = "EcrImagePull"
+          Effect = "Allow"
+          Action = [
+            "ecr:BatchGetImage",
+            "ecr:GetDownloadUrlForLayer",
+            "ecr:BatchCheckLayerAvailability",
+          ]
+          Resource = [var.image_repository_arn]
+        },
+        {
+          #checkov:skip=CKV_AWS_355:EcrImageToken requires a wildcard resource; ecr:GetAuthorizationToken has no resource-level permission
+          Sid      = "EcrImageToken"
+          Effect   = "Allow"
+          Action   = ["ecr:GetAuthorizationToken"]
+          Resource = ["*"]
+        },
+      ],
+      length(local.ssm_secret_arns) == 0 ? [] : [
+        {
+          Sid      = "SsmSecrets"
+          Effect   = "Allow"
+          Action   = ["ssm:GetParameters"]
+          Resource = local.ssm_secret_arns
+        },
+      ],
+      length(local.secretsmanager_secret_arns) == 0 ? [] : [
+        {
+          Sid      = "SecretsManagerSecrets"
+          Effect   = "Allow"
+          Action   = ["secretsmanager:GetSecretValue"]
+          Resource = local.secretsmanager_secret_arns
+        },
+      ],
+    )
+  })
+}
+
+resource "aws_iam_role" "task" {
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.account_id
+          }
+          ArnLike = {
+            "aws:SourceArn" = "arn:${local.partition}:ecs:${local.region}:${local.account_id}:*"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy" "task" {
+  count = length(var.task_role_policy_statements) > 0 ? 1 : 0
+
+  name = "TaskPolicy"
+  role = aws_iam_role.task.id
+
+  policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = var.task_role_policy_statements
+  })
+}
+
+resource "aws_ecs_task_definition" "this" {
+  family                   = local.name
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = var.cpu
+  memory                   = var.memory
+  execution_role_arn       = aws_iam_role.execution.arn
+  task_role_arn            = aws_iam_role.task.arn
+
+  runtime_platform {
+    cpu_architecture        = "ARM64"
+    operating_system_family = "LINUX"
+  }
+
+  volume {
+    name = "tmp"
+  }
+
+  container_definitions = jsonencode([
+    merge({
+      name                   = local.container_name
+      image                  = var.image_uri
+      essential              = true
+      readonlyRootFilesystem = true
+      user                   = var.container_user
+      portMappings = [
+        {
+          containerPort = var.container_port
+          protocol      = "tcp"
+        }
+      ]
+      environment = [
+        for key, value in merge(var.environment, { PORT = tostring(var.container_port) }) : {
+          name  = key
+          value = value
+        }
+      ]
+      secrets = [
+        for key, value in var.secrets : {
+          name      = key
+          valueFrom = value
+        }
+      ]
+      mountPoints = [
+        {
+          sourceVolume  = "tmp"
+          containerPath = "/tmp"
+          readOnly      = false
+        }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.service.name
+          "awslogs-region"        = local.region
+          "awslogs-stream-prefix" = "service"
+        }
+      }
+    }, local.container_health_check)
+  ])
+
+  tags = var.tags
+}
+
+resource "aws_security_group" "service" {
+  name_prefix = "${substr(local.name, 0, 40)}-service-"
+  description = "Tasks of the ${local.name} service"
+  vpc_id      = var.vpc_id
+
+  tags = merge(var.tags, {
+    Name = "${local.name}-service"
+  })
+}
+
+resource "aws_vpc_security_group_egress_rule" "service_https" {
+  security_group_id = aws_security_group.service.id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+  description       = "Allow outbound HTTPS to AWS service endpoints"
+}
+
+resource "aws_ecs_service" "this" {
+  name                   = local.name
+  cluster                = local.cluster_arn
+  task_definition        = aws_ecs_task_definition.this.arn
+  launch_type            = "FARGATE"
+  platform_version       = "LATEST"
+  desired_count          = var.desired_count
+  enable_execute_command = false
+  propagate_tags         = "SERVICE"
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  network_configuration {
+    subnets          = var.subnet_ids
+    security_groups  = [aws_security_group.service.id]
+    assign_public_ip = false
+  }
+
+  lifecycle {
+    ignore_changes = [desired_count]
+  }
+
+  tags = var.tags
+
+  depends_on = [aws_iam_role_policy.execution]
+}
+
+resource "aws_appautoscaling_target" "this" {
+  service_namespace  = "ecs"
+  scalable_dimension = "ecs:service:DesiredCount"
+  resource_id        = "service/${local.cluster_name}/${aws_ecs_service.this.name}"
+  min_capacity       = var.min_capacity
+  max_capacity       = var.max_capacity
+
+  tags = var.tags
+}
+
+resource "aws_appautoscaling_policy" "cpu" {
+  name               = "${local.name}-cpu"
+  policy_type        = "TargetTrackingScaling"
+  service_namespace  = aws_appautoscaling_target.this.service_namespace
+  scalable_dimension = aws_appautoscaling_target.this.scalable_dimension
+  resource_id        = aws_appautoscaling_target.this.resource_id
+
+  target_tracking_scaling_policy_configuration {
+    target_value = var.target_cpu_utilization
+
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageCPUUtilization"
+    }
+  }
+}
