@@ -57,10 +57,10 @@ Pythonプロジェクトにコンテナサービスを追加するには、2つ�
         - Dockerfile コンテナイメージの定義
         - .dockerignore イメージビルドコンテキストから除外されるファイル
     - pyproject.toml FastAPIとuvicorn依存関係で更新
-    - project.json `bundle-arm`と`bundle`ターゲット、およびサービス用の`<name>-serve`、`<name>-docker`、`<name>-trivy`ターゲットで更新
+    - project.json サービスのCPUアーキテクチャ用のバンドルターゲット（`bundle-arm`または`bundle-x86`）、集約`bundle`ターゲット、およびサービス用の`<name>-serve`、`<name>-docker`、`<name>-trivy`ターゲットで更新
 </FileTree>
 
-ターゲット名は`name`オプションで始まるか、省略した場合は`container`で始まります。例えば、名前なしの場合、ターゲットは`container-serve`、`container-docker`、`container-trivy`となり、`--name=orders`の場合は`orders-serve`、`orders-docker`、`orders-trivy`となります。`bundle-arm`と`bundle`ターゲットは、プロジェクトがバンドルするすべてのもので共有されます。
+ターゲット名は`name`オプションで始まるか、省略した場合は`container`で始まります。例えば、名前なしの場合、ターゲットは`container-serve`、`container-docker`、`container-trivy`となり、`--name=orders`の場合は`orders-serve`、`orders-docker`、`orders-trivy`となります。バンドルターゲットは、プロジェクトがバンドルするすべてのもので共有されます。
 
 <OptionFilter when={{ infra: 'ecs' }} description="ECSサービスインフラストラクチャ">
 ### インフラストラクチャ
@@ -129,7 +129,7 @@ curl http://localhost:<port>/health
 
 ## イメージのビルドとスキャン
 
-`<name>-docker`ターゲットは、サービスのlinux/arm64イメージをビルドします。最初に`bundle-arm`ターゲットを実行し、コードとlinux/arm64依存関係を`dist/<project root>/bundle-arm`に書き込みます。集約`bundle`ターゲットは`bundle-arm`に依存します。次に、`<name>-docker`ターゲットは、そのフォルダー、`Dockerfile`、`.dockerignore`を`dist/<project root>/docker/<name>`にコピーし、そのフォルダーをビルドコンテキスト（イメージビルドが読み取れるファイル）としてイメージをビルドします。ワークスペースが設定されているコンテナエンジン、`docker`または[Finch](https://runfinch.com/)を使用します。ターゲットは、プロジェクト内のすべてのイメージをビルドする集約`docker`ターゲットの一部として実行されます。
+`<name>-docker`ターゲットは、`architecture`オプションのCPUアーキテクチャ用のサービスのイメージをビルドします（`linux/arm64`または`linux/amd64`）。最初に一致するバンドルターゲット（`bundle-arm`または`bundle-x86`）を実行し、そのアーキテクチャ用のコードと依存関係を`dist/<project root>/bundle-arm`または`dist/<project root>/bundle-x86`に書き込みます。集約`bundle`ターゲットはそれに依存します。次に、`<name>-docker`ターゲットは、そのフォルダー、`Dockerfile`、`.dockerignore`を`dist/<project root>/docker/<name>`にコピーし、そのフォルダーをビルドコンテキスト（イメージビルドが読み取れるファイル）としてイメージをビルドします。ワークスペースが設定されているコンテナエンジン、`docker`または[Finch](https://runfinch.com/)を使用します。ターゲットは、プロジェクト内のすべてのイメージをビルドする集約`docker`ターゲットの一部として実行されます。
 
 <NxCommands commands={['run your-project:container-docker']} />
 
@@ -362,6 +362,33 @@ secrets     = { API_KEY = aws_secretsmanager_secret.api_key.arn }
 </Fragment>
 </Infrastructure>
 
+#### CPUアーキテクチャ
+
+`architecture`オプションは、タスクが実行されるCPU、イメージがビルドされるプラットフォーム、およびバンドルがPythonホイールを解決するプラットフォームを設定します：`ARM64`または`X86_64`。ARM64は[AWS Graviton](https://aws.amazon.com/ec2/graviton/)プロセッサ上で実行され、AWS FargateはX86_64よりもvCPUあたりおよびメモリのGBあたりの料金が低くなります。リージョンの料金については、[AWS Fargate pricing](https://aws.amazon.com/fargate/pricing/)を参照してください。
+
+オプションを省略すると、ジェネレーターは実行するマシンのアーキテクチャを使用するため、`nx run your-project:container-docker`はネイティブにビルドされ、エミュレーターは必要ありません。ジェネレーターを再実行すると、最初に生成したアーキテクチャが保持されます。どのマシンで再実行しても、そのアーキテクチャはすでにデプロイされたタスク定義とバンドルターゲットの名前に含まれているためです。
+
+アーキテクチャは、サービスが最初に生成されたときに固定されます。ジェネレーターは生成したインフラストラクチャを書き換えないため、既存のサービスを別のアーキテクチャに移動するには2つのステップが必要です：
+
+1. 生成されたコードでアーキテクチャを変更します。CDKでは、`packages/common/constructs/src/app/services/<name>.ts`の`architecture:`行。Terraformでは、`packages/common/terraform/src/app/services/<name>/<name>.tf`の`module "ecs_service"`ブロックの`cpu_architecture`。
+2. `--architecture`を同じ値に設定してジェネレーターを再実行し、`<name>-docker`ターゲットがそれ用にビルドし、バンドルがそれ用にホイールを解決するようにします。
+
+その後、再デプロイします。ジェネレーターが記録したものと異なるアーキテクチャを渡すと、警告が表示され、変更する必要があるファイルが示されます。
+
+ステップ2を実行してステップ1を忘れると、プロバイダーごとに異なる失敗が発生し、どちらの失敗も大きくありません。Terraformでは、タスク定義は古いアーキテクチャを保持し、Terraformがプッシュするイメージは新しいアーキテクチャを持つため、タスクは起動しません。CDKでは、デプロイされたイメージは生成されたコンストラクトからビルドされるため、古いアーキテクチャを持ちますが、その中のバンドルは要求したアーキテクチャ用のホイールを保持します：コンテナは最初のコンパイル済みインポートでクラッシュします。
+
+切り替えると、以前のアーキテクチャのバンドルターゲットも残ります。これは、バンドルターゲットがそのプラットフォーム用にバンドルするプロジェクト内のすべてのもので共有されているためです。警告がそれを示します。他に何も使用していない場合は削除してください。
+
+`architecture`は生成されたサービスコンストラクトのプロパティでもあるため、スタックは単一のインスタンス化に対して異なるものを渡すことができます。これはデプロイされるものを変更しますが、`<name>-docker`および`<name>-trivy`ターゲットがビルドするものは変更しないため、2つを自分で同期させてください。
+
+x86_64マシンでARM64イメージをビルドする、またはarm64マシンでX86_64イメージをビルドすると、エミュレーターをインストールしない限り`exec format error`で失敗します。ジェネレーターは、生成しようとしているアーキテクチャがマシンが実行しているものでない場合に警告します。<Link path="/troubleshooting/docker">Troubleshooting Docker</Link>を参照してください。
+
+| 設定 | CDKプロパティ | Terraform変数 | デフォルト |
+| --- | --- | --- | --- |
+| CPUアーキテクチャ | `architecture` | `cpu_architecture` | `'ARM64'` |
+
+ジェネレーターは選択したアーキテクチャをサービスのコンストラクトとモジュールに書き込むため、このデフォルトは汎用の`EcsService`コンストラクトまたは`ecs-service`モジュールを自分で使用する場合にのみ適用されます。
+
 #### サイジングとスケーリング
 
 各タスクは、デフォルトで256 CPUユニット（vCPUの4分の1）と512 MiBのメモリを取得します。サービスは1つのタスクを開始し、オートスケーリングは1つから2つのタスクを実行し続け、平均CPU使用率が70%を超えるとタスクを追加します。
@@ -440,7 +467,7 @@ Terraformでは、`container_user`は`ecs-service`モジュールの変数です
 </Fragment>
 </Infrastructure>
 
-次に、AWSコンソールまたはAWS CLIで、ECSサービスとクラスターがなくなったことを確認します。CDKとTerraformの両方で、destroyはサービスのロググループを削除し、AWS KMSキーの削除をスケジュールするため、サービスの何も残りません。KMSがキーを削除する前の待機期間は、CDKでは30日、Terraformでは7日です。イメージはAmazon ECRに残り、CDKアセットリポジトリまたは共有`asset-ecr`リポジトリにあります。不要になった場合は削除してください。VPCはあなたのものなので、サービスを破棄してもそのまま残ります。
+次に、AWSコンソールまたはAWS CLIで、ECSサービスとクラスターがなくなったことを確認します。CDKとTerraformの両方で、destroyはサービスのロググループを削除し、AWS KMSキーの削除をスケジュールします。KMSは、キーを削除する前に7日間待機します。イメージはAmazon ECRに残り、CDKアセットリポジトリまたは共有`asset-ecr`リポジトリにあります。不要になった場合は削除してください。VPCはあなたのものなので、サービスを破棄してもそのまま残ります。
 </OptionFilter>
 
 ## サービスの接続

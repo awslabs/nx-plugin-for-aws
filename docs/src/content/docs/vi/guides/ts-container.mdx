@@ -129,7 +129,7 @@ Server cũng có một route mẫu mà bạn thay thế bằng các route của 
 
 ## Build và Quét Image
 
-Target `<name>-docker` build một linux/arm64 image của dịch vụ của bạn. Nó chạy target `bundle` trước, vì vậy image chứa server đã được bundle. Sau đó nó sao chép `Dockerfile` và `.dockerignore` vào thư mục đầu ra bundle, `dist/<project root>/bundle/container/<name>`, và build image với thư mục đó làm build context (các file mà image build có thể đọc). Nó sử dụng container engine mà workspace của bạn được thiết lập, `docker` hoặc [Finch](https://runfinch.com/). Target chạy như một phần của target tổng hợp `docker`, build mọi image trong dự án.
+Target `<name>-docker` build một image của dịch vụ của bạn cho kiến trúc CPU trong tùy chọn `architecture`, `linux/arm64` hoặc `linux/amd64`. Nó chạy target `bundle` trước, vì vậy image chứa server đã được bundle. Sau đó nó sao chép `Dockerfile` và `.dockerignore` vào thư mục đầu ra bundle, `dist/<project root>/bundle/container/<name>`, và build image với thư mục đó làm build context (các file mà image build có thể đọc). Nó sử dụng container engine mà workspace của bạn được thiết lập, `docker` hoặc [Finch](https://runfinch.com/). Target chạy như một phần của target tổng hợp `docker`, build mọi image trong dự án.
 
 <NxCommands commands={['run your-project:container-docker']} />
 
@@ -362,6 +362,31 @@ secrets     = { API_KEY = aws_secretsmanager_secret.api_key.arn }
 </Fragment>
 </Infrastructure>
 
+#### Kiến trúc CPU
+
+Tùy chọn `architecture` đặt CPU mà các task chạy trên đó và nền tảng mà image được build cho: `ARM64` hoặc `X86_64`. ARM64 chạy trên bộ xử lý [AWS Graviton](https://aws.amazon.com/ec2/graviton/), mà AWS Fargate tính phí ở mức thấp hơn cho mỗi vCPU và mỗi GB bộ nhớ so với X86_64. Xem [AWS Fargate pricing](https://aws.amazon.com/fargate/pricing/) để biết mức giá trong Region của bạn.
+
+Bỏ qua tùy chọn và generator sẽ sử dụng kiến trúc của máy bạn chạy nó, vì vậy `nx run your-project:container-docker` build một cách native và không cần emulator. Chạy lại generator sẽ giữ kiến trúc mà nó đã tạo lần đầu tiên, bất kể máy nào bạn chạy lại nó, vì kiến trúc đó đã có trong task definition đã triển khai của bạn.
+
+Kiến trúc được cố định khi dịch vụ được tạo lần đầu tiên. Generator không bao giờ viết lại infrastructure mà nó đã tạo, vì vậy việc chuyển một dịch vụ hiện có sang kiến trúc khác cần hai bước:
+
+1. Thay đổi kiến trúc trong mã đã được tạo. Trong CDK, dòng `architecture:` trong `packages/common/constructs/src/app/services/<name>.ts`. Trong Terraform, `cpu_architecture` trong block `module "ecs_service"` của `packages/common/terraform/src/app/services/<name>/<name>.tf`.
+2. Chạy lại generator với `--architecture` được đặt thành cùng giá trị, để target `<name>-docker` build cho nó.
+
+Sau đó triển khai lại. Nếu bạn truyền một kiến trúc khác với kiến trúc mà generator đã ghi lại, nó sẽ cảnh báo và nêu tên file bạn phải thay đổi.
+
+Thực hiện bước 2 và quên bước 1 sẽ thất bại khác nhau cho mỗi provider, và cả hai lỗi đều không rõ ràng. Trong Terraform, task definition giữ kiến trúc cũ trong khi image mà Terraform đẩy có kiến trúc mới, vì vậy task không khởi động. Trong CDK, image được triển khai được build từ construct đã tạo, vì vậy dịch vụ tiếp tục chạy trên kiến trúc cũ và image bạn build và quét cục bộ là kiến trúc khác, không bao giờ được triển khai.
+
+`architecture` cũng là một prop của construct dịch vụ đã tạo, vì vậy một stack có thể truyền một kiến trúc khác cho một instantiation duy nhất. Điều đó thay đổi những gì được triển khai nhưng không thay đổi những gì các target `<name>-docker` và `<name>-trivy` build, vì vậy hãy tự giữ hai cái đồng bộ.
+
+Build một ARM64 image trên máy x86_64, hoặc một X86_64 image trên máy arm64, sẽ thất bại với `exec format error` trừ khi bạn cài đặt emulator. Generator cảnh báo bạn khi kiến trúc mà nó sắp tạo không phải là kiến trúc mà máy của bạn chạy. Xem <Link path="/troubleshooting/docker">Troubleshooting Docker</Link>.
+
+| Cài đặt | CDK prop | Terraform variable | Mặc định |
+| --- | --- | --- | --- |
+| Kiến trúc CPU | `architecture` | `cpu_architecture` | `'ARM64'` |
+
+Generator ghi kiến trúc mà nó đã chọn vào construct và module của dịch vụ của bạn, vì vậy giá trị mặc định đó chỉ áp dụng khi bạn tự sử dụng construct `EcsService` generic hoặc module `ecs-service`.
+
 #### Kích thước và Mở rộng
 
 Mỗi task nhận 256 CPU unit (một phần tư vCPU) và 512 MiB bộ nhớ theo mặc định. Dịch vụ khởi động một task, và autoscaling giữ từ một đến hai task đang chạy, thêm task khi mức sử dụng CPU trung bình vượt quá 70%.
@@ -440,7 +465,7 @@ Chạy target `destroy` của dự án infrastructure của bạn:
 </Fragment>
 </Infrastructure>
 
-Sau đó kiểm tra trong AWS console hoặc với AWS CLI rằng ECS service và cluster đã biến mất. Với cả CDK và Terraform, destroy đều xóa log group của dịch vụ và lên lịch xóa AWS KMS key của nó, vì vậy không còn gì của dịch vụ bị bỏ lại. Thời gian chờ trước khi KMS xóa key là 30 ngày với CDK và 7 ngày với Terraform. Các image vẫn ở trong Amazon ECR, trong CDK assets repository hoặc shared `asset-ecr` repository. Xóa chúng nếu bạn không còn cần chúng nữa. VPC là của bạn, vì vậy việc hủy dịch vụ sẽ để nó nguyên vị trí.
+Sau đó kiểm tra trong AWS console hoặc với AWS CLI rằng ECS service và cluster đã biến mất. Với cả CDK và Terraform, destroy đều xóa log group của dịch vụ và lên lịch AWS KMS key của nó để xóa. KMS chờ 7 ngày trước khi xóa key. Các image vẫn ở trong Amazon ECR, trong CDK assets repository hoặc shared `asset-ecr` repository. Xóa chúng nếu bạn không còn cần chúng nữa. VPC là của bạn, vì vậy việc hủy dịch vụ sẽ để nó nguyên vị trí.
 </OptionFilter>
 
 ## Kết nối Dịch vụ của Bạn

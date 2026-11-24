@@ -129,7 +129,7 @@ Il server ha anche una route di esempio che sostituisci con le tue route. `GET /
 
 ## Costruire e Scansionare l'Immagine
 
-Il target `<name>-docker` costruisce un'immagine linux/arm64 del tuo servizio. Esegue prima il target `bundle`, quindi l'immagine contiene il server in bundle. Quindi copia il `Dockerfile` e `.dockerignore` nella cartella di output del bundle, `dist/<project root>/bundle/container/<name>`, e costruisce l'immagine con quella cartella come contesto di build (i file che la build dell'immagine può leggere). Utilizza il motore di container con cui è configurato il tuo workspace, `docker` o [Finch](https://runfinch.com/). Il target viene eseguito come parte del target aggregato `docker`, che costruisce ogni immagine nel progetto.
+Il target `<name>-docker` costruisce un'immagine del tuo servizio per l'architettura CPU nell'opzione `architecture`, `linux/arm64` o `linux/amd64`. Esegue prima il target `bundle`, quindi l'immagine contiene il server in bundle. Quindi copia il `Dockerfile` e `.dockerignore` nella cartella di output del bundle, `dist/<project root>/bundle/container/<name>`, e costruisce l'immagine con quella cartella come contesto di build (i file che la build dell'immagine può leggere). Utilizza il motore di container con cui è configurato il tuo workspace, `docker` o [Finch](https://runfinch.com/). Il target viene eseguito come parte del target aggregato `docker`, che costruisce ogni immagine nel progetto.
 
 <NxCommands commands={['run your-project:container-docker']} />
 
@@ -362,6 +362,31 @@ secrets     = { API_KEY = aws_secretsmanager_secret.api_key.arn }
 </Fragment>
 </Infrastructure>
 
+#### Architettura CPU
+
+L'opzione `architecture` imposta la CPU su cui vengono eseguiti i task e la piattaforma per cui viene costruita l'immagine: `ARM64` o `X86_64`. ARM64 viene eseguito su processori [AWS Graviton](https://aws.amazon.com/ec2/graviton/), che AWS Fargate fattura a una tariffa inferiore per vCPU e per GB di memoria rispetto a X86_64. Vedi [AWS Fargate pricing](https://aws.amazon.com/fargate/pricing/) per le tariffe nella tua Regione.
+
+Ometti l'opzione e il generatore utilizza l'architettura della macchina su cui lo esegui, quindi `nx run your-project:container-docker` costruisce nativamente e non necessita di emulatore. Rieseguire il generatore mantiene l'architettura che ha generato la prima volta, indipendentemente dalla macchina su cui lo riesegui, perché quell'architettura è già nella tua definizione del task deployata.
+
+L'architettura è fissata quando il servizio viene generato per la prima volta. Il generatore non riscrive mai l'infrastruttura che ha prodotto, quindi spostare un servizio esistente sull'altra architettura richiede due passaggi:
+
+1. Cambia l'architettura nel codice prodotto. In CDK, la riga `architecture:` in `packages/common/constructs/src/app/services/<name>.ts`. In Terraform, `cpu_architecture` nel blocco `module "ecs_service"` di `packages/common/terraform/src/app/services/<name>/<name>.tf`.
+2. Riesegui il generatore con `--architecture` impostato sullo stesso valore, in modo che il target `<name>-docker` costruisca per esso.
+
+Quindi rideploya. Se passi un'architettura che differisce da quella che il generatore ha registrato, avvisa e nomina il file che devi modificare.
+
+Eseguire il passaggio 2 e dimenticare il passaggio 1 fallisce in modo diverso per provider, e nessun fallimento è evidente. In Terraform, la definizione del task mantiene la vecchia architettura mentre l'immagine che Terraform spinge ha quella nuova, quindi il task non si avvia. In CDK, l'immagine deployata viene costruita dal costrutto prodotto, quindi il servizio continua a funzionare sulla vecchia architettura e l'immagine che hai costruito e scansionato localmente è l'altra, che non viene mai deployata.
+
+`architecture` è anche una prop del costrutto del servizio prodotto, quindi uno stack può passarne una diversa per una singola istanziazione. Ciò cambia ciò che viene deployato ma non ciò che i target `<name>-docker` e `<name>-trivy` costruiscono, quindi mantieni i due sincronizzati tu stesso.
+
+Costruire un'immagine ARM64 su una macchina x86_64, o un'immagine X86_64 su una macchina arm64, fallisce con `exec format error` a meno che tu non installi un emulatore. Il generatore ti avvisa quando l'architettura che sta per generare non è quella su cui viene eseguita la tua macchina. Vedi <Link path="/troubleshooting/docker">Troubleshooting Docker</Link>.
+
+| Impostazione | Prop CDK | Variabile Terraform | Predefinito |
+| --- | --- | --- | --- |
+| Architettura CPU | `architecture` | `cpu_architecture` | `'ARM64'` |
+
+Il generatore scrive l'architettura che ha scelto nel costrutto e nel modulo del tuo servizio, quindi quel valore predefinito si applica solo quando usi tu stesso il costrutto generico `EcsService` o il modulo `ecs-service`.
+
 #### Dimensionamento e Scaling
 
 Ogni task ottiene 256 unità CPU (un quarto di una vCPU) e 512 MiB di memoria per impostazione predefinita. Il servizio avvia un task e l'autoscaling mantiene tra uno e due task in esecuzione, aggiungendo task quando l'uso medio della CPU supera il 70%.
@@ -440,7 +465,7 @@ Esegui il target `destroy` del tuo progetto di infrastruttura:
 </Fragment>
 </Infrastructure>
 
-Quindi verifica nella console AWS o con l'AWS CLI che il servizio ECS e il cluster siano spariti. Con entrambi CDK e Terraform, destroy elimina il log group del servizio e pianifica la sua chiave AWS KMS per l'eliminazione, quindi nulla del servizio viene lasciato indietro. Il periodo di attesa della chiave prima che KMS la elimini è di 30 giorni con CDK e 7 giorni con Terraform. Le immagini rimangono in Amazon ECR, nel repository degli asset CDK o nel repository condiviso `asset-ecr`. Eliminale se non ne hai più bisogno. Il VPC è tuo, quindi distruggere il servizio lo lascia al suo posto.
+Quindi verifica nella console AWS o con l'AWS CLI che il servizio ECS e il cluster siano spariti. Con entrambi CDK e Terraform, destroy elimina i log group del servizio e pianifica la sua chiave AWS KMS per l'eliminazione. KMS attende 7 giorni prima di eliminare la chiave. Le immagini rimangono in Amazon ECR, nel repository degli asset CDK o nel repository condiviso `asset-ecr`. Eliminale se non ne hai più bisogno. Il VPC è tuo, quindi distruggere il servizio lo lascia al suo posto.
 </OptionFilter>
 
 ## Connettere il Tuo Servizio

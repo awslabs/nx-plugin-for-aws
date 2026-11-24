@@ -57,10 +57,10 @@ Le générateur ajoute les fichiers suivants à votre projet. Le dossier source 
         - Dockerfile Définition de l'image conteneur
         - .dockerignore Fichiers exclus du contexte de construction de l'image
     - pyproject.toml Mis à jour avec les dépendances FastAPI et uvicorn
-    - project.json Mis à jour avec les cibles `bundle-arm` et `bundle` et les cibles `<name>-serve`, `<name>-docker` et `<name>-trivy` pour votre service
+    - project.json Mis à jour avec une cible bundle pour l'architecture CPU du service (`bundle-arm` ou `bundle-x86`), la cible agrégée `bundle`, et les cibles `<name>-serve`, `<name>-docker` et `<name>-trivy` pour votre service
 </FileTree>
 
-Les noms de cibles commencent par l'option `name`, ou par `container` si vous l'omettez. Par exemple, les cibles sont `container-serve`, `container-docker` et `container-trivy` sans nom, et `orders-serve`, `orders-docker` et `orders-trivy` pour `--name=orders`. Les cibles `bundle-arm` et `bundle` sont partagées par tout ce que le projet regroupe.
+Les noms de cibles commencent par l'option `name`, ou par `container` si vous l'omettez. Par exemple, les cibles sont `container-serve`, `container-docker` et `container-trivy` sans nom, et `orders-serve`, `orders-docker` et `orders-trivy` pour `--name=orders`. Les cibles bundle sont partagées par tout ce que le projet regroupe.
 
 <OptionFilter when={{ infra: 'ecs' }} description="Infrastructure du service ECS">
 ### Infrastructure
@@ -129,7 +129,7 @@ Le serveur a également une route d'exemple que vous remplacez par vos propres r
 
 ## Construire et scanner l'image
 
-La cible `<name>-docker` construit une image linux/arm64 de votre service. Elle exécute d'abord la cible `bundle-arm`, qui écrit votre code et ses dépendances linux/arm64 dans `dist/<project root>/bundle-arm`. La cible agrégée `bundle` dépend de `bundle-arm`. La cible `<name>-docker` copie ensuite ce dossier, le `Dockerfile` et le `.dockerignore` dans `dist/<project root>/docker/<name>`, et construit l'image avec ce dossier comme contexte de construction (les fichiers que la construction de l'image peut lire). Elle utilise le moteur de conteneur avec lequel votre espace de travail est configuré, `docker` ou [Finch](https://runfinch.com/). La cible s'exécute dans le cadre de la cible agrégée `docker`, qui construit chaque image du projet.
+La cible `<name>-docker` construit une image de votre service pour l'architecture CPU dans l'option `architecture`, `linux/arm64` ou `linux/amd64`. Elle exécute d'abord la cible bundle correspondante, `bundle-arm` ou `bundle-x86`, qui écrit votre code et ses dépendances pour cette architecture dans `dist/<project root>/bundle-arm` ou `dist/<project root>/bundle-x86`. La cible agrégée `bundle` en dépend. La cible `<name>-docker` copie ensuite ce dossier, le `Dockerfile` et le `.dockerignore` dans `dist/<project root>/docker/<name>`, et construit l'image avec ce dossier comme contexte de construction (les fichiers que la construction de l'image peut lire). Elle utilise le moteur de conteneur avec lequel votre espace de travail est configuré, `docker` ou [Finch](https://runfinch.com/). La cible s'exécute dans le cadre de la cible agrégée `docker`, qui construit chaque image du projet.
 
 <NxCommands commands={['run your-project:container-docker']} />
 
@@ -362,6 +362,33 @@ secrets     = { API_KEY = aws_secretsmanager_secret.api_key.arn }
 </Fragment>
 </Infrastructure>
 
+#### Architecture CPU
+
+L'option `architecture` définit le CPU sur lequel les tâches s'exécutent, la plateforme pour laquelle l'image est construite et la plateforme pour laquelle le bundle résout ses wheels Python : `ARM64` ou `X86_64`. ARM64 s'exécute sur des processeurs [AWS Graviton](https://aws.amazon.com/ec2/graviton/), qu'AWS Fargate facture à un tarif inférieur par vCPU et par Go de mémoire que X86_64. Consultez [Tarification AWS Fargate](https://aws.amazon.com/fargate/pricing/) pour les tarifs dans votre région.
+
+Omettez l'option et le générateur utilise l'architecture de la machine sur laquelle vous l'exécutez, donc `nx run your-project:container-docker` construit nativement et n'a besoin d'aucun émulateur. La réexécution du générateur conserve l'architecture qu'il a générée la première fois, quelle que soit la machine sur laquelle vous le réexécutez, car cette architecture est déjà dans votre définition de tâche déployée et dans le nom de votre cible bundle.
+
+L'architecture est fixée lors de la première génération du service. Le générateur ne réécrit jamais l'infrastructure qu'il a fournie, donc déplacer un service existant vers l'autre architecture nécessite deux étapes :
+
+1. Modifiez l'architecture dans le code fourni. Dans CDK, la ligne `architecture:` dans `packages/common/constructs/src/app/services/<name>.ts`. Dans Terraform, `cpu_architecture` dans le bloc `module "ecs_service"` de `packages/common/terraform/src/app/services/<name>/<name>.tf`.
+2. Réexécutez le générateur avec `--architecture` défini sur la même valeur, afin que la cible `<name>-docker` construise pour celle-ci et que le bundle résolve les wheels pour celle-ci.
+
+Ensuite, redéployez. Si vous transmettez une architecture qui diffère de celle que le générateur a enregistrée, il avertit et nomme le fichier que vous devez modifier.
+
+Faire l'étape 2 et oublier l'étape 1 échoue différemment selon le fournisseur, et aucun échec n'est bruyant. Dans Terraform, la définition de tâche conserve l'ancienne architecture tandis que l'image que Terraform pousse a la nouvelle, donc la tâche ne démarre pas. Dans CDK, l'image déployée est construite à partir du construct fourni, elle a donc l'ancienne architecture, tandis que le bundle à l'intérieur contient des wheels pour l'architecture que vous avez demandée : le conteneur plante alors lors de sa première importation compilée.
+
+Un changement laisse également en place la cible bundle de l'architecture précédente, car les cibles bundle sont partagées par tout ce qui regroupe dans le projet pour leur plateforme. L'avertissement la nomme ; supprimez-la une fois que rien d'autre ne l'utilise.
+
+`architecture` est également une prop du construct de service fourni, donc une stack peut en transmettre une différente pour une seule instanciation. Cela change ce qui est déployé mais pas ce que les cibles `<name>-docker` et `<name>-trivy` construisent, alors gardez les deux synchronisés vous-même.
+
+Construire une image ARM64 sur une machine x86_64, ou une image X86_64 sur une machine arm64, échoue avec `exec format error` sauf si vous installez un émulateur. Le générateur vous avertit lorsque l'architecture qu'il est sur le point de générer n'est pas celle sur laquelle votre machine s'exécute. Consultez <Link path="/troubleshooting/docker">Dépannage Docker</Link>.
+
+| Paramètre | Prop CDK | Variable Terraform | Par défaut |
+| --- | --- | --- | --- |
+| Architecture CPU | `architecture` | `cpu_architecture` | `'ARM64'` |
+
+Le générateur écrit l'architecture qu'il a choisie dans le construct et le module de votre service, donc cette valeur par défaut s'applique uniquement lorsque vous utilisez vous-même le construct générique `EcsService` ou le module `ecs-service`.
+
 #### Dimensionnement et mise à l'échelle
 
 Chaque tâche obtient 256 unités CPU (un quart de vCPU) et 512 Mio de mémoire par défaut. Le service démarre une tâche, et l'autoscaling maintient entre une et deux tâches en cours d'exécution, en ajoutant des tâches lorsque l'utilisation moyenne du CPU dépasse 70 %.
@@ -440,7 +467,7 @@ Exécutez la cible `destroy` de votre projet d'infrastructure :
 </Fragment>
 </Infrastructure>
 
-Vérifiez ensuite dans la console AWS ou avec l'AWS CLI que le service et le cluster ECS ont disparu. Avec CDK et Terraform, destroy supprime le groupe de journaux du service et planifie la suppression de sa clé AWS KMS, de sorte que rien du service ne reste. La période d'attente de la clé avant que KMS ne la supprime est de 30 jours avec CDK et de 7 jours avec Terraform. Les images restent dans Amazon ECR, dans le dépôt d'actifs CDK ou le dépôt partagé `asset-ecr`. Supprimez-les si vous n'en avez plus besoin. Le VPC est le vôtre, donc la destruction du service le laisse en place.
+Vérifiez ensuite dans la console AWS ou avec l'AWS CLI que le service et le cluster ECS ont disparu. Avec CDK et Terraform, destroy supprime le groupe de journaux du service et planifie la suppression de sa clé AWS KMS. KMS attend 7 jours avant de supprimer la clé. Les images restent dans Amazon ECR, dans le dépôt d'actifs CDK ou le dépôt partagé `asset-ecr`. Supprimez-les si vous n'en avez plus besoin. Le VPC est le vôtre, donc la destruction du service le laisse en place.
 </OptionFilter>
 
 ## Connecter votre service
