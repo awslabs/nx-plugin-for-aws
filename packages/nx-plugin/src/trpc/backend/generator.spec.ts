@@ -16,6 +16,7 @@ import {
 import { expectHasMetricTags } from '../../utils/metrics-assertions.js';
 import {
   createTreeUsingTsSolutionSetup,
+  onHostArch,
   snapshotTreeDir,
 } from '../../utils/test.js';
 import { terraformLambdaRuntime } from '../../utils/versions.js';
@@ -1708,6 +1709,71 @@ export const echo = publicProcedure.query(() => ({ message: 'hi' }));
           'packages/common/constructs/src/core/api/ecs-http-endpoint.ts',
         ),
       ).toBe(true);
+    });
+
+    describe('architecture', () => {
+      const SERVICE_FILE =
+        'packages/common/constructs/src/app/services/test-api-container.ts';
+
+      // The architecture ts#container recorded for the API's container service.
+      const recordedArchitecture = (): string | undefined =>
+        (
+          readProjectConfiguration(tree, '@proj/test-api').metadata as {
+            components: { architecture?: string }[];
+          }
+        ).components[0].architecture;
+
+      const dockerBuildCommand = (): string =>
+        readProjectConfiguration(tree, '@proj/test-api').targets?.[
+          'test-api-container-docker'
+        ].options.commands[2];
+
+      it.each<[string, string, string]>([
+        ['arm64', 'ARM64', 'linux/arm64'],
+        ['x64', 'X86_64', 'linux/amd64'],
+      ])(
+        'should use the host architecture (%s) when none is given',
+        async (hostArch, expected, platform) => {
+          await onHostArch(hostArch, () =>
+            tsTrpcApiGenerator(tree, ecsOptions('iam')),
+          );
+
+          expect(recordedArchitecture()).toBe(expected);
+          expect(dockerBuildCommand()).toContain(`--platform ${platform} `);
+          expect(tree.read(SERVICE_FILE, 'utf-8')).toContain(
+            `architecture: '${expected}',`,
+          );
+        },
+      );
+
+      it('should use the requested architecture over the host', async () => {
+        await onHostArch('arm64', () =>
+          tsTrpcApiGenerator(tree, {
+            ...ecsOptions('iam'),
+            architecture: 'X86_64',
+          }),
+        );
+
+        expect(recordedArchitecture()).toBe('X86_64');
+        expect(dockerBuildCommand()).toContain('--platform linux/amd64 ');
+        expect(tree.read(SERVICE_FILE, 'utf-8')).toContain(
+          "architecture: 'X86_64',",
+        );
+      });
+
+      it('should keep the recorded architecture when re-run on another host', async () => {
+        await onHostArch('x64', () =>
+          tsTrpcApiGenerator(tree, ecsOptions('iam')),
+        );
+        expect(recordedArchitecture()).toBe('X86_64');
+
+        await onHostArch('arm64', () =>
+          tsTrpcApiGenerator(tree, ecsOptions('iam')),
+        );
+
+        expect(recordedArchitecture()).toBe('X86_64');
+        expect(dockerBuildCommand()).toContain('--platform linux/amd64 ');
+      });
     });
 
     it('should type the procedure context without an API Gateway event', async () => {

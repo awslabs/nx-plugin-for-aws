@@ -203,6 +203,7 @@ export async function tsTrpcApiGenerator(
       name: containerName,
       infra: 'ecs',
       iac: options.iac,
+      architecture: options.architecture,
       preferInstallDependencies: false,
     });
     // ts#container writes its targets and its assigned port straight to the

@@ -30,6 +30,7 @@ export async function tsApiGenerator(
         directory: options.directory,
         subDirectory: options.subDirectory,
         iac: options.iac,
+        architecture: options.architecture,
         preferInstallDependencies: options.preferInstallDependencies,
       });
     case 'smithy':
