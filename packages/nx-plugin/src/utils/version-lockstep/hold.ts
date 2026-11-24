@@ -19,19 +19,19 @@ export interface VersionHold<Name extends IVersionedDep = IVersionedDep> {
 }
 
 const ADOT_DEPENDENCY_LIFT_WHEN =
-  'the vended ADOT distribution and Langfuse resolve together and the Python Langfuse runtime tests pass';
+  'the vended ADOT distribution stops requiring these packages at an exact version, since a vended pin that differs from the one ADOT requires makes every generated pyproject.toml unsatisfiable';
 
 /** Python pins the version update keeps at their current version. */
 export const PY_VERSION_HOLDS: readonly VersionHold<IPyDepVersion>[] = [
   {
     name: 'opentelemetry-api',
-    reason: 'the generated ADOT distribution requires opentelemetry-api 1.45.1',
+    reason: 'the generated ADOT distribution requires opentelemetry-api 1.45.2',
     liftWhen: ADOT_DEPENDENCY_LIFT_WHEN,
   },
   {
     name: 'opentelemetry-exporter-otlp-proto-http',
     reason:
-      'the generated ADOT distribution requires opentelemetry-exporter-otlp-proto-http 1.45.1',
+      'the generated ADOT distribution requires opentelemetry-exporter-otlp-proto-http 1.45.2',
     liftWhen: ADOT_DEPENDENCY_LIFT_WHEN,
   },
   {
@@ -42,7 +42,7 @@ export const PY_VERSION_HOLDS: readonly VersionHold<IPyDepVersion>[] = [
   },
   {
     name: 'opentelemetry-sdk',
-    reason: 'the generated ADOT distribution requires opentelemetry-sdk 1.45.1',
+    reason: 'the generated ADOT distribution requires opentelemetry-sdk 1.45.2',
     liftWhen: ADOT_DEPENDENCY_LIFT_WHEN,
   },
   {
