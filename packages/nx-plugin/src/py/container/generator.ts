@@ -15,7 +15,11 @@ import { addPythonBundleTarget } from '../../utils/bundle/bundle.js';
 import {
   addContainerServiceInfra,
   CONTAINER_PORT,
+  containerBuildPlatform,
   containerHealthCheckCommand,
+  containerPythonPlatform,
+  resolveContainerArchitecture,
+  warnIfArchitectureNeedsEmulation,
 } from '../../utils/container-constructs/container-constructs.js';
 import type { ContainerMetadata } from '../../utils/container-constructs/container-metadata.js';
 import { resolveContainers } from '../../utils/containers.js';
@@ -120,6 +124,16 @@ export const pyContainerGenerator = async (
   const infra = options.infra ?? 'ecs';
   const iac = infra === 'ecs' ? await resolveIac(tree, options.iac) : undefined;
 
+  // Read before anything is written, so the architecture a previous run put in
+  // the vended code is kept rather than re-detected from this machine. A second
+  // architecture would otherwise add a second bundle target beside the first.
+  const recorded = recordedMetadata(tree, project.name, targetPrefix);
+  const architecture = resolveContainerArchitecture(
+    options.architecture,
+    recorded,
+  );
+  warnIfArchitectureNeedsEmulation(architecture);
+
   const port = assignPort(tree, project, 8081, {
     component: { info: PY_CONTAINER_GENERATOR_INFO, name: targetPrefix },
   });
@@ -145,7 +159,7 @@ export const pyContainerGenerator = async (
   );
 
   const { bundleTargetName, bundleOutputDir } = addPythonBundleTarget(project, {
-    pythonPlatform: 'aarch64-manylinux_2_28',
+    pythonPlatform: containerPythonPlatform(architecture),
   });
 
   const containers = await resolveContainers(tree, 'inherit');
@@ -175,7 +189,7 @@ export const pyContainerGenerator = async (
           `${sourceDir}/.dockerignore`,
           `${dockerBuildContextDir}/.dockerignore`,
         ),
-        `${containers} build --platform linux/arm64 -t ${dockerImageTag} ${dockerBuildContextDir}`,
+        `${containers} build --platform ${containerBuildPlatform(architecture)} -t ${dockerImageTag} ${dockerBuildContextDir}`,
       ],
       parallel: false,
     },
@@ -231,6 +245,7 @@ export const pyContainerGenerator = async (
       dockerBuildContextDir,
       containerPort: CONTAINER_PORT,
       healthCheckCommand: containerHealthCheckCommand('python'),
+      architecture,
       containers,
       iac,
     });
@@ -240,6 +255,7 @@ export const pyContainerGenerator = async (
     infra,
     port,
     rc: nameClassName,
+    architecture,
     ...(iac ? { iac } : {}),
   };
 
@@ -248,7 +264,6 @@ export const pyContainerGenerator = async (
     projectRoot: project.root,
   });
 
-  const recorded = recordedMetadata(tree, project.name, targetPrefix);
   addComponentGeneratorMetadata(
     tree,
     project.name,

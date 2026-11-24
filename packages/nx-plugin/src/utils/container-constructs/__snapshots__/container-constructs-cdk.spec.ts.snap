@@ -45,8 +45,8 @@ import { Construct } from 'constructs';
 export type EcsServiceImage =
   | {
       /**
-       * Directory holding a Dockerfile, built as a linux/arm64 CDK image asset
-       * at deploy time.
+       * Directory holding a Dockerfile, built as a CDK image asset at deploy
+       * time for the platform matching the service's \`architecture\`.
        */
       readonly directory: string;
     }
@@ -54,12 +54,19 @@ export type EcsServiceImage =
       /**
        * Prebuilt image URI (a public registry or ECR). Nothing is built
        * locally. For an ECR image the execution role is granted pull on it.
+       * The image must be built for the service's \`architecture\`.
        */
       readonly imageUri: string;
     };
 
 /**
- * Properties for an ECS service on AWS Fargate (linux/arm64) in an existing VPC.
+ * CPU architecture the task runs on. \`ARM64\` runs on AWS Graviton, which costs
+ * less per task on AWS Fargate; \`X86_64\` runs on Intel or AMD.
+ */
+export type EcsServiceArchitecture = 'ARM64' | 'X86_64';
+
+/**
+ * Properties for an ECS service on AWS Fargate in an existing VPC.
  */
 export interface EcsServiceProps {
   /**
@@ -88,6 +95,13 @@ export interface EcsServiceProps {
    * The container image to run.
    */
   readonly image: EcsServiceImage;
+  /**
+   * CPU architecture the task runs on. An \`image.directory\` asset is built for
+   * the matching platform, so the image and the task always agree.
+   *
+   * @default 'ARM64'
+   */
+  readonly architecture?: EcsServiceArchitecture;
   /**
    * Port the server listens on inside the container, passed as \`PORT\`.
    *
@@ -173,9 +187,18 @@ export interface EcsServiceProps {
 const ECR_IMAGE_URI =
   /^(\\d{12})\\.dkr\\.ecr\\.([a-z0-9-]+)\\.amazonaws\\.com(?:\\.cn)?\\/([^:@]+)(?:[:@](.+))?$/;
 
+/** The task CPU architecture and image build platform each architecture means. */
+const ARCHITECTURES: Record<
+  EcsServiceArchitecture,
+  { readonly cpu: CpuArchitecture; readonly platform: Platform }
+> = {
+  ARM64: { cpu: CpuArchitecture.ARM64, platform: Platform.LINUX_ARM64 },
+  X86_64: { cpu: CpuArchitecture.X86_64, platform: Platform.LINUX_AMD64 },
+};
+
 /**
- * An ECS service on AWS Fargate (linux/arm64) in an existing VPC, with no load
- * balancer and no inbound rule on its security group.
+ * An ECS service on AWS Fargate in an existing VPC, with no load balancer and
+ * no inbound rule on its security group.
  *
  * Members other connections and stacks rely on: \`service\`, \`taskDefinition\`,
  * \`taskRole\`, \`securityGroup\`, \`connections\` and \`logGroup\`.
@@ -185,7 +208,7 @@ export class EcsService extends Construct implements IConnectable {
   public readonly cluster: ICluster;
   /** The Fargate service. */
   public readonly service: FargateService;
-  /** The Fargate task definition (linux/arm64). */
+  /** The Fargate task definition. */
   public readonly taskDefinition: FargateTaskDefinition;
   /** Role the container's code runs as. No permissions unless granted. */
   public readonly taskRole: IRole;
@@ -204,6 +227,7 @@ export class EcsService extends Construct implements IConnectable {
     const { serviceName, vpc } = props;
 
     const containerPort = props.containerPort ?? 8080;
+    const architecture = ARCHITECTURES[props.architecture ?? 'ARM64'];
     const vpcSubnets = props.vpcSubnets ?? {
       subnetType: SubnetType.PRIVATE_WITH_EGRESS,
     };
@@ -268,7 +292,7 @@ export class EcsService extends Construct implements IConnectable {
       cpu: props.cpu ?? 256,
       memoryLimitMiB: props.memoryLimitMiB ?? 512,
       runtimePlatform: {
-        cpuArchitecture: CpuArchitecture.ARM64,
+        cpuArchitecture: architecture.cpu,
         operatingSystemFamily: OperatingSystemFamily.LINUX,
       },
     });
@@ -287,7 +311,7 @@ export class EcsService extends Construct implements IConnectable {
     this.logGroup = logGroup;
 
     const container = this.taskDefinition.addContainer('Container', {
-      image: this.containerImage(props.image),
+      image: this.containerImage(props.image, architecture.platform),
       readonlyRootFilesystem: true,
       user: props.user ?? '1000',
       environment: {
@@ -371,11 +395,12 @@ export class EcsService extends Construct implements IConnectable {
     return cluster;
   }
 
-  private containerImage(image: EcsServiceImage): ContainerImage {
+  private containerImage(
+    image: EcsServiceImage,
+    platform: Platform,
+  ): ContainerImage {
     if ('directory' in image) {
-      return ContainerImage.fromAsset(image.directory, {
-        platform: Platform.LINUX_ARM64,
-      });
+      return ContainerImage.fromAsset(image.directory, { platform });
     }
     const ecr = ECR_IMAGE_URI.exec(image.imageUri);
     if (!ecr) {
@@ -442,6 +467,7 @@ export class Orders extends EcsService {
     const rc = RuntimeConfig.ensure(scope);
     super(scope, id, {
       containerPort: 8080,
+      architecture: 'ARM64',
       healthCheck: {
         command: ["CMD","node","-e","fetch('http://127.0.0.1:'+(process.env.PORT||'8080')+'/health',{signal:AbortSignal.timeout(3000)}).then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"],
         interval: Duration.seconds(30),
@@ -509,8 +535,8 @@ import { Construct } from 'constructs';
 export type EcsServiceImage =
   | {
       /**
-       * Directory holding a Dockerfile, built as a linux/arm64 CDK image asset
-       * at deploy time.
+       * Directory holding a Dockerfile, built as a CDK image asset at deploy
+       * time for the platform matching the service's \`architecture\`.
        */
       readonly directory: string;
     }
@@ -518,12 +544,19 @@ export type EcsServiceImage =
       /**
        * Prebuilt image URI (a public registry or ECR). Nothing is built
        * locally. For an ECR image the execution role is granted pull on it.
+       * The image must be built for the service's \`architecture\`.
        */
       readonly imageUri: string;
     };
 
 /**
- * Properties for an ECS service on AWS Fargate (linux/arm64) in an existing VPC.
+ * CPU architecture the task runs on. \`ARM64\` runs on AWS Graviton, which costs
+ * less per task on AWS Fargate; \`X86_64\` runs on Intel or AMD.
+ */
+export type EcsServiceArchitecture = 'ARM64' | 'X86_64';
+
+/**
+ * Properties for an ECS service on AWS Fargate in an existing VPC.
  */
 export interface EcsServiceProps {
   /**
@@ -552,6 +585,13 @@ export interface EcsServiceProps {
    * The container image to run.
    */
   readonly image: EcsServiceImage;
+  /**
+   * CPU architecture the task runs on. An \`image.directory\` asset is built for
+   * the matching platform, so the image and the task always agree.
+   *
+   * @default 'ARM64'
+   */
+  readonly architecture?: EcsServiceArchitecture;
   /**
    * Port the server listens on inside the container, passed as \`PORT\`.
    *
@@ -637,9 +677,18 @@ export interface EcsServiceProps {
 const ECR_IMAGE_URI =
   /^(\\d{12})\\.dkr\\.ecr\\.([a-z0-9-]+)\\.amazonaws\\.com(?:\\.cn)?\\/([^:@]+)(?:[:@](.+))?$/;
 
+/** The task CPU architecture and image build platform each architecture means. */
+const ARCHITECTURES: Record<
+  EcsServiceArchitecture,
+  { readonly cpu: CpuArchitecture; readonly platform: Platform }
+> = {
+  ARM64: { cpu: CpuArchitecture.ARM64, platform: Platform.LINUX_ARM64 },
+  X86_64: { cpu: CpuArchitecture.X86_64, platform: Platform.LINUX_AMD64 },
+};
+
 /**
- * An ECS service on AWS Fargate (linux/arm64) in an existing VPC, with no load
- * balancer and no inbound rule on its security group.
+ * An ECS service on AWS Fargate in an existing VPC, with no load balancer and
+ * no inbound rule on its security group.
  *
  * Members other connections and stacks rely on: \`service\`, \`taskDefinition\`,
  * \`taskRole\`, \`securityGroup\`, \`connections\` and \`logGroup\`.
@@ -649,7 +698,7 @@ export class EcsService extends Construct implements IConnectable {
   public readonly cluster: ICluster;
   /** The Fargate service. */
   public readonly service: FargateService;
-  /** The Fargate task definition (linux/arm64). */
+  /** The Fargate task definition. */
   public readonly taskDefinition: FargateTaskDefinition;
   /** Role the container's code runs as. No permissions unless granted. */
   public readonly taskRole: IRole;
@@ -668,6 +717,7 @@ export class EcsService extends Construct implements IConnectable {
     const { serviceName, vpc } = props;
 
     const containerPort = props.containerPort ?? 8080;
+    const architecture = ARCHITECTURES[props.architecture ?? 'ARM64'];
     const vpcSubnets = props.vpcSubnets ?? {
       subnetType: SubnetType.PRIVATE_WITH_EGRESS,
     };
@@ -732,7 +782,7 @@ export class EcsService extends Construct implements IConnectable {
       cpu: props.cpu ?? 256,
       memoryLimitMiB: props.memoryLimitMiB ?? 512,
       runtimePlatform: {
-        cpuArchitecture: CpuArchitecture.ARM64,
+        cpuArchitecture: architecture.cpu,
         operatingSystemFamily: OperatingSystemFamily.LINUX,
       },
     });
@@ -751,7 +801,7 @@ export class EcsService extends Construct implements IConnectable {
     this.logGroup = logGroup;
 
     const container = this.taskDefinition.addContainer('Container', {
-      image: this.containerImage(props.image),
+      image: this.containerImage(props.image, architecture.platform),
       readonlyRootFilesystem: true,
       user: props.user ?? '1000',
       environment: {
@@ -835,11 +885,12 @@ export class EcsService extends Construct implements IConnectable {
     return cluster;
   }
 
-  private containerImage(image: EcsServiceImage): ContainerImage {
+  private containerImage(
+    image: EcsServiceImage,
+    platform: Platform,
+  ): ContainerImage {
     if ('directory' in image) {
-      return ContainerImage.fromAsset(image.directory, {
-        platform: Platform.LINUX_ARM64,
-      });
+      return ContainerImage.fromAsset(image.directory, { platform });
     }
     const ecr = ECR_IMAGE_URI.exec(image.imageUri);
     if (!ecr) {
@@ -906,6 +957,7 @@ export class Orders extends EcsService {
     const rc = RuntimeConfig.ensure(scope);
     super(scope, id, {
       containerPort: 8080,
+      architecture: 'ARM64',
       healthCheck: {
         command: ["CMD","python","-c","import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '8080') + '/health', timeout=3)"],
         interval: Duration.seconds(30),

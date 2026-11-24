@@ -14,6 +14,7 @@ import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../../utils/config/utils.js';
+import type { ContainerArchitecture } from '../../utils/container-constructs/container-constructs.js';
 import { CONTAINER_PORT } from '../../utils/container-constructs/container-constructs.js';
 import { addContainerServiceCdkConstructs } from '../../utils/container-constructs/container-constructs-cdk.js';
 import { addContainerServiceTerraformModules } from '../../utils/container-constructs/container-constructs-terraform.js';
@@ -21,7 +22,9 @@ import { expectHasMetricTags } from '../../utils/metrics-assertions.js';
 import type { UVPyprojectToml } from '../../utils/nxlv-python.js';
 import {
   createTreeUsingTsSolutionSetup,
+  onHostArch,
   snapshotTreeDir,
+  stubHostArch,
 } from '../../utils/test.js';
 import { BASE_IMAGES, PY_VERSIONS } from '../../utils/versions.js';
 import { pyProjectGenerator } from '../project/generator.js';
@@ -86,9 +89,14 @@ const components = (tree: Tree) =>
 
 describe('py#container generator', () => {
   let tree: Tree;
+  let restoreHostArch: () => void;
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    // Pinned so the architecture the generator writes, and every snapshot
+    // below, is the same wherever these tests run. The tests that cover host
+    // detection itself pin it to the architecture they are about.
+    restoreHostArch = stubHostArch('arm64');
     tree = createTreeUsingTsSolutionSetup();
     await pyProjectGenerator(tree, {
       name: 'my-proj',
@@ -96,6 +104,10 @@ describe('py#container generator', () => {
       directory: 'packages',
       preferInstallDependencies: false,
     });
+  });
+
+  afterEach(() => {
+    restoreHostArch();
   });
 
   describe('snapshots', () => {
@@ -285,6 +297,116 @@ describe('py#container generator', () => {
     ]);
   });
 
+  /**
+   * The wheels in the bundle, the image the `docker` target builds and the
+   * deployed task definition all have to be for the same CPU, and the default
+   * has to be buildable on the machine the user is sitting at.
+   */
+  describe('architecture', () => {
+    const dockerCommands = (): string[] =>
+      readProject(tree).targets['container-docker'].options.commands;
+
+    const architectureOf = (): string => components(tree)[0].architecture;
+
+    it.each<[string, string, string, string]>([
+      ['arm64', 'ARM64', 'linux/arm64', 'aarch64-manylinux_2_28'],
+      ['x64', 'X86_64', 'linux/amd64', 'x86_64-manylinux_2_28'],
+    ])(
+      'should bundle and build for the host architecture (%s) when none is given',
+      async (hostArch, expected, platform, pythonPlatform) => {
+        await onHostArch(hostArch, () =>
+          pyContainerGenerator(tree, { project: PROJECT, iac: 'cdk' }),
+        );
+
+        const { targets } = readProject(tree);
+        const bundleTarget = expected === 'ARM64' ? 'bundle-arm' : 'bundle-x86';
+        expect(architectureOf()).toBe(expected);
+        expect(targets[bundleTarget]).toBeDefined();
+        expect(targets[bundleTarget].options.commands[1]).toContain(
+          `--python-platform ${pythonPlatform} `,
+        );
+        expect(targets['container-docker'].dependsOn).toEqual([bundleTarget]);
+        expect(dockerCommands().at(-1)).toContain(`--platform ${platform} `);
+        // The bundle the image copies in is the one built for this CPU.
+        expect(dockerCommands()[2]).toContain(
+          `dist/packages/my_proj/${bundleTarget}/.`,
+        );
+      },
+    );
+
+    it.each<[ContainerArchitecture, string, string]>([
+      ['ARM64', 'x64', 'bundle-arm'],
+      ['X86_64', 'arm64', 'bundle-x86'],
+    ])(
+      'should bundle and build for %s when it is asked for, whatever the host is',
+      async (architecture, hostArch, bundleTarget) => {
+        await onHostArch(hostArch, () =>
+          pyContainerGenerator(tree, {
+            project: PROJECT,
+            iac: 'cdk',
+            architecture,
+          }),
+        );
+
+        expect(architectureOf()).toBe(architecture);
+        expect(readProject(tree).targets[bundleTarget]).toBeDefined();
+      },
+    );
+
+    // A re-run that re-detected would add a second bundle target beside the
+    // first, and build an image whose wheels are for the other CPU.
+    it('should keep the architecture of the first run when re-run on another host', async () => {
+      await onHostArch('x64', () =>
+        pyContainerGenerator(tree, { project: PROJECT, iac: 'cdk' }),
+      );
+
+      await onHostArch('arm64', () =>
+        pyContainerGenerator(tree, { project: PROJECT, iac: 'cdk' }),
+      );
+
+      const { targets } = readProject(tree);
+      expect(architectureOf()).toBe('X86_64');
+      expect(targets['bundle-x86']).toBeDefined();
+      expect(targets['bundle-arm']).toBeUndefined();
+      expect(targets.bundle.dependsOn).toEqual(['bundle-x86']);
+      expect(dockerCommands().at(-1)).toContain('--platform linux/amd64 ');
+    });
+
+    // A service generated before this option existed recorded no architecture
+    // and was vended ARM64-only, and its vended code stays on disk.
+    it('should keep ARM64 for a service recorded without an architecture', async () => {
+      await pyContainerGenerator(tree, {
+        project: PROJECT,
+        iac: 'cdk',
+        architecture: 'ARM64',
+      });
+      const project = readProject(tree);
+      delete (project.metadata as any).components[0].architecture;
+      updateProjectConfiguration(tree, PROJECT, project);
+
+      await onHostArch('x64', () =>
+        pyContainerGenerator(tree, { project: PROJECT, iac: 'cdk' }),
+      );
+
+      const { targets } = readProject(tree);
+      expect(targets['bundle-x86']).toBeUndefined();
+      expect(dockerCommands().at(-1)).toContain('--platform linux/arm64 ');
+    });
+
+    it('should pass the architecture to the vended infrastructure', async () => {
+      await pyContainerGenerator(tree, {
+        project: PROJECT,
+        iac: 'cdk',
+        architecture: 'X86_64',
+      });
+
+      expect(addContainerServiceCdkConstructs).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ architecture: 'X86_64' }),
+      );
+    });
+  });
+
   it('should add fastapi and uvicorn to pyproject.toml', async () => {
     await pyContainerGenerator(tree, { project: PROJECT, iac: 'cdk' });
 
@@ -380,6 +502,7 @@ describe('py#container generator', () => {
         "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '8080') + '/health', timeout=3)",
       ],
       containers: 'docker',
+      architecture: 'ARM64',
     };
 
     it('should pass the service options to the CDK constructs', async () => {
@@ -467,6 +590,7 @@ describe('py#container generator', () => {
         infra: 'ecs',
         port: 8081,
         rc: 'MyProjContainer',
+        architecture: 'ARM64',
         iac: 'cdk',
       },
     ]);

@@ -4,6 +4,7 @@
  */
 import {
   addProjectConfiguration,
+  logger,
   readJson,
   type Tree,
   writeJson,
@@ -13,6 +14,7 @@ import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../../utils/config/utils.js';
+import type { ContainerArchitecture } from '../../utils/container-constructs/container-constructs.js';
 import { declareDependencies } from '../../utils/declared-dependencies.js';
 import { expectHasMetricTags } from '../../utils/metrics-assertions.js';
 import {
@@ -22,7 +24,9 @@ import {
 import { TypeScriptVerifier } from '../../utils/test/ts.spec.js';
 import {
   createTreeUsingTsSolutionSetup,
+  onHostArch,
   snapshotTreeDir,
+  stubHostArch,
 } from '../../utils/test.js';
 import { BASE_IMAGES } from '../../utils/versions.js';
 import { injectRdsCaBundleIntoDockerfile } from '../rdb/utils.js';
@@ -58,6 +62,7 @@ const allFiles = (tree: Tree): Record<string, string | null> =>
 
 describe('ts#container generator', () => {
   let tree: Tree;
+  let restoreHostArch: () => void;
 
   const run = (options: Partial<TsContainerGeneratorSchema> = {}) =>
     tsContainerGenerator(tree, {
@@ -67,6 +72,10 @@ describe('ts#container generator', () => {
     });
 
   beforeEach(() => {
+    // Pinned so the architecture the generator writes, and every snapshot
+    // below, is the same wherever these tests run. The tests that cover host
+    // detection itself pin it to the architecture they are about.
+    restoreHostArch = stubHostArch('arm64');
     tree = createTreeUsingTsSolutionSetup();
     addProjectConfiguration(tree, 'test-project', {
       root: PROJECT_ROOT,
@@ -87,6 +96,7 @@ describe('ts#container generator', () => {
   });
 
   afterEach(() => {
+    restoreHostArch();
     vi.restoreAllMocks();
   });
 
@@ -246,6 +256,99 @@ describe('ts#container generator', () => {
     expect(targets['container-trivy'].options.commands.join('\n')).toContain(
       'finch save',
     );
+  });
+
+  /**
+   * The image the service's infrastructure deploys and the image the `docker`
+   * target builds have to be for the same CPU, and the default has to be
+   * buildable on the machine the user is sitting at.
+   */
+  describe('architecture', () => {
+    const dockerBuildCommand = (): string =>
+      readProject(tree).targets['container-docker'].options.commands[2];
+
+    const architectureOf = (): string => componentsOf(tree)[0].architecture;
+
+    it.each<[string, string, string]>([
+      ['arm64', 'ARM64', 'linux/arm64'],
+      ['x64', 'X86_64', 'linux/amd64'],
+    ])(
+      'should build for the host architecture (%s) when none is given',
+      async (hostArch, expected, platform) => {
+        await onHostArch(hostArch, () => run({ architecture: undefined }));
+
+        expect(architectureOf()).toBe(expected);
+        expect(dockerBuildCommand()).toContain(`--platform ${platform} `);
+        expect(tree.read(SERVICE_FILE, 'utf-8')).toContain(
+          `architecture: '${expected}',`,
+        );
+      },
+    );
+
+    it.each<[ContainerArchitecture, string]>([
+      ['ARM64', 'linux/arm64'],
+      ['X86_64', 'linux/amd64'],
+    ])(
+      'should build for %s when it is asked for, whatever the host is',
+      async (architecture, platform) => {
+        // Asked for the architecture this host is not.
+        const hostArch = architecture === 'ARM64' ? 'x64' : 'arm64';
+        await onHostArch(hostArch, () => run({ architecture }));
+
+        expect(architectureOf()).toBe(architecture);
+        expect(dockerBuildCommand()).toContain(`--platform ${platform} `);
+        expect(tree.read(SERVICE_FILE, 'utf-8')).toContain(
+          `architecture: '${architecture}',`,
+        );
+      },
+    );
+
+    // Generators are idempotent: the architecture is in the vended code and
+    // the deployed task definition, so a re-run on another machine must not
+    // move it.
+    it('should keep the architecture of the first run when re-run on another host', async () => {
+      await onHostArch('x64', () => run({ architecture: undefined }));
+      expect(architectureOf()).toBe('X86_64');
+
+      await onHostArch('arm64', () => run({ architecture: undefined }));
+
+      expect(architectureOf()).toBe('X86_64');
+      expect(dockerBuildCommand()).toContain('--platform linux/amd64 ');
+    });
+
+    // A service generated before this option existed recorded no architecture
+    // and was vended ARM64-only, and its vended constructs stay on disk.
+    it('should keep ARM64 for a service recorded without an architecture', async () => {
+      await run({ architecture: 'ARM64' });
+      const project = readProject(tree);
+      delete project.metadata.components[0].architecture;
+      writeJson(tree, `${PROJECT_ROOT}/project.json`, project);
+
+      await onHostArch('x64', () => run({ architecture: undefined }));
+
+      expect(dockerBuildCommand()).toContain('--platform linux/arm64 ');
+      expect(architectureOf()).toBeUndefined();
+    });
+
+    it('should warn how to fix a build the host cannot run natively', async () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+      await onHostArch('x64', () => run({ architecture: 'ARM64' }));
+
+      expect(
+        warn.mock.calls.map(([message]) => String(message)).join('\n'),
+      ).toContain('tonistiigi/binfmt --install arm64');
+    });
+
+    it('should warn nothing when it builds for the host', async () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+      await onHostArch('x64', () => run({ architecture: undefined }));
+
+      expect(
+        warn.mock.calls.map(([message]) => String(message)).join('\n'),
+      ).not.toContain('binfmt');
+    });
   });
 
   it('should vend the CDK service and build the shared constructs after the project', async () => {

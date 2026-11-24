@@ -157,9 +157,14 @@ function describeContainerDeploy(
 
       // The two services, and the generators at the far ends of their
       // connections.
+      //
+      // The TypeScript service pins ARM64 and the Python service takes the
+      // default, which is the runner's own x86_64: one deploy of each
+      // architecture, so both are proved to start and pass their health check
+      // on Fargate.
       for (const command of [
         'ts#project --name=ts-project',
-        'ts#container --project=ts-project --name=ts-service',
+        'ts#container --project=ts-project --name=ts-service --architecture=ARM64',
         'py#project --name=py-project --type=application',
         'py#container --project=py_project --name=py-service',
         'ts#dynamodb --name=my-table',
