@@ -30,6 +30,7 @@ export async function pyApiGenerator(
         subDirectory: options.subDirectory,
         moduleName: options.moduleName,
         iac: options.iac,
+        architecture: options.architecture,
         preferInstallDependencies: options.preferInstallDependencies,
       });
   }

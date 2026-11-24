@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type { ContainerArchitecture } from '../../utils/container-constructs/container-constructs.js';
 import { IacOption } from '../../utils/iac.js';
 
 export interface PyFastApiProjectGeneratorSchema {
@@ -14,5 +15,6 @@ export interface PyFastApiProjectGeneratorSchema {
   readonly subDirectory?: string;
   readonly moduleName?: string;
   readonly iac: IacOption;
+  readonly architecture?: ContainerArchitecture;
   readonly preferInstallDependencies?: boolean;
 }

@@ -23,7 +23,9 @@ import {
 } from '../../utils/shared-constructs-constants.js';
 import {
   createTreeUsingTsSolutionSetup,
+  onHostArch,
   snapshotTreeDir,
+  stubHostArch,
 } from '../../utils/test.js';
 import {
   FAST_API_GENERATOR_INFO,
@@ -584,6 +586,19 @@ describe('fastapi project generator', () => {
   });
 
   describe('infra=http-ecs', () => {
+    let restoreHostArch: () => void;
+
+    // Pinned so the architecture the container is generated for, and so the
+    // bundle target it builds, is the same wherever these tests run. The
+    // architecture tests pin it to the architecture they are about.
+    beforeEach(() => {
+      restoreHostArch = stubHostArch('arm64');
+    });
+
+    afterEach(() => {
+      restoreHostArch();
+    });
+
     const ecsOptions = (
       auth: PyFastApiProjectGeneratorSchema['auth'],
     ): PyFastApiProjectGeneratorSchema => ({
@@ -717,13 +732,84 @@ describe('fastapi project generator', () => {
       expect(tree.exists('apps/test_api/proj_test_api/init.py')).toBe(true);
     });
 
+    describe('architecture', () => {
+      const SERVICE_FILE =
+        'packages/common/constructs/src/app/services/test-api-container.ts';
+
+      const targets = () =>
+        readProjectConfiguration(tree, 'proj.test_api').targets ?? {};
+
+      it.each<[string, string, string, string, string]>([
+        [
+          'arm64',
+          'ARM64',
+          'bundle-arm',
+          'aarch64-manylinux_2_28',
+          'linux/arm64',
+        ],
+        ['x64', 'X86_64', 'bundle-x86', 'x86_64-manylinux_2_28', 'linux/amd64'],
+      ])(
+        'should bundle and build for the host architecture (%s) when none is given',
+        async (hostArch, expected, bundleTarget, pythonPlatform, platform) => {
+          await onHostArch(hostArch, () =>
+            pyFastApiProjectGenerator(tree, ecsOptions('iam')),
+          );
+
+          expect(targets()[bundleTarget].options.commands[1]).toContain(
+            `--python-platform ${pythonPlatform} `,
+          );
+          expect(
+            targets()['test-api-container-docker'].options.commands.at(-1),
+          ).toContain(`--platform ${platform} `);
+          expect(tree.read(SERVICE_FILE, 'utf-8')).toContain(
+            `architecture: '${expected}',`,
+          );
+        },
+      );
+
+      it('should use the requested architecture over the host', async () => {
+        await onHostArch('arm64', () =>
+          pyFastApiProjectGenerator(tree, {
+            ...ecsOptions('iam'),
+            architecture: 'X86_64',
+          }),
+        );
+
+        expect(targets()['bundle-x86'].options.commands[1]).toContain(
+          '--python-platform x86_64-manylinux_2_28 ',
+        );
+        expect(targets()['bundle-arm']).toBeUndefined();
+        expect(tree.read(SERVICE_FILE, 'utf-8')).toContain(
+          "architecture: 'X86_64',",
+        );
+      });
+
+      it('should keep the recorded architecture when re-run on another host', async () => {
+        await onHostArch('x64', () =>
+          pyFastApiProjectGenerator(tree, ecsOptions('iam')),
+        );
+
+        await onHostArch('arm64', () =>
+          pyFastApiProjectGenerator(tree, ecsOptions('iam')),
+        );
+
+        expect(tree.read(SERVICE_FILE, 'utf-8')).toContain(
+          "architecture: 'X86_64',",
+        );
+        expect(
+          targets()['test-api-container-docker'].options.commands.at(-1),
+        ).toContain('--platform linux/amd64 ');
+        expect(targets()['bundle-arm']).toBeUndefined();
+      });
+    });
+
     it('should bundle for Lambda only when a Lambda still runs', async () => {
       await pyFastApiProjectGenerator(tree, ecsOptions('iam'));
       const iamTargets = readProjectConfiguration(
         tree,
         'proj.test_api',
       ).targets;
-      // Nothing runs in Lambda, so only the image's arm64 bundle is built.
+      // Nothing runs in Lambda, so only the image's bundle is built.
       expect(iamTargets['bundle-x86']).toBeUndefined();
       expect(iamTargets['bundle-arm']).toBeDefined();
 

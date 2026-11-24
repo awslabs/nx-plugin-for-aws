@@ -3,7 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import {
+  createTreeUsingTsSolutionSetup,
+  onHostArch,
+} from '../../utils/test.js';
 import { pyApiGenerator } from './generator.js';
 import { PyApiGeneratorSchema } from './schema';
 
@@ -76,5 +79,26 @@ describe('py#api generator', () => {
     expect(
       tree.read('packages/common/constructs/src/app/apis/test-api.ts', 'utf-8'),
     ).toContain("pattern: 'shared'");
+  });
+
+  it('should forward the architecture to py#fast-api for http-ecs', async () => {
+    // Asked for the architecture this host is not.
+    await onHostArch('arm64', () =>
+      pyApiGenerator(tree, {
+        name: 'TestApi',
+        directory: 'packages',
+        infra: 'http-ecs',
+        auth: 'iam',
+        iac: 'cdk',
+        architecture: 'X86_64',
+      }),
+    );
+
+    expect(
+      tree.read(
+        'packages/common/constructs/src/app/services/test-api-container.ts',
+        'utf-8',
+      ),
+    ).toContain("architecture: 'X86_64',");
   });
 });

@@ -180,6 +180,7 @@ export const pyFastApiProjectGenerator = async (
       name: containerName,
       infra: 'ecs',
       iac: schema.iac,
+      architecture: schema.architecture,
       preferInstallDependencies: false,
     });
     // py#container writes its targets and its assigned port straight to the
@@ -192,7 +193,8 @@ export const pyFastApiProjectGenerator = async (
 
   // Bundle for the Lambda platform, built only for what still runs in Lambda:
   // the API itself on the Lambda variants, and the custom authorizer handler.
-  // py#container builds the arm64 bundle the container image is made from.
+  // py#container builds the bundle the container image is made from, for the
+  // container's architecture.
   const bundleOutputDir = joinPathFragments(
     'dist',
     dir,
