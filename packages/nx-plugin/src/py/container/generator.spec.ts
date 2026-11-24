@@ -455,6 +455,24 @@ describe('py#container generator', () => {
           'dist/packages/my_proj/bundle-x86/.',
         );
       });
+
+      // Escalating from infra=none vends the module for the first time, so it
+      // already carries this run's architecture. The bundle target the switch
+      // left behind is still real, and still named.
+      it('should name the stale bundle target but no file when this run vended the module', async () => {
+        await pyContainerGenerator(tree, {
+          project: PROJECT,
+          infra: 'none',
+          iac: 'terraform',
+          architecture: 'ARM64',
+        });
+
+        const message = await switchTo('X86_64');
+
+        expect(message).toContain('bundle-arm');
+        expect(message).not.toContain('app/services/');
+        expect(message).not.toContain('does not change the infrastructure');
+      });
     });
 
     it('should pass the architecture to the vended infrastructure', async () => {

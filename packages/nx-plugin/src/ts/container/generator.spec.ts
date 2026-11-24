@@ -384,6 +384,24 @@ describe('ts#container generator', () => {
 
         expect(message).not.toContain('is now set to');
       });
+
+      // Escalating from infra=none vends the construct for the first time, so
+      // it already carries this run's architecture. Naming it would send the
+      // user to a file that is already right.
+      it('should name no file when this run vended the construct', async () => {
+        await run({ infra: 'none', architecture: 'ARM64' });
+
+        const message = await switchTo('X86_64');
+
+        expect(message).toContain(
+          'generated for ARM64 and is now set to X86_64',
+        );
+        expect(message).not.toContain('app/services/');
+        expect(message).not.toContain('does not change the infrastructure');
+        expect(tree.read(SERVICE_FILE, 'utf-8')).toContain(
+          "architecture: 'X86_64',",
+        );
+      });
     });
 
     it('should warn how to fix a build the host cannot run natively', async () => {

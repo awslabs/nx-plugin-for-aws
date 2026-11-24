@@ -245,7 +245,10 @@ describe('warnArchitectureSwitchIsPartial', () => {
       unchangedFiles: [],
     });
 
-    expect(message).toContain('generated for X86_64 and is now set to ARM64');
-    expect(message).toContain('then redeploy');
+    expect(message).toBe(
+      'This container service was generated for X86_64 and is now set to ARM64.',
+    );
+    // No claim about vended infrastructure, because there is none to name.
+    expect(message).not.toContain('vended');
   });
 });

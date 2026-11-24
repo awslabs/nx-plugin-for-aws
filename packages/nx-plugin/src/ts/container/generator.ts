@@ -136,11 +136,16 @@ export const tsContainerGenerator = async (
   warnIfArchitectureNeedsEmulation(architecture);
   const switchedArchitecture =
     previousArchitecture !== undefined && previousArchitecture !== architecture;
+  // Escalating from infra=none vends the infrastructure for the first time, so
+  // it already carries this run's architecture and there is no file to name.
+  const vendedInfraThisRun = recorded?.infra === 'none' && infra === 'ecs';
   if (switchedArchitecture) {
     warnArchitectureSwitchIsPartial({
       from: previousArchitecture,
       to: architecture,
-      unchangedFiles: vendedArchitectureFiles(name, iac, architecture),
+      unchangedFiles: vendedInfraThisRun
+        ? []
+        : vendedArchitectureFiles(name, iac, architecture),
     });
   }
 

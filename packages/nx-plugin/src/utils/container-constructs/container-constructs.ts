@@ -130,10 +130,14 @@ export const vendedArchitectureFiles = (
 };
 
 /**
- * Warns that a re-run with a different architecture changed only what the
- * generator owns. The infrastructure it vended is written `KeepExisting`, so
- * the architecture in it is the user's to change, and the service keeps
- * deploying on the old architecture until they do.
+ * Warns that a re-run changed the architecture of an existing service. The
+ * infrastructure the generator vended is written `KeepExisting`, so when a
+ * previous run vended it the architecture in it is the user's to change, and
+ * the service keeps deploying on the old architecture until they do.
+ *
+ * Says only what it knows: `unchangedFiles` is empty when this run vended the
+ * infrastructure itself, or when the service has none, and then there is no
+ * file to name.
  */
 export const warnArchitectureSwitchIsPartial = (options: {
   /** The architecture a previous run generated the service for. */
@@ -150,16 +154,12 @@ export const warnArchitectureSwitchIsPartial = (options: {
 }): void => {
   const { from, to, unchangedFiles, staleBundleTarget } = options;
   const lines = [
-    `This container service was generated for ${from} and is now set to ${to}. The generator changed its build targets; it does not change the infrastructure it vended, which still deploys ${from}.`,
+    `This container service was generated for ${from} and is now set to ${to}.`,
   ];
   if (unchangedFiles.length > 0) {
     lines.push(
-      'Change it yourself, then redeploy:',
+      `The generator changed its build targets; it does not change the infrastructure it vended, which still deploys ${from}. Change it yourself, then redeploy:`,
       ...unchangedFiles.map((file) => `  - ${file.path}: ${file.change}`),
-    );
-  } else {
-    lines.push(
-      `If you have deployed this service, change the architecture in the construct or module you deployed it with, then redeploy.`,
     );
   }
   if (staleBundleTarget) {

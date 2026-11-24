@@ -86,6 +86,13 @@ describe('container-service-architecture-prop migration', () => {
   });
 
   /** A workspace holding the CDK core construct v1.7.0 vended. */
+  /**
+   * A workspace holding the CDK core construct v1.7.0 vended, in the form it
+   * is on disk: the generator formats what it writes, and the vended template
+   * is not biome-clean, so the file a real workspace holds is the formatted
+   * rendering rather than the raw template. That is what the migration has to
+   * match its anchors against.
+   */
   const givenShippedCdkConstruct = async (
     contents = SHIPPED_ECS_SERVICE_TS,
   ): Promise<void> => {
@@ -95,9 +102,10 @@ describe('container-service-architecture-prop migration', () => {
       declareDependencies()({ ts: [...SHARED_CONSTRUCTS_DEPENDENCIES] }),
     );
     tree.write(ECS_SERVICE_TS, contents);
+    await formatFilesInSubtree(tree);
   };
 
-  /** A workspace holding the Terraform core module v1.7.0 vended. */
+  /** A workspace holding the Terraform core module v1.7.0 vended, formatted. */
   const givenShippedTerraformModule = async (
     overrides: { module?: string; variables?: string } = {},
   ): Promise<void> => {
@@ -108,6 +116,7 @@ describe('container-service-architecture-prop migration', () => {
     );
     tree.write(ECS_SERVICE_TF, overrides.module ?? SHIPPED_ECS_SERVICE_TF);
     tree.write(VARIABLES_TF, overrides.variables ?? SHIPPED_VARIABLES_TF);
+    await formatFilesInSubtree(tree);
   };
 
   /**
@@ -198,15 +207,14 @@ describe('container-service-architecture-prop migration', () => {
         '        cpuArchitecture: CpuArchitecture.X86_64,',
       );
       await givenShippedCdkConstruct(diverged);
+      const seeded = read(tree, ECS_SERVICE_TS);
 
       const { nextSteps } = await migration(tree);
 
-      // Nothing of the architecture input was added, and the line the user
-      // changed is still theirs. (`formatFilesInSubtree` runs either way, so
-      // this is the behaviour to assert rather than byte equality.)
+      // Untouched, byte for byte: the migration returns before any write.
       const after = read(tree, ECS_SERVICE_TS);
+      expect(after).toEqual(seeded);
       expect(after).not.toContain('EcsServiceArchitecture');
-      expect(after).not.toContain('ARCHITECTURES');
       expect(after).toContain('cpuArchitecture: CpuArchitecture.X86_64,');
       expect(nextSteps).toHaveLength(1);
       expect(nextSteps[0]).toContain(ECS_SERVICE_TS);
@@ -326,6 +334,18 @@ describe('container-service-architecture-prop migration', () => {
     // One line naming all three, plus nothing else.
     expect(nextSteps).toHaveLength(1);
     expect(nextSteps[0]).toContain('defaults to ARM64');
+  });
+
+  /**
+   * The point of formatting the seeded files: the raw template is not
+   * biome-clean, so the file a v1.7.0 workspace holds on disk is not the
+   * template text. If this stopped being true, the `givenShipped*` helpers
+   * would be testing the template again without anyone noticing.
+   */
+  it('should be tested against a file the format pass really changed', async () => {
+    await givenShippedCdkConstruct();
+
+    expect(read(tree, ECS_SERVICE_TS)).not.toEqual(SHIPPED_ECS_SERVICE_TS);
   });
 
   /**

@@ -26,20 +26,29 @@ import {
  * `cpu_architecture` to a core module that does not declare the variable, which
  * Terraform rejects as an unsupported argument.
  *
- * This replaces the core construct and module with the versions that take the
- * input. Both default it to ARM64, which is what the previous versions
- * hard-coded, so an existing service's synth and plan do not change: it is a
- * new input, not a new default.
+ * This gives the core construct and module the input, by editing the lines
+ * that hold the architecture rather than overwriting the files, so an
+ * unrelated change the user made to either is kept. Both default the input to
+ * ARM64, which is what the previous versions hard-coded, so an existing
+ * service's synth and plan do not change: it is a new input, not a new
+ * default.
  *
  * Guardrails:
  * - Every edit is checked before any is written, and a file missing one anchor
  *   is left entirely alone and reported through `nextSteps`. A half-rewritten
- *   construct would be worse than one the user fixes by hand.
+ *   construct would be worse than one the user fixes by hand. A file that
+ *   matches every anchor comes out byte-identical to a freshly generated one.
  * - Idempotent. A file that already names the architecture input is skipped
  *   before the anchors are read, so a second run writes nothing and reports
  *   nothing.
  * - A rewritten file is reported too. A user whose vended infrastructure
  *   changed in a patch release should not have to diff it to find out.
+ *
+ * Known limitation: most anchors span several lines with `\n`, so a working
+ * copy checked out with CRLF line endings (Git for Windows `core.autocrlf`)
+ * matches none of them. Such a file is reported as diverged, with the manual
+ * step, rather than being half-rewritten. No workspace is vended a
+ * `.gitattributes`, so that cohort is real.
  */
 
 /** One known old form and the new form that replaces it. */

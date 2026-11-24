@@ -142,6 +142,9 @@ export const pyContainerGenerator = async (
   warnIfArchitectureNeedsEmulation(architecture);
   const switchedArchitecture =
     previousArchitecture !== undefined && previousArchitecture !== architecture;
+  // Escalating from infra=none vends the infrastructure for the first time, so
+  // it already carries this run's architecture and there is no file to name.
+  const vendedInfraThisRun = recorded?.infra === 'none' && infra === 'ecs';
 
   const port = assignPort(tree, project, 8081, {
     component: { info: PY_CONTAINER_GENERATOR_INFO, name: targetPrefix },
@@ -183,7 +186,9 @@ export const pyContainerGenerator = async (
     warnArchitectureSwitchIsPartial({
       from: previousArchitecture,
       to: architecture,
-      unchangedFiles: vendedArchitectureFiles(name, iac, architecture),
+      unchangedFiles: vendedInfraThisRun
+        ? []
+        : vendedArchitectureFiles(name, iac, architecture),
       ...(project.targets[staleBundleTarget] ? { staleBundleTarget } : {}),
     });
   }
