@@ -148,6 +148,7 @@ module "ecs_service" {
   image_uri                   = "\${null_resource.docker_publish.triggers.repository_url}:\${null_resource.docker_publish.triggers.image_tag}"
   image_repository_arn        = var.asset_ecr_repository_arn
   container_port              = 8080
+  cpu_architecture            = "ARM64"
   health_check_command        = ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||'8080')+'/health',{signal:AbortSignal.timeout(3000)}).then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
   environment                 = local.environment
   secrets                     = var.secrets
@@ -340,6 +341,7 @@ module "ecs_service" {
   image_uri                   = "\${null_resource.docker_publish.triggers.repository_url}:\${null_resource.docker_publish.triggers.image_tag}"
   image_repository_arn        = var.asset_ecr_repository_arn
   container_port              = 8080
+  cpu_architecture            = "ARM64"
   health_check_command        = ["CMD", "python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '8080') + '/health', timeout=3)"]
   environment                 = local.environment
   secrets                     = var.secrets
@@ -652,7 +654,7 @@ resource "aws_ecs_task_definition" "this" {
   task_role_arn            = aws_iam_role.task.arn
 
   runtime_platform {
-    cpu_architecture        = "ARM64"
+    cpu_architecture        = var.cpu_architecture
     operating_system_family = "LINUX"
   }
 
@@ -825,8 +827,8 @@ output "log_group_name" {
 `;
 
 exports[`addContainerServiceTerraformModules > snapshots > should render the core module > variables.tf 1`] = `
-"# Inputs of the reusable ECS service module (AWS Fargate, linux/arm64) in an
-# existing VPC. The module never creates a VPC.
+"# Inputs of the reusable ECS service module (AWS Fargate) in an existing VPC.
+# The module never creates a VPC.
 
 variable "service_name" {
   description = "Name of the service."
@@ -870,6 +872,17 @@ variable "memory" {
   description = "Task memory in MiB."
   type        = number
   default     = 512
+}
+
+variable "cpu_architecture" {
+  description = "CPU architecture the task runs on. ARM64 runs on AWS Graviton, which costs less per task on AWS Fargate; X86_64 runs on Intel or AMD. The image in image_uri must be built for it."
+  type        = string
+  default     = "ARM64"
+
+  validation {
+    condition     = contains(["ARM64", "X86_64"], var.cpu_architecture)
+    error_message = "cpu_architecture must be ARM64 or X86_64."
+  }
 }
 
 variable "desired_count" {

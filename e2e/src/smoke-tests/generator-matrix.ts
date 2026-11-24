@@ -256,8 +256,14 @@ export const runGeneratorMatrix = async (
   );
   // Container services on ECS, one per language. Each is the source of its
   // language's data connections.
+  //
+  // The TypeScript one pins ARM64 and the Python one takes the default, which
+  // is the runner's own architecture: between them one image of each
+  // architecture is built, bundled and scanned on every lane that generates
+  // this matrix. CI runners are x86_64 and `init-monorepo` registers the QEMU
+  // handlers the ARM64 build needs.
   await runCLI(
-    `generate @aws/nx-plugin:ts#container --project=ts-project --name=my-ts-container --no-interactive${deferFlag}`,
+    `generate @aws/nx-plugin:ts#container --project=ts-project --name=my-ts-container --architecture=ARM64 --no-interactive${deferFlag}`,
     opts,
   );
   await runCLI(

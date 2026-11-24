@@ -515,10 +515,17 @@ export const internalTestMatrixGenerator = async (
   });
 
   // Container services on ECS, one per language.
+  //
+  // The TypeScript one pins ARM64 and the Python one takes the default, which
+  // is the runner's own architecture: between them one image of each
+  // architecture is built and scanned, the same split `generator-matrix.ts`
+  // uses. Pinning one also keeps this generator's output from depending
+  // entirely on the host it runs on.
   await tsContainerGenerator(tree, {
     project: 'ts-project',
     name: 'my-ts-container',
     iac: 'inherit',
+    architecture: 'ARM64',
     ...defaults,
   });
   await pyContainerGenerator(tree, {

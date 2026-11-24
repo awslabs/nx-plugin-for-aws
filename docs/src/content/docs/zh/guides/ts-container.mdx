@@ -129,7 +129,7 @@ curl http://localhost:<port>/health
 
 ## 构建和扫描镜像
 
-`<name>-docker` 目标构建您的服务的 linux/arm64 镜像。它首先运行 `bundle` 目标，因此镜像包含打包的服务器。然后它将 `Dockerfile` 和 `.dockerignore` 复制到 bundle 输出文件夹 `dist/<project root>/bundle/container/<name>` 中，并使用该文件夹作为构建上下文（镜像构建可以读取的文件）构建镜像。它使用您的工作区设置的容器引擎，`docker` 或 [Finch](https://runfinch.com/)。该目标作为聚合 `docker` 目标的一部分运行，该目标构建项目中的每个镜像。
+`<name>-docker` 目标为 `architecture` 选项中的 CPU 架构构建您的服务镜像，`linux/arm64` 或 `linux/amd64`。它首先运行 `bundle` 目标，因此镜像包含打包的服务器。然后它将 `Dockerfile` 和 `.dockerignore` 复制到 bundle 输出文件夹 `dist/<project root>/bundle/container/<name>` 中，并使用该文件夹作为构建上下文（镜像构建可以读取的文件）构建镜像。它使用您的工作区设置的容器引擎，`docker` 或 [Finch](https://runfinch.com/)。该目标作为聚合 `docker` 目标的一部分运行，该目标构建项目中的每个镜像。
 
 <NxCommands commands={['run your-project:container-docker']} />
 
@@ -362,6 +362,31 @@ secrets     = { API_KEY = aws_secretsmanager_secret.api_key.arn }
 </Fragment>
 </Infrastructure>
 
+#### CPU 架构
+
+`architecture` 选项设置任务运行的 CPU 和镜像构建的平台：`ARM64` 或 `X86_64`。ARM64 运行在 [AWS Graviton](https://aws.amazon.com/ec2/graviton/) 处理器上，AWS Fargate 对其每 vCPU 和每 GB 内存的计费费率低于 X86_64。有关您所在区域的费率，请参阅 [AWS Fargate pricing](https://aws.amazon.com/fargate/pricing/)。
+
+省略该选项，生成器将使用您运行它的机器的架构，因此 `nx run your-project:container-docker` 原生构建，不需要模拟器。重新运行生成器会保留它第一次生成的架构，无论您在哪台机器上重新运行它，因为该架构已经在您部署的任务定义中。
+
+架构在首次生成服务时固定。生成器永远不会重写它提供的基础设施，因此将现有服务移动到另一个架构需要两个步骤：
+
+1. 在提供的代码中更改架构。在 CDK 中，是 `packages/common/constructs/src/app/services/<name>.ts` 中的 `architecture:` 行。在 Terraform 中，是 `packages/common/terraform/src/app/services/<name>/<name>.tf` 的 `module "ecs_service"` 块中的 `cpu_architecture`。
+2. 使用 `--architecture` 设置为相同的值重新运行生成器，以便 `<name>-docker` 目标为其构建。
+
+然后重新部署。如果您传递的架构与生成器记录的架构不同，它会发出警告并指出您必须更改的文件。
+
+执行步骤 2 而忘记步骤 1 会因提供商而异地失败，并且两种失败都不明显。在 Terraform 中，任务定义保留旧架构，而 Terraform 推送的镜像具有新架构，因此任务无法启动。在 CDK 中，部署的镜像是从提供的构造构建的，因此服务继续在旧架构上运行，而您在本地构建和扫描的镜像是另一个架构，永远不会被部署。
+
+`architecture` 也是提供的服务构造的属性，因此堆栈可以为单个实例化传递不同的架构。这会更改部署的内容，但不会更改 `<name>-docker` 和 `<name>-trivy` 目标构建的内容，因此请自己保持两者同步。
+
+在 x86_64 机器上构建 ARM64 镜像，或在 arm64 机器上构建 X86_64 镜像，除非您安装模拟器，否则会失败并显示 `exec format error`。当生成器即将生成的架构不是您的机器运行的架构时，生成器会警告您。请参阅 <Link path="/troubleshooting/docker">Troubleshooting Docker</Link>。
+
+| 设置 | CDK 属性 | Terraform 变量 | 默认值 |
+| --- | --- | --- | --- |
+| CPU 架构 | `architecture` | `cpu_architecture` | `'ARM64'` |
+
+生成器将其选择的架构写入您的服务的构造和模块中，因此该默认值仅在您自己使用通用 `EcsService` 构造或 `ecs-service` 模块时适用。
+
 #### 大小和扩展
 
 默认情况下，每个任务获得 256 个 CPU 单元（四分之一个 vCPU）和 512 MiB 内存。服务启动一个任务，自动扩展保持一到两个任务运行，当平均 CPU 使用率超过 70% 时添加任务。
@@ -440,7 +465,7 @@ task_role_policy_statements = [{
 </Fragment>
 </Infrastructure>
 
-然后在 AWS 控制台或使用 AWS CLI 检查 ECS 服务和集群是否已消失。使用 CDK 和 Terraform，destroy 都会删除服务的日志组并安排其 AWS KMS 密钥删除，因此服务不会留下任何东西。KMS 删除密钥之前的等待期在 CDK 中为 30 天，在 Terraform 中为 7 天。镜像保留在 Amazon ECR 中，在 CDK 资产仓库或共享 `asset-ecr` 仓库中。如果您不再需要它们，请删除它们。VPC 是您的，因此销毁服务会将其保留在原处。
+然后在 AWS 控制台或使用 AWS CLI 检查 ECS 服务和集群是否已消失。使用 CDK 和 Terraform，destroy 都会删除服务的日志组并安排其 AWS KMS 密钥删除。KMS 在删除密钥之前等待 7 天。镜像保留在 Amazon ECR 中，在 CDK 资产仓库或共享 `asset-ecr` 仓库中。如果您不再需要它们，请删除它们。VPC 是您的，因此销毁服务会将其保留在原处。
 </OptionFilter>
 
 ## 连接您的服务

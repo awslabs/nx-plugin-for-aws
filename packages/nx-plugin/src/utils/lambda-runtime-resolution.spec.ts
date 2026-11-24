@@ -4,12 +4,13 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  compareRuntimeVersions,
+  LAMBDA_RUNTIME_CEILINGS,
   resolveLambdaRuntimes,
   runtimeIdentifierVersion,
   unresolvedRuntimeWarning,
 } from './lambda-runtime-resolution.js';
-import { LAMBDA_RUNTIME_VERSIONS } from './versions.js';
+import { compareRuntimeVersions } from './runtime-resolution.js';
+import { type ILambdaRuntime, LAMBDA_RUNTIME_VERSIONS } from './versions.js';
 
 /** A slice of `Runtime.ALL` names, as `aws-cdk-lib` publishes them. */
 const CDK_RUNTIMES = [
@@ -65,14 +66,94 @@ describe('lambda runtime resolution', () => {
     });
 
     it('should compare majors numerically rather than as text', () => {
-      const { versions } = resolveLambdaRuntimes([
-        'nodejs9.x',
-        'nodejs100.x',
-        'python3.9',
-        'python3.100',
-      ]);
+      // No ceilings, so the comparison is what decides the result.
+      const { versions } = resolveLambdaRuntimes(
+        ['nodejs9.x', 'nodejs100.x', 'python3.9', 'python3.100'],
+        {},
+      );
 
       expect(versions).toEqual({ node: '100', python: '3.100' });
+    });
+  });
+
+  describe('holding a runtime below its ceiling', () => {
+    // `Runtime.ALL` lists runtimes that are not generally available: aws-cdk-lib
+    // added `python3.15` in 2.276.0 and `nodejs26.x` in 2.277.0, both days
+    // before Lambda made them GA. The ceiling decides in this repo when a
+    // runtime moves.
+    const CEILINGS = {
+      node: {
+        ceiling: '24',
+        reason: 'the vended image',
+        liftWhen: 'the newer image is published',
+      },
+    };
+
+    it('should keep the pin when CDK lists a runtime above the ceiling', () => {
+      const { versions, unresolved } = resolveLambdaRuntimes(
+        ['nodejs26.x', 'python3.14'],
+        CEILINGS,
+      );
+
+      expect(versions.node).toBe(LAMBDA_RUNTIME_VERSIONS.node);
+      expect(unresolved).toEqual([
+        {
+          language: 'node',
+          kept: LAMBDA_RUNTIME_VERSIONS.node,
+          reason: 'held-below-ceiling',
+          detail: 'the vended image',
+          liftWhen: 'the newer image is published',
+        },
+      ]);
+    });
+
+    // Surfaced in the PR body, so a hold that has outlived its reason is visible
+    // without reading the resolver — carrying the lift condition as well as the
+    // reason, the way a Python or Terraform hold reports it.
+    it('should warn with the reason the runtime is held', () => {
+      const { unresolved } = resolveLambdaRuntimes(['nodejs26.x'], CEILINGS);
+
+      expect(unresolvedRuntimeWarning(unresolved[0])).toContain(
+        'the vended image',
+      );
+      expect(unresolvedRuntimeWarning(unresolved[0])).toContain('node');
+      expect(unresolvedRuntimeWarning(unresolved[0])).toContain(
+        'Lift when the newer image is published',
+      );
+    });
+
+    it('should still move a language with no ceiling', () => {
+      const { versions, unresolved } = resolveLambdaRuntimes(
+        ['nodejs26.x', 'python3.99'],
+        CEILINGS,
+      );
+
+      expect(versions.python).toBe('3.99');
+      expect(unresolved.map((entry) => entry.language)).toEqual(['node']);
+    });
+
+    // A ceiling above the pin, and the version a held note names, are covered in
+    // `runtime-resolution.spec.ts`, where the pins are a fixture rather than the
+    // live ones this resolver reads.
+
+    // A ceiling below the pin it caps does nothing, because the hold never moves
+    // a runtime backwards: the pin stays and only the hold warning appears. Such
+    // a ceiling reads as a hold to the next version it would cap, so the shipped
+    // ones are checked against the pins instead of being taken on trust.
+    it('should ship no ceiling below the runtime it caps', () => {
+      const inert: string[] = [];
+
+      for (const language of Object.keys(
+        LAMBDA_RUNTIME_VERSIONS,
+      ) as ILambdaRuntime[]) {
+        const held = LAMBDA_RUNTIME_CEILINGS[language];
+        const pin = LAMBDA_RUNTIME_VERSIONS[language];
+        if (held && compareRuntimeVersions(held.ceiling, pin) < 0) {
+          inert.push(`${language}: ceiling ${held.ceiling} below pin ${pin}`);
+        }
+      }
+
+      expect(inert).toEqual([]);
     });
   });
 

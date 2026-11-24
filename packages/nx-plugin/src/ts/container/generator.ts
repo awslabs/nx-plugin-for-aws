@@ -18,7 +18,13 @@ import {
 import {
   addContainerServiceInfra,
   CONTAINER_PORT,
+  containerBuildPlatform,
   containerHealthCheckCommand,
+  recordedContainerArchitecture,
+  resolveContainerArchitecture,
+  vendedArchitectureFiles,
+  warnArchitectureSwitchIsPartial,
+  warnIfArchitectureNeedsEmulation,
 } from '../../utils/container-constructs/container-constructs.js';
 import type { ContainerMetadata } from '../../utils/container-constructs/container-metadata.js';
 import { resolveContainers } from '../../utils/containers.js';
@@ -119,6 +125,30 @@ export const tsContainerGenerator = async (
   const infra = options.infra ?? 'ecs';
   const iac = infra === 'ecs' ? await resolveIac(tree, options.iac) : undefined;
 
+  // Read before anything is written, so the architecture a previous run put in
+  // the vended code is kept rather than re-detected from this machine.
+  const recorded = recordedMetadata(tree, project.name, targetPrefix);
+  const previousArchitecture = recordedContainerArchitecture(recorded);
+  const architecture = resolveContainerArchitecture(
+    options.architecture,
+    recorded,
+  );
+  warnIfArchitectureNeedsEmulation(architecture);
+  const switchedArchitecture =
+    previousArchitecture !== undefined && previousArchitecture !== architecture;
+  // Escalating from infra=none vends the infrastructure for the first time, so
+  // it already carries this run's architecture and there is no file to name.
+  const vendedInfraThisRun = recorded?.infra === 'none' && infra === 'ecs';
+  if (switchedArchitecture) {
+    warnArchitectureSwitchIsPartial({
+      from: previousArchitecture,
+      to: architecture,
+      unchangedFiles: vendedInfraThisRun
+        ? []
+        : vendedArchitectureFiles(name, iac, architecture),
+    });
+  }
+
   const port = assignPort(tree, project, 8081, {
     component: { info: TS_CONTAINER_GENERATOR_INFO, name: targetPrefix },
   });
@@ -170,7 +200,7 @@ export const tsContainerGenerator = async (
           `${sourceDir}/.dockerignore`,
           `${bundleOutputDir}/.dockerignore`,
         ),
-        `${containers} build --platform linux/arm64 -t ${dockerImageTag} ${bundleOutputDir}`,
+        `${containers} build --platform ${containerBuildPlatform(architecture)} -t ${dockerImageTag} ${bundleOutputDir}`,
       ],
       parallel: false,
     },
@@ -201,6 +231,7 @@ export const tsContainerGenerator = async (
       dockerBuildContextDir: bundleOutputDir,
       containerPort: CONTAINER_PORT,
       healthCheckCommand: containerHealthCheckCommand('node'),
+      architecture,
       containers,
       iac,
     });
@@ -235,6 +266,7 @@ export const tsContainerGenerator = async (
     infra,
     port,
     rc: nameClassName,
+    architecture,
     ...(iac ? { iac } : {}),
   };
 
@@ -243,7 +275,6 @@ export const tsContainerGenerator = async (
     projectRoot: project.root,
   });
 
-  const recorded = recordedMetadata(tree, project.name, targetPrefix);
   addComponentGeneratorMetadata(
     tree,
     project.name,
@@ -263,6 +294,18 @@ export const tsContainerGenerator = async (
         infra: metadata.infra,
         iac: metadata.iac,
       },
+    );
+  }
+  if (switchedArchitecture) {
+    // The run was asked for another architecture, so record it. Otherwise the
+    // next re-run without the option would resolve the old one and quietly put
+    // the build targets back, fighting the vended code the user just changed.
+    updateComponentGeneratorMetadata(
+      tree,
+      project.name,
+      TS_CONTAINER_GENERATOR_INFO,
+      targetPrefix,
+      { architecture },
     );
   }
 

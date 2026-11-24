@@ -129,7 +129,7 @@ The server also has a sample route that you replace with your own routes. `GET /
 
 ## Building and Scanning the Image
 
-The `<name>-docker` target builds a linux/arm64 image of your service. It runs the `bundle` target first, so the image holds the bundled server. It then copies the `Dockerfile` and `.dockerignore` into the bundle output folder, `dist/<project root>/bundle/container/<name>`, and builds the image with that folder as the build context (the files the image build can read). It uses the container engine your workspace is set up with, `docker` or [Finch](https://runfinch.com/). The target runs as part of the aggregate `docker` target, which builds every image in the project.
+The `<name>-docker` target builds an image of your service for the CPU architecture in the `architecture` option, `linux/arm64` or `linux/amd64`. It runs the `bundle` target first, so the image holds the bundled server. It then copies the `Dockerfile` and `.dockerignore` into the bundle output folder, `dist/<project root>/bundle/container/<name>`, and builds the image with that folder as the build context (the files the image build can read). It uses the container engine your workspace is set up with, `docker` or [Finch](https://runfinch.com/). The target runs as part of the aggregate `docker` target, which builds every image in the project.
 
 <NxCommands commands={['run your-project:container-docker']} />
 
@@ -361,6 +361,31 @@ secrets     = { API_KEY = aws_secretsmanager_secret.api_key.arn }
 
 </Fragment>
 </Infrastructure>
+
+#### CPU Architecture
+
+The `architecture` option sets the CPU the tasks run on and the platform the image is built for: `ARM64` or `X86_64`. ARM64 runs on [AWS Graviton](https://aws.amazon.com/ec2/graviton/) processors, which AWS Fargate bills at a lower rate per vCPU and per GB of memory than X86_64. See [AWS Fargate pricing](https://aws.amazon.com/fargate/pricing/) for the rates in your Region.
+
+Leave the option out and the generator uses the architecture of the machine you run it on, so `nx run your-project:container-docker` builds natively and needs no emulator. Re-running the generator keeps the architecture it generated the first time, whatever machine you re-run it on, because that architecture is already in your deployed task definition.
+
+The architecture is fixed when the service is first generated. The generator never rewrites the infrastructure it vended, so moving an existing service to the other architecture takes two steps:
+
+1. Change the architecture in the vended code. In CDK, the `architecture:` line in `packages/common/constructs/src/app/services/<name>.ts`. In Terraform, `cpu_architecture` in the `module "ecs_service"` block of `packages/common/terraform/src/app/services/<name>/<name>.tf`.
+2. Re-run the generator with `--architecture` set to the same value, so the `<name>-docker` target builds for it.
+
+Then redeploy. If you pass an architecture that differs from the one the generator recorded, it warns and names the file you have to change.
+
+Doing step 2 and forgetting step 1 fails differently per provider, and neither failure is loud. In Terraform, the task definition keeps the old architecture while the image Terraform pushes has the new one, so the task does not start. In CDK, the deployed image is built from the vended construct, so the service keeps running on the old architecture and the image you built and scanned locally is the other one, which is never deployed.
+
+`architecture` is also a prop of the vended service construct, so a stack can pass a different one for a single instantiation. That changes what deploys but not what the `<name>-docker` and `<name>-trivy` targets build, so keep the two in step yourself.
+
+Building an ARM64 image on an x86_64 machine, or an X86_64 image on an arm64 machine, fails with `exec format error` unless you install an emulator. The generator warns you when the architecture it is about to generate is not the one your machine runs. See <Link path="/troubleshooting/docker">Troubleshooting Docker</Link>.
+
+| Setting | CDK prop | Terraform variable | Default |
+| --- | --- | --- | --- |
+| CPU architecture | `architecture` | `cpu_architecture` | `'ARM64'` |
+
+The generator writes the architecture it chose into your service's construct and module, so that default applies only when you use the generic `EcsService` construct or the `ecs-service` module yourself.
 
 #### Sizing and Scaling
 

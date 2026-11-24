@@ -3,11 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  AGENT_CORE_RUNTIME_CEILINGS,
   agentCoreRuntimeIdentifierVersion,
   resolveAgentCoreRuntimes,
   unresolvedAgentCoreRuntimeWarning,
 } from './agent-core-runtime-resolution.js';
-import { AGENT_CORE_RUNTIME_VERSIONS } from './versions.js';
+import { compareRuntimeVersions } from './runtime-resolution.js';
+import {
+  AGENT_CORE_RUNTIME_VERSIONS,
+  type IAgentCoreRuntime,
+} from './versions.js';
 
 /**
  * The identifiers `aws-cdk-lib` publishes as `AgentCoreRuntime` members at the
@@ -90,6 +95,79 @@ describe('agent core runtime resolution', () => {
       expect(unresolved).toHaveLength(
         Object.keys(AGENT_CORE_RUNTIME_VERSIONS).length,
       );
+    });
+  });
+
+  // `aws-cdk-lib` publishes an `AgentCoreRuntime` member when CDK adds it, not
+  // when AgentCore makes the runtime generally available — the same thing
+  // `Runtime.ALL` did with python3.15 and nodejs26.x. A ceiling is how this repo
+  // declines such a member; nothing else would catch it, since the member exists
+  // in CDK by definition.
+  describe('holding a runtime below its ceiling', () => {
+    const CEILINGS = {
+      python: {
+        ceiling: '3.14',
+        reason: 'the service has no 3.15 yet',
+        liftWhen: 'AgentCore accepts PYTHON_3_15',
+      },
+    };
+
+    it('should keep the pin when CDK lists a runtime above the ceiling', () => {
+      const { versions, unresolved } = resolveAgentCoreRuntimes(
+        [...CDK_IDENTIFIERS, 'PYTHON_3_15'],
+        CEILINGS,
+      );
+
+      expect(versions.python).toBe(AGENT_CORE_RUNTIME_VERSIONS.python);
+      expect(unresolved).toEqual([
+        {
+          language: 'python',
+          kept: AGENT_CORE_RUNTIME_VERSIONS.python,
+          reason: 'held-below-ceiling',
+          detail: 'the service has no 3.15 yet',
+          liftWhen: 'AgentCore accepts PYTHON_3_15',
+        },
+      ]);
+    });
+
+    it('should warn with the reason and the lift condition', () => {
+      const { unresolved } = resolveAgentCoreRuntimes(
+        [...CDK_IDENTIFIERS, 'PYTHON_3_15'],
+        CEILINGS,
+      );
+      const warning = unresolvedAgentCoreRuntimeWarning(unresolved[0]);
+
+      expect(warning).toContain('AgentCore');
+      expect(warning).toContain('the service has no 3.15 yet');
+      expect(warning).toContain('Lift when AgentCore accepts PYTHON_3_15');
+    });
+
+    it('should still move a language with no ceiling', () => {
+      const { versions, unresolved } = resolveAgentCoreRuntimes(
+        [...CDK_IDENTIFIERS, 'NODE_24', 'PYTHON_3_15'],
+        CEILINGS,
+      );
+
+      expect(versions.node).toBe('24');
+      expect(unresolved.map((entry) => entry.language)).toEqual(['python']);
+    });
+
+    // A ceiling below the pin it caps is inert, because the resolution never
+    // moves a runtime backwards, yet it reads as a hold.
+    it('should ship no ceiling below the runtime it caps', () => {
+      const inert: string[] = [];
+
+      for (const language of Object.keys(
+        AGENT_CORE_RUNTIME_VERSIONS,
+      ) as IAgentCoreRuntime[]) {
+        const held = AGENT_CORE_RUNTIME_CEILINGS[language];
+        const pin = AGENT_CORE_RUNTIME_VERSIONS[language];
+        if (held && compareRuntimeVersions(held.ceiling, pin) < 0) {
+          inert.push(`${language}: ceiling ${held.ceiling} below pin ${pin}`);
+        }
+      }
+
+      expect(inert).toEqual([]);
     });
   });
 

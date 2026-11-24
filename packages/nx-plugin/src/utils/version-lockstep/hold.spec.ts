@@ -128,6 +128,31 @@ describe('PY_VERSION_HOLDS', () => {
       expect(liftWhen).not.toBe('');
     }
   });
+
+  // A hold's reason names the version ADOT requires, and the pin is only
+  // correct while it equals that version. The reason is prose, so moving the
+  // pin without rewriting it leaves the hold set claiming a version the table
+  // no longer holds — which is how the ADOT 0.22.0 -> 0.24.0 bump shipped pins
+  // that could not resolve.
+  it('names, in each ADOT hold, the version its pin is actually held at', () => {
+    const adotHolds = PY_VERSION_HOLDS.filter(({ reason }) =>
+      reason.startsWith('the generated ADOT distribution requires'),
+    );
+    expect(adotHolds.length).toBeGreaterThan(0);
+
+    for (const { name, reason } of adotHolds) {
+      const match = /requires (\S+) (\d\S*)$/.exec(reason);
+      expect(
+        match,
+        `${name}'s reason does not name a package and version`,
+      ).not.toBeNull();
+      const [, named, version] = match as RegExpExecArray;
+      expect(named, `${name}'s reason names ${named}`).toBe(name);
+      expect(`==${version}`, `${name}'s reason disagrees with its pin`).toBe(
+        PY_VERSIONS[name],
+      );
+    }
+  });
 });
 
 describe('TERRAFORM_VERSION_HOLDS', () => {

@@ -90,3 +90,42 @@ export const snapshotTreeDir = (tree: Tree, dir: string) => {
       );
   }
 };
+
+/**
+ * Stands in for the CPU architecture of the machine the generator runs on, and
+ * returns a function that puts the real one back.
+ *
+ * A generator that reads `process.arch` to decide what it writes would
+ * otherwise produce different files, and different snapshots, on an arm64 and
+ * an x86_64 machine. Pin it in a spec that generates such a file.
+ *
+ * `arch` takes a `process.arch` value, in practice `arm64` or `x64`.
+ */
+export const stubHostArch = (arch: string): (() => void) => {
+  const original = process.arch;
+  Object.defineProperty(process, 'arch', { value: arch, configurable: true });
+  return () =>
+    Object.defineProperty(process, 'arch', {
+      value: original,
+      configurable: true,
+    });
+};
+
+/**
+ * Runs `run` as if this machine's CPU architecture were `arch`, and awaits it
+ * before putting the real one back. Awaiting matters for a generator, which
+ * reads `process.arch` after its first `await`.
+ *
+ * Nests: an inner call restores the architecture the outer one had stubbed.
+ */
+export const onHostArch = async <T>(
+  arch: string,
+  run: () => T | Promise<T>,
+): Promise<T> => {
+  const restore = stubHostArch(arch);
+  try {
+    return await run();
+  } finally {
+    restore();
+  }
+};

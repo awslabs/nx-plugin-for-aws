@@ -401,6 +401,22 @@ describe('trpc backend generator', () => {
     );
   });
 
+  it('should bind the local server to loopback unless HOST is set', async () => {
+    await tsTrpcApiGenerator(tree, {
+      name: 'TestApi',
+      directory: 'apps',
+      infra: 'http-lambda',
+      auth: 'iam',
+      iac: 'cdk',
+    });
+
+    const localServer = tree.read('apps/test-api/src/local-server.ts', 'utf-8');
+    expect(localServer).toContain(
+      "const HOST = process.env.HOST || '127.0.0.1'",
+    );
+    expect(localServer).toContain('.listen(PORT, HOST)');
+  });
+
   it('should add generator metric to app.ts', async () => {
     // Call the generator function
     await tsTrpcApiGenerator(tree, {

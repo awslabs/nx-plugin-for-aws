@@ -129,7 +129,7 @@ curl http://localhost:<port>/health
 
 ## イメージのビルドとスキャン
 
-`<name>-docker`ターゲットは、サービスのlinux/arm64イメージをビルドします。最初に`bundle`ターゲットを実行するため、イメージにはバンドルされたサーバーが含まれます。次に、`Dockerfile`と`.dockerignore`をバンドル出力フォルダー`dist/<project root>/bundle/container/<name>`にコピーし、そのフォルダーをビルドコンテキスト（イメージビルドが読み取れるファイル）としてイメージをビルドします。ワークスペースで設定されているコンテナエンジン、`docker`または[Finch](https://runfinch.com/)を使用します。このターゲットは、プロジェクト内のすべてのイメージをビルドする集約`docker`ターゲットの一部として実行されます。
+`<name>-docker`ターゲットは、`architecture`オプションで指定されたCPUアーキテクチャ（`linux/arm64`または`linux/amd64`）用のサービスのイメージをビルドします。最初に`bundle`ターゲットを実行するため、イメージにはバンドルされたサーバーが含まれます。次に、`Dockerfile`と`.dockerignore`をバンドル出力フォルダー`dist/<project root>/bundle/container/<name>`にコピーし、そのフォルダーをビルドコンテキスト（イメージビルドが読み取れるファイル）としてイメージをビルドします。ワークスペースで設定されているコンテナエンジン、`docker`または[Finch](https://runfinch.com/)を使用します。このターゲットは、プロジェクト内のすべてのイメージをビルドする集約`docker`ターゲットの一部として実行されます。
 
 <NxCommands commands={['run your-project:container-docker']} />
 
@@ -362,6 +362,31 @@ secrets     = { API_KEY = aws_secretsmanager_secret.api_key.arn }
 </Fragment>
 </Infrastructure>
 
+#### CPUアーキテクチャ
+
+`architecture`オプションは、タスクが実行されるCPUとイメージがビルドされるプラットフォームを設定します：`ARM64`または`X86_64`です。ARM64は[AWS Graviton](https://aws.amazon.com/ec2/graviton/)プロセッサ上で実行され、AWS FargateはX86_64よりもvCPUあたりおよびメモリのGBあたりの料金が低くなります。リージョンの料金については、[AWS Fargate pricing](https://aws.amazon.com/fargate/pricing/)を参照してください。
+
+オプションを省略すると、ジェネレーターは実行するマシンのアーキテクチャを使用するため、`nx run your-project:container-docker`はネイティブにビルドされ、エミュレーターは必要ありません。ジェネレーターを再実行すると、最初に生成されたアーキテクチャが保持されます。どのマシンで再実行しても、そのアーキテクチャはすでにデプロイされたタスク定義に含まれているためです。
+
+アーキテクチャは、サービスが最初に生成されたときに固定されます。ジェネレーターは生成したインフラストラクチャを書き換えないため、既存のサービスを別のアーキテクチャに移行するには2つのステップが必要です：
+
+1. 生成されたコード内のアーキテクチャを変更します。CDKでは、`packages/common/constructs/src/app/services/<name>.ts`の`architecture:`行です。Terraformでは、`packages/common/terraform/src/app/services/<name>/<name>.tf`の`module "ecs_service"`ブロック内の`cpu_architecture`です。
+2. `--architecture`を同じ値に設定してジェネレーターを再実行し、`<name>-docker`ターゲットがそれに対してビルドするようにします。
+
+その後、再デプロイします。ジェネレーターが記録したものと異なるアーキテクチャを渡すと、警告が表示され、変更する必要があるファイルが示されます。
+
+ステップ2を実行してステップ1を忘れると、プロバイダーごとに異なる失敗が発生し、どちらの失敗も目立ちません。Terraformでは、タスク定義は古いアーキテクチャを保持し、Terraformがプッシュするイメージは新しいアーキテクチャを持つため、タスクは起動しません。CDKでは、デプロイされるイメージは生成されたコンストラクトからビルドされるため、サービスは古いアーキテクチャで実行され続け、ローカルでビルドおよびスキャンしたイメージは別のもので、デプロイされることはありません。
+
+`architecture`は生成されたサービスコンストラクトのプロップでもあるため、スタックは単一のインスタンス化に対して異なるものを渡すことができます。これはデプロイされるものを変更しますが、`<name>-docker`および`<name>-trivy`ターゲットがビルドするものは変更しないため、2つを自分で同期させてください。
+
+x86_64マシンでARM64イメージをビルドする、またはarm64マシンでX86_64イメージをビルドすると、エミュレーターをインストールしない限り`exec format error`で失敗します。ジェネレーターは、生成しようとしているアーキテクチャがマシンが実行しているものでない場合に警告します。<Link path="/troubleshooting/docker">Troubleshooting Docker</Link>を参照してください。
+
+| 設定 | CDKプロップ | Terraform変数 | デフォルト |
+| --- | --- | --- | --- |
+| CPUアーキテクチャ | `architecture` | `cpu_architecture` | `'ARM64'` |
+
+ジェネレーターは選択したアーキテクチャをサービスのコンストラクトとモジュールに書き込むため、このデフォルトは汎用の`EcsService`コンストラクトまたは`ecs-service`モジュールを自分で使用する場合にのみ適用されます。
+
 #### サイジングとスケーリング
 
 各タスクは、デフォルトで256 CPUユニット（vCPUの4分の1）と512 MiBのメモリを取得します。サービスは1つのタスクを起動し、オートスケーリングは1つから2つのタスクを実行し続け、平均CPU使用率が70%を超えるとタスクを追加します。
@@ -440,7 +465,7 @@ Terraformでは、`container_user`は`ecs-service`モジュールの変数です
 </Fragment>
 </Infrastructure>
 
-次に、AWSコンソールまたはAWS CLIで、ECSサービスとクラスターがなくなっていることを確認します。CDKとTerraformの両方で、destroyはサービスのロググループを削除し、AWS KMSキーの削除をスケジュールするため、サービスの何も残りません。KMSがキーを削除する前の待機期間は、CDKでは30日、Terraformでは7日です。イメージはAmazon ECRに残り、CDKアセットリポジトリまたは共有`asset-ecr`リポジトリにあります。不要になった場合は削除してください。VPCはあなたのものなので、サービスを破棄してもそのまま残ります。
+次に、AWSコンソールまたはAWS CLIで、ECSサービスとクラスターがなくなっていることを確認します。CDKとTerraformの両方で、destroyはサービスのロググループを削除し、AWS KMSキーの削除をスケジュールします。KMSは、キーを削除する前に7日間待機します。イメージはAmazon ECRに残り、CDKアセットリポジトリまたは共有`asset-ecr`リポジトリにあります。不要になった場合は削除してください。VPCはあなたのものなので、サービスを破棄してもそのまま残ります。
 </OptionFilter>
 
 ## サービスの接続
