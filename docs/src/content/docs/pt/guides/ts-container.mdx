@@ -129,7 +129,7 @@ O servidor também tem uma rota de exemplo que você substitui por suas própria
 
 ## Construindo e Escaneando a Imagem
 
-O target `<name>-docker` constrói uma imagem linux/arm64 do seu serviço. Ele executa o target `bundle` primeiro, então a imagem contém o servidor empacotado. Em seguida, copia o `Dockerfile` e `.dockerignore` para a pasta de saída do bundle, `dist/<project root>/bundle/container/<name>`, e constrói a imagem com essa pasta como contexto de construção (os arquivos que a construção da imagem pode ler). Ele usa o mecanismo de contêiner com o qual seu workspace está configurado, `docker` ou [Finch](https://runfinch.com/). O target é executado como parte do target agregado `docker`, que constrói todas as imagens no projeto.
+O target `<name>-docker` constrói uma imagem do seu serviço para a arquitetura de CPU na opção `architecture`, `linux/arm64` ou `linux/amd64`. Ele executa o target `bundle` primeiro, então a imagem contém o servidor empacotado. Em seguida, copia o `Dockerfile` e `.dockerignore` para a pasta de saída do bundle, `dist/<project root>/bundle/container/<name>`, e constrói a imagem com essa pasta como contexto de construção (os arquivos que a construção da imagem pode ler). Ele usa o mecanismo de contêiner com o qual seu workspace está configurado, `docker` ou [Finch](https://runfinch.com/). O target é executado como parte do target agregado `docker`, que constrói todas as imagens no projeto.
 
 <NxCommands commands={['run your-project:container-docker']} />
 
@@ -362,6 +362,31 @@ secrets     = { API_KEY = aws_secretsmanager_secret.api_key.arn }
 </Fragment>
 </Infrastructure>
 
+#### Arquitetura de CPU
+
+A opção `architecture` define a CPU em que as tarefas são executadas e a plataforma para a qual a imagem é construída: `ARM64` ou `X86_64`. ARM64 é executado em processadores [AWS Graviton](https://aws.amazon.com/ec2/graviton/), que o AWS Fargate cobra a uma taxa menor por vCPU e por GB de memória do que X86_64. Consulte [AWS Fargate pricing](https://aws.amazon.com/fargate/pricing/) para as taxas em sua Região.
+
+Deixe a opção de fora e o gerador usa a arquitetura da máquina em que você o executa, então `nx run your-project:container-docker` constrói nativamente e não precisa de emulador. Executar novamente o gerador mantém a arquitetura que ele gerou na primeira vez, independentemente da máquina em que você o executa novamente, porque essa arquitetura já está em sua definição de tarefa implantada.
+
+A arquitetura é fixada quando o serviço é gerado pela primeira vez. O gerador nunca reescreve a infraestrutura que forneceu, então mover um serviço existente para a outra arquitetura requer duas etapas:
+
+1. Altere a arquitetura no código fornecido. No CDK, a linha `architecture:` em `packages/common/constructs/src/app/services/<name>.ts`. No Terraform, `cpu_architecture` no bloco `module "ecs_service"` de `packages/common/terraform/src/app/services/<name>/<name>.tf`.
+2. Execute novamente o gerador com `--architecture` definido para o mesmo valor, para que o target `<name>-docker` construa para ele.
+
+Em seguida, reimplante. Se você passar uma arquitetura que difere daquela que o gerador registrou, ele avisa e nomeia o arquivo que você precisa alterar.
+
+Fazer a etapa 2 e esquecer a etapa 1 falha de forma diferente por provedor, e nenhuma falha é alta. No Terraform, a definição da tarefa mantém a arquitetura antiga enquanto a imagem que o Terraform envia tem a nova, então a tarefa não inicia. No CDK, a imagem implantada é construída a partir do construto fornecido, então o serviço continua sendo executado na arquitetura antiga e a imagem que você construiu e escaneou localmente é a outra, que nunca é implantada.
+
+`architecture` também é uma prop do construto de serviço fornecido, então uma stack pode passar uma diferente para uma única instanciação. Isso altera o que é implantado, mas não o que os targets `<name>-docker` e `<name>-trivy` constroem, então mantenha os dois em sincronia você mesmo.
+
+Construir uma imagem ARM64 em uma máquina x86_64, ou uma imagem X86_64 em uma máquina arm64, falha com `exec format error` a menos que você instale um emulador. O gerador avisa quando a arquitetura que está prestes a gerar não é a que sua máquina executa. Consulte <Link path="/troubleshooting/docker">Troubleshooting Docker</Link>.
+
+| Configuração | Prop CDK | Variável Terraform | Padrão |
+| --- | --- | --- | --- |
+| Arquitetura de CPU | `architecture` | `cpu_architecture` | `'ARM64'` |
+
+O gerador escreve a arquitetura que escolheu no construto e módulo do seu serviço, então esse padrão se aplica apenas quando você usa o construto genérico `EcsService` ou o módulo `ecs-service` você mesmo.
+
 #### Dimensionamento e Escala
 
 Cada tarefa obtém 256 unidades de CPU (um quarto de uma vCPU) e 512 MiB de memória por padrão. O serviço inicia uma tarefa, e o autoscaling mantém entre uma e duas tarefas em execução, adicionando tarefas quando o uso médio de CPU ultrapassa 70%.
@@ -440,7 +465,7 @@ Execute o target `destroy` do seu projeto de infraestrutura:
 </Fragment>
 </Infrastructure>
 
-Em seguida, verifique no console AWS ou com a AWS CLI que o serviço e cluster ECS foram removidos. Com CDK e Terraform, destroy exclui o log group do serviço e agenda sua chave AWS KMS para exclusão, então nada do serviço fica para trás. O período de espera da chave antes que o KMS a exclua é de 30 dias com CDK e 7 dias com Terraform. As imagens permanecem no Amazon ECR, no repositório de ativos CDK ou no repositório compartilhado `asset-ecr`. Exclua-as se você não precisar mais delas. A VPC é sua, então destruir o serviço a deixa no lugar.
+Em seguida, verifique no console AWS ou com a AWS CLI que o serviço e cluster ECS foram removidos. Com CDK e Terraform, destroy exclui os log groups do serviço e agenda sua chave AWS KMS para exclusão. O KMS aguarda 7 dias antes de excluir a chave. As imagens permanecem no Amazon ECR, no repositório de ativos CDK ou no repositório compartilhado `asset-ecr`. Exclua-as se você não precisar mais delas. A VPC é sua, então destruir o serviço a deixa no lugar.
 </OptionFilter>
 
 ## Conectando Seu Serviço

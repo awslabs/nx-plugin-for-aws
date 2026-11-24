@@ -203,6 +203,7 @@ export async function tsTrpcApiGenerator(
       name: containerName,
       infra: 'ecs',
       iac: options.iac,
+      architecture: options.architecture,
       preferInstallDependencies: false,
     });
     // ts#container writes its targets and its assigned port straight to the
@@ -297,7 +298,9 @@ export async function tsTrpcApiGenerator(
     // serve target runs it: ts#container's equivalent target is dropped rather
     // than leaving two copies of the same server to start.
     delete projectConfig.targets[`${containerName}-serve`];
-    const devDependsOn = (projectConfig.targets['dev']?.dependsOn ?? []).filter(
+    // ts#container puts its serve target on the project's `dev` target on
+    // every run, so both that target and its dependsOn are there to read.
+    const devDependsOn = projectConfig.targets['dev'].dependsOn.filter(
       (target) => target !== `${containerName}-serve`,
     );
     if (devDependsOn.length > 0) {

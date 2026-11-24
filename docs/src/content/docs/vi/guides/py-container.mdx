@@ -57,10 +57,10 @@ Generator thêm các tệp sau vào dự án của bạn. Thư mục nguồn đ�
         - Dockerfile Định nghĩa container image
         - .dockerignore Các tệp bị bỏ qua khỏi ngữ cảnh xây dựng image
     - pyproject.toml Được cập nhật với các dependency FastAPI và uvicorn
-    - project.json Được cập nhật với các target `bundle-arm` và `bundle` cùng các target `<name>-serve`, `<name>-docker` và `<name>-trivy` cho dịch vụ của bạn
+    - project.json Được cập nhật với bundle target cho kiến trúc CPU của dịch vụ (`bundle-arm` hoặc `bundle-x86`), target tổng hợp `bundle`, và các target `<name>-serve`, `<name>-docker` và `<name>-trivy` cho dịch vụ của bạn
 </FileTree>
 
-Tên target bắt đầu bằng tùy chọn `name`, hoặc bằng `container` nếu bạn bỏ qua nó. Ví dụ, các target là `container-serve`, `container-docker` và `container-trivy` khi không có tên, và `orders-serve`, `orders-docker` và `orders-trivy` cho `--name=orders`. Các target `bundle-arm` và `bundle` được chia sẻ bởi mọi thứ mà dự án đóng gói.
+Tên target bắt đầu bằng tùy chọn `name`, hoặc bằng `container` nếu bạn bỏ qua nó. Ví dụ, các target là `container-serve`, `container-docker` và `container-trivy` khi không có tên, và `orders-serve`, `orders-docker` và `orders-trivy` cho `--name=orders`. Các bundle target được chia sẻ bởi mọi thứ mà dự án đóng gói.
 
 <OptionFilter when={{ infra: 'ecs' }} description="ECS service infrastructure">
 ### Infrastructure
@@ -129,7 +129,7 @@ Máy chủ cũng có một route mẫu mà bạn thay thế bằng các route c�
 
 ## Xây dựng và quét Image
 
-Target `<name>-docker` xây dựng một image linux/arm64 của dịch vụ của bạn. Nó chạy target `bundle-arm` trước, ghi mã của bạn và các dependency linux/arm64 của nó vào `dist/<project root>/bundle-arm`. Target tổng hợp `bundle` phụ thuộc vào `bundle-arm`. Target `<name>-docker` sau đó sao chép thư mục đó, `Dockerfile` và `.dockerignore` vào `dist/<project root>/docker/<name>`, và xây dựng image với thư mục đó làm build context (các tệp mà quá trình xây dựng image có thể đọc). Nó sử dụng container engine mà workspace của bạn được thiết lập, `docker` hoặc [Finch](https://runfinch.com/). Target chạy như một phần của target tổng hợp `docker`, xây dựng mọi image trong dự án.
+Target `<name>-docker` xây dựng một image của dịch vụ của bạn cho kiến trúc CPU trong tùy chọn `architecture`, `linux/arm64` hoặc `linux/amd64`. Nó chạy bundle target tương ứng trước, `bundle-arm` hoặc `bundle-x86`, ghi mã của bạn và các dependency của nó cho kiến trúc đó vào `dist/<project root>/bundle-arm` hoặc `dist/<project root>/bundle-x86`. Target tổng hợp `bundle` phụ thuộc vào nó. Target `<name>-docker` sau đó sao chép thư mục đó, `Dockerfile` và `.dockerignore` vào `dist/<project root>/docker/<name>`, và xây dựng image với thư mục đó làm build context (các tệp mà quá trình xây dựng image có thể đọc). Nó sử dụng container engine mà workspace của bạn được thiết lập, `docker` hoặc [Finch](https://runfinch.com/). Target chạy như một phần của target tổng hợp `docker`, xây dựng mọi image trong dự án.
 
 <NxCommands commands={['run your-project:container-docker']} />
 
@@ -362,6 +362,33 @@ secrets     = { API_KEY = aws_secretsmanager_secret.api_key.arn }
 </Fragment>
 </Infrastructure>
 
+#### Kiến trúc CPU
+
+Tùy chọn `architecture` đặt CPU mà các task chạy trên đó, nền tảng mà image được xây dựng cho, và nền tảng mà bundle giải quyết các Python wheel của nó: `ARM64` hoặc `X86_64`. ARM64 chạy trên bộ xử lý [AWS Graviton](https://aws.amazon.com/ec2/graviton/), mà AWS Fargate tính phí ở mức thấp hơn mỗi vCPU và mỗi GB bộ nhớ so với X86_64. Xem [AWS Fargate pricing](https://aws.amazon.com/fargate/pricing/) để biết mức giá trong Region của bạn.
+
+Bỏ qua tùy chọn và generator sử dụng kiến trúc của máy bạn chạy nó, vì vậy `nx run your-project:container-docker` xây dựng nguyên bản và không cần trình giả lập. Chạy lại generator giữ kiến trúc mà nó đã tạo lần đầu tiên, bất kể máy nào bạn chạy lại nó, vì kiến trúc đó đã có trong task definition đã triển khai của bạn và trong tên của bundle target của bạn.
+
+Kiến trúc được cố định khi dịch vụ được tạo lần đầu. Generator không bao giờ viết lại infrastructure mà nó đã cung cấp, vì vậy việc chuyển một dịch vụ hiện có sang kiến trúc khác cần hai bước:
+
+1. Thay đổi kiến trúc trong mã đã cung cấp. Trong CDK, dòng `architecture:` trong `packages/common/constructs/src/app/services/<name>.ts`. Trong Terraform, `cpu_architecture` trong khối `module "ecs_service"` của `packages/common/terraform/src/app/services/<name>/<name>.tf`.
+2. Chạy lại generator với `--architecture` được đặt thành cùng giá trị, để target `<name>-docker` xây dựng cho nó và bundle giải quyết các wheel cho nó.
+
+Sau đó triển khai lại. Nếu bạn truyền một kiến trúc khác với kiến trúc mà generator đã ghi lại, nó cảnh báo và đặt tên tệp bạn phải thay đổi.
+
+Thực hiện bước 2 và quên bước 1 thất bại khác nhau theo từng nhà cung cấp, và cả hai lỗi đều không rõ ràng. Trong Terraform, task definition giữ kiến trúc cũ trong khi image mà Terraform đẩy có kiến trúc mới, vì vậy task không khởi động. Trong CDK, image đã triển khai được xây dựng từ construct đã cung cấp, vì vậy nó có kiến trúc cũ, trong khi bundle bên trong nó chứa các wheel cho kiến trúc bạn yêu cầu: container sau đó bị crash khi import được biên dịch đầu tiên của nó.
+
+Một chuyển đổi cũng để lại bundle target của kiến trúc trước đó tại chỗ, vì các bundle target được chia sẻ bởi mọi thứ trong dự án đóng gói cho nền tảng của chúng. Cảnh báo đặt tên nó; xóa nó khi không có gì khác sử dụng nó.
+
+`architecture` cũng là một prop của construct dịch vụ đã cung cấp, vì vậy một stack có thể truyền một kiến trúc khác cho một khởi tạo duy nhất. Điều đó thay đổi những gì triển khai nhưng không thay đổi những gì các target `<name>-docker` và `<name>-trivy` xây dựng, vì vậy hãy giữ hai cái đồng bộ với nhau.
+
+Xây dựng một image ARM64 trên máy x86_64, hoặc một image X86_64 trên máy arm64, thất bại với `exec format error` trừ khi bạn cài đặt trình giả lập. Generator cảnh báo bạn khi kiến trúc mà nó sắp tạo không phải là kiến trúc mà máy của bạn chạy. Xem <Link path="/troubleshooting/docker">Troubleshooting Docker</Link>.
+
+| Cài đặt | CDK prop | Terraform variable | Mặc định |
+| --- | --- | --- | --- |
+| Kiến trúc CPU | `architecture` | `cpu_architecture` | `'ARM64'` |
+
+Generator ghi kiến trúc mà nó đã chọn vào construct và module của dịch vụ của bạn, vì vậy mặc định đó chỉ áp dụng khi bạn tự sử dụng construct `EcsService` chung hoặc module `ecs-service`.
+
 #### Kích thước và mở rộng quy mô
 
 Mỗi task nhận 256 đơn vị CPU (một phần tư vCPU) và 512 MiB bộ nhớ theo mặc định. Dịch vụ khởi động một task, và autoscaling giữ từ một đến hai task đang chạy, thêm task khi mức sử dụng CPU trung bình vượt quá 70%.
@@ -440,7 +467,7 @@ Chạy target `destroy` của dự án infrastructure của bạn:
 </Fragment>
 </Infrastructure>
 
-Sau đó kiểm tra trong AWS console hoặc với AWS CLI rằng dịch vụ ECS và cluster đã biến mất. Với cả CDK và Terraform, destroy đều xóa log group của dịch vụ và lên lịch xóa khóa AWS KMS của nó, vì vậy không có gì của dịch vụ còn lại. Thời gian chờ của khóa trước khi KMS xóa nó là 30 ngày với CDK và 7 ngày với Terraform. Các image vẫn ở trong Amazon ECR, trong kho lưu trữ CDK assets hoặc kho lưu trữ `asset-ecr` được chia sẻ. Xóa chúng nếu bạn không còn cần chúng nữa. VPC là của bạn, vì vậy việc hủy dịch vụ để nó nguyên vị trí.
+Sau đó kiểm tra trong AWS console hoặc với AWS CLI rằng dịch vụ ECS và cluster đã biến mất. Với cả CDK và Terraform, destroy đều xóa log group của dịch vụ và lên lịch xóa khóa AWS KMS của nó. KMS chờ 7 ngày trước khi xóa khóa. Các image vẫn ở trong Amazon ECR, trong kho lưu trữ CDK assets hoặc kho lưu trữ `asset-ecr` được chia sẻ. Xóa chúng nếu bạn không còn cần chúng nữa. VPC là của bạn, vì vậy việc hủy dịch vụ để nó nguyên vị trí.
 </OptionFilter>
 
 ## Kết nối dịch vụ của bạn

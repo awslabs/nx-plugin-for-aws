@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { type Tree, updateJson } from '@nx/devkit';
@@ -16,6 +16,7 @@ import {
 import { createTreeUsingTsSolutionSetup } from '../test.js';
 import {
   type AddContainerServiceInfraOptions,
+  type ContainerArchitecture,
   type ContainerRuntime,
   containerHealthCheckCommand,
 } from './container-constructs.js';
@@ -44,6 +45,7 @@ const serviceOptions = (
   dockerBuildContextDir: 'dist/apps/shop/bundle/container/orders',
   containerPort: 8080,
   healthCheckCommand: containerHealthCheckCommand('node'),
+  architecture: 'ARM64',
   containers: 'docker',
   ...overrides,
 });
@@ -154,6 +156,19 @@ describe('addContainerServiceCdkConstructs', () => {
     expect(content).toContain('EcsService as CoreEcsService');
     expect(content).toContain('export class EcsService extends CoreEcsService');
   });
+
+  // Written as a literal, so the deployed architecture is fixed at generate
+  // time rather than read from whichever machine runs a later deploy.
+  it.each<ContainerArchitecture>(['ARM64', 'X86_64'])(
+    'should write %s into the service subclass',
+    async (architecture) => {
+      const tree = await renderTree(serviceOptions({ architecture }));
+
+      expect(
+        readOrThrow(tree, `${CONSTRUCTS_SRC}/app/services/orders.ts`),
+      ).toContain(`architecture: '${architecture}',`);
+    },
+  );
 });
 
 describe('vended container constructs compile', () => {
@@ -683,6 +698,46 @@ describe('EcsService synth', () => {
       expect(key.DeletionPolicy).toBe('Delete');
       expect(key.UpdateReplacePolicy).toBe('Delete');
       expect(key.Properties.PendingWindowInDays).toBe(7);
+    });
+  });
+
+  /**
+   * The task's CPU architecture and the platform its image asset is built for
+   * have to agree, or the task starts and dies on `exec format error`.
+   */
+  describe('architecture', () => {
+    // The platform reaches the deploy through the asset manifest, not the
+    // template, so that is where it has to be read.
+    const imageAssetPlatforms = (app: import('aws-cdk-lib').App): string[] => {
+      const assembly = app.synth();
+      const manifest = JSON.parse(
+        readFileSync(join(assembly.directory, 'Test.assets.json'), 'utf-8'),
+      ) as {
+        dockerImages?: Record<string, { source?: { platform?: string } }>;
+      };
+      return Object.values(manifest.dockerImages ?? {}).map(
+        (image) => image.source?.platform ?? 'unset',
+      );
+    };
+
+    it('should run the task on arm64 and build an arm64 asset by default', () => {
+      const { stack, app } = newService();
+
+      expect(taskDefinitionOf(synth(stack).resources).RuntimePlatform).toEqual({
+        CpuArchitecture: 'ARM64',
+        OperatingSystemFamily: 'LINUX',
+      });
+      expect(imageAssetPlatforms(app)).toEqual(['linux/arm64']);
+    });
+
+    it('should run the task on x86_64 and build an amd64 asset when asked', () => {
+      const { stack, app } = newService({ architecture: 'X86_64' });
+
+      expect(taskDefinitionOf(synth(stack).resources).RuntimePlatform).toEqual({
+        CpuArchitecture: 'X86_64',
+        OperatingSystemFamily: 'LINUX',
+      });
+      expect(imageAssetPlatforms(app)).toEqual(['linux/amd64']);
     });
   });
 

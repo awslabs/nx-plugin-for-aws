@@ -57,10 +57,10 @@ Il generatore aggiunge i seguenti file al tuo progetto. La cartella sorgente è 
         - Dockerfile Definizione dell'immagine del container
         - .dockerignore File esclusi dal contesto di build dell'immagine
     - pyproject.toml Aggiornato con le dipendenze FastAPI e uvicorn
-    - project.json Aggiornato con i target `bundle-arm` e `bundle` e i target `<name>-serve`, `<name>-docker` e `<name>-trivy` per il tuo servizio
+    - project.json Aggiornato con un target bundle per l'architettura CPU del servizio (`bundle-arm` o `bundle-x86`), il target aggregato `bundle` e i target `<name>-serve`, `<name>-docker` e `<name>-trivy` per il tuo servizio
 </FileTree>
 
-I nomi dei target iniziano con l'opzione `name`, o con `container` se la ometti. Ad esempio, i target sono `container-serve`, `container-docker` e `container-trivy` senza un nome, e `orders-serve`, `orders-docker` e `orders-trivy` per `--name=orders`. I target `bundle-arm` e `bundle` sono condivisi da tutto ciò che il progetto raggruppa.
+I nomi dei target iniziano con l'opzione `name`, o con `container` se la ometti. Ad esempio, i target sono `container-serve`, `container-docker` e `container-trivy` senza un nome, e `orders-serve`, `orders-docker` e `orders-trivy` per `--name=orders`. I target bundle sono condivisi da tutto ciò che il progetto raggruppa.
 
 <OptionFilter when={{ infra: 'ecs' }} description="ECS service infrastructure">
 ### Infrastruttura
@@ -129,7 +129,7 @@ Il server ha anche una route di esempio che sostituisci con le tue route. `GET /
 
 ## Costruire e Scansionare l'Immagine
 
-Il target `<name>-docker` costruisce un'immagine linux/arm64 del tuo servizio. Esegue prima il target `bundle-arm`, che scrive il tuo codice e le sue dipendenze linux/arm64 in `dist/<project root>/bundle-arm`. Il target aggregato `bundle` dipende da `bundle-arm`. Il target `<name>-docker` quindi copia quella cartella, il `Dockerfile` e il `.dockerignore` in `dist/<project root>/docker/<name>`, e costruisce l'immagine con quella cartella come contesto di build (i file che la build dell'immagine può leggere). Utilizza il motore di container con cui è configurato il tuo workspace, `docker` o [Finch](https://runfinch.com/). Il target viene eseguito come parte del target aggregato `docker`, che costruisce ogni immagine nel progetto.
+Il target `<name>-docker` costruisce un'immagine del tuo servizio per l'architettura CPU nell'opzione `architecture`, `linux/arm64` o `linux/amd64`. Esegue prima il target bundle corrispondente, `bundle-arm` o `bundle-x86`, che scrive il tuo codice e le sue dipendenze per quell'architettura in `dist/<project root>/bundle-arm` o `dist/<project root>/bundle-x86`. Il target aggregato `bundle` dipende da esso. Il target `<name>-docker` quindi copia quella cartella, il `Dockerfile` e il `.dockerignore` in `dist/<project root>/docker/<name>`, e costruisce l'immagine con quella cartella come contesto di build (i file che la build dell'immagine può leggere). Utilizza il motore di container con cui è configurato il tuo workspace, `docker` o [Finch](https://runfinch.com/). Il target viene eseguito come parte del target aggregato `docker`, che costruisce ogni immagine nel progetto.
 
 <NxCommands commands={['run your-project:container-docker']} />
 
@@ -361,6 +361,33 @@ secrets     = { API_KEY = aws_secretsmanager_secret.api_key.arn }
 
 </Fragment>
 </Infrastructure>
+
+#### Architettura CPU
+
+L'opzione `architecture` imposta la CPU su cui vengono eseguiti i task, la piattaforma per cui viene costruita l'immagine e la piattaforma per cui il bundle risolve i suoi wheel Python: `ARM64` o `X86_64`. ARM64 viene eseguito su processori [AWS Graviton](https://aws.amazon.com/ec2/graviton/), che AWS Fargate fattura a una tariffa inferiore per vCPU e per GB di memoria rispetto a X86_64. Vedi [AWS Fargate pricing](https://aws.amazon.com/fargate/pricing/) per le tariffe nella tua Regione.
+
+Ometti l'opzione e il generatore utilizza l'architettura della macchina su cui lo esegui, quindi `nx run your-project:container-docker` costruisce nativamente e non necessita di emulatore. Rieseguire il generatore mantiene l'architettura che ha generato la prima volta, indipendentemente dalla macchina su cui lo riesegui, perché quell'architettura è già nella tua definizione del task distribuita e nel nome del tuo target bundle.
+
+L'architettura è fissata quando il servizio viene generato per la prima volta. Il generatore non riscrive mai l'infrastruttura che ha fornito, quindi spostare un servizio esistente sull'altra architettura richiede due passaggi:
+
+1. Cambia l'architettura nel codice fornito. In CDK, la riga `architecture:` in `packages/common/constructs/src/app/services/<name>.ts`. In Terraform, `cpu_architecture` nel blocco `module "ecs_service"` di `packages/common/terraform/src/app/services/<name>/<name>.tf`.
+2. Riesegui il generatore con `--architecture` impostato sullo stesso valore, in modo che il target `<name>-docker` costruisca per esso e il bundle risolva i wheel per esso.
+
+Quindi ridistribuisci. Se passi un'architettura che differisce da quella che il generatore ha registrato, avvisa e nomina il file che devi modificare.
+
+Eseguire il passaggio 2 e dimenticare il passaggio 1 fallisce in modo diverso per provider, e nessun fallimento è evidente. In Terraform, la definizione del task mantiene la vecchia architettura mentre l'immagine che Terraform carica ha quella nuova, quindi il task non si avvia. In CDK, l'immagine distribuita viene costruita dal costrutto fornito, quindi ha la vecchia architettura, mentre il bundle al suo interno contiene wheel per l'architettura che hai richiesto: il container quindi si blocca alla sua prima importazione compilata.
+
+Un cambio lascia anche in posizione il target bundle dell'architettura precedente, perché i target bundle sono condivisi da tutto nel progetto che raggruppa per la loro piattaforma. L'avviso lo nomina; rimuovilo una volta che nient'altro lo utilizza.
+
+`architecture` è anche una prop del costrutto del servizio fornito, quindi uno stack può passarne una diversa per una singola istanziazione. Ciò cambia ciò che viene distribuito ma non ciò che i target `<name>-docker` e `<name>-trivy` costruiscono, quindi mantieni i due sincronizzati tu stesso.
+
+Costruire un'immagine ARM64 su una macchina x86_64, o un'immagine X86_64 su una macchina arm64, fallisce con `exec format error` a meno che non installi un emulatore. Il generatore ti avvisa quando l'architettura che sta per generare non è quella su cui viene eseguita la tua macchina. Vedi <Link path="/troubleshooting/docker">Troubleshooting Docker</Link>.
+
+| Impostazione | Prop CDK | Variabile Terraform | Predefinito |
+| --- | --- | --- | --- |
+| Architettura CPU | `architecture` | `cpu_architecture` | `'ARM64'` |
+
+Il generatore scrive l'architettura che ha scelto nel costrutto e nel modulo del tuo servizio, quindi quel valore predefinito si applica solo quando utilizzi direttamente il costrutto generico `EcsService` o il modulo `ecs-service`.
 
 #### Dimensionamento e Scalabilità
 

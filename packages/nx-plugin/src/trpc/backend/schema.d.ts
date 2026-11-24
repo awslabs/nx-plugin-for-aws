@@ -4,6 +4,7 @@
  */
 
 import { TsProjectGeneratorSchema } from '../../ts/lib/schema';
+import type { ContainerArchitecture } from '../../utils/container-constructs/container-constructs.js';
 import { IacOption } from '../../utils/iac.js';
 
 export interface TsTrpcApiGeneratorSchema {
@@ -14,5 +15,6 @@ export interface TsTrpcApiGeneratorSchema {
   directory?: TsProjectGeneratorSchema['directory'];
   subDirectory?: TsProjectGeneratorSchema['subDirectory'];
   iac: IacOption;
+  architecture?: ContainerArchitecture;
   preferInstallDependencies?: boolean;
 }

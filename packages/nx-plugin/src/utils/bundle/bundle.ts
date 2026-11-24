@@ -45,6 +45,16 @@ export interface AddPythonBundleTargetOptions {
   pythonPlatform?: 'x86_64-manylinux_2_28' | 'aarch64-manylinux_2_28';
 }
 
+/**
+ * Name of the bundle target that resolves wheels for `pythonPlatform`. A
+ * project that bundles for both platforms has one target of each, and `bundle`
+ * depends on both.
+ */
+export const pythonBundleTargetName = (
+  pythonPlatform: Required<AddPythonBundleTargetOptions>['pythonPlatform'],
+): string =>
+  pythonPlatform === 'aarch64-manylinux_2_28' ? 'bundle-arm' : 'bundle-x86';
+
 interface CreatePythonBundleTargetOptions
   extends Required<AddPythonBundleTargetOptions> {
   /**

@@ -11,6 +11,7 @@ import { createTreeUsingTsSolutionSetup } from '../test.js';
 import {
   type AddContainerServiceInfraOptions,
   addContainerServiceInfra,
+  type ContainerArchitecture,
   type ContainerRuntime,
   containerHealthCheckCommand,
 } from './container-constructs.js';
@@ -55,6 +56,7 @@ const CONTRACT_VARIABLES = [
   'container_port',
   'cpu',
   'memory',
+  'cpu_architecture',
   'desired_count',
   'min_capacity',
   'max_capacity',
@@ -124,6 +126,7 @@ const BASE_OPTIONS: AddContainerServiceInfraOptions = {
   dockerBuildContextDir: 'dist/packages/svc/orders/docker',
   containerPort: 8080,
   healthCheckCommand: containerHealthCheckCommand('node'),
+  architecture: 'ARM64',
   containers: 'docker',
 };
 
@@ -367,8 +370,42 @@ describe('addContainerServiceTerraformModules', () => {
     expect(core).toContain('readonlyRootFilesystem = true');
     expect(core).toMatch(/^\s*enable_execute_command\s*=\s*false$/m);
     expect(core).toMatch(/^\s*rollback\s*=\s*true$/m);
-    expect(core).toContain('cpu_architecture        = "ARM64"');
     expect(core).not.toContain('health_check_grace_period_seconds');
+  });
+
+  describe('architecture', () => {
+    it('should take the task architecture from the core module variable', async () => {
+      await render();
+
+      const core = read(CORE_FILES.module);
+      expect(core).toContain('cpu_architecture        = var.cpu_architecture');
+      expect(core).not.toContain('cpu_architecture        = "');
+    });
+
+    // Existing workspaces keep the core module they were generated with, so
+    // the variable must default to the value that module hard-coded.
+    it('should default the core module to ARM64, and accept only the two Fargate architectures', async () => {
+      await render();
+
+      const [variable] = blocksOf(
+        read(CORE_FILES.variables),
+        'variable "cpu_architecture"',
+      );
+      expect(variable).toMatch(/^\s*default\s*=\s*"ARM64"$/m);
+      expect(variable).toContain('contains(["ARM64", "X86_64"]');
+    });
+
+    it.each<ContainerArchitecture>(['ARM64', 'X86_64'])(
+      'should pass %s to the core module from the app module',
+      async (architecture) => {
+        await render({ architecture });
+
+        const [ecsService] = blocksOf(read(APP_FILE), 'module "ecs_service"');
+        expect(ecsService.split('\n')).toContain(
+          `  cpu_architecture            = "${architecture}"`,
+        );
+      },
+    );
   });
 
   it('should manage the Container Insights log group so destroy removes it', async () => {

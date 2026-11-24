@@ -57,10 +57,10 @@ The generator adds the following files to your project. The source folder is nam
         - Dockerfile Container image definition
         - .dockerignore Files left out of the image build context
     - pyproject.toml Updated with FastAPI and uvicorn dependencies
-    - project.json Updated with the `bundle-arm` and `bundle` targets and the `<name>-serve`, `<name>-docker` and `<name>-trivy` targets for your service
+    - project.json Updated with a bundle target for the service's CPU architecture (`bundle-arm` or `bundle-x86`), the aggregate `bundle` target, and the `<name>-serve`, `<name>-docker` and `<name>-trivy` targets for your service
 </FileTree>
 
-Target names start with the `name` option, or with `container` if you leave it out. For example, the targets are `container-serve`, `container-docker` and `container-trivy` without a name, and `orders-serve`, `orders-docker` and `orders-trivy` for `--name=orders`. The `bundle-arm` and `bundle` targets are shared by everything the project bundles.
+Target names start with the `name` option, or with `container` if you leave it out. For example, the targets are `container-serve`, `container-docker` and `container-trivy` without a name, and `orders-serve`, `orders-docker` and `orders-trivy` for `--name=orders`. The bundle targets are shared by everything the project bundles.
 
 <OptionFilter when={{ infra: 'ecs' }} description="ECS service infrastructure">
 ### Infrastructure
@@ -129,7 +129,7 @@ The server also has a sample route that you replace with your own routes. `GET /
 
 ## Building and Scanning the Image
 
-The `<name>-docker` target builds a linux/arm64 image of your service. It runs the `bundle-arm` target first, which writes your code and its linux/arm64 dependencies to `dist/<project root>/bundle-arm`. The aggregate `bundle` target depends on `bundle-arm`. The `<name>-docker` target then copies that folder, the `Dockerfile` and the `.dockerignore` into `dist/<project root>/docker/<name>`, and builds the image with that folder as the build context (the files the image build can read). It uses the container engine your workspace is set up with, `docker` or [Finch](https://runfinch.com/). The target runs as part of the aggregate `docker` target, which builds every image in the project.
+The `<name>-docker` target builds an image of your service for the CPU architecture in the `architecture` option, `linux/arm64` or `linux/amd64`. It runs the matching bundle target first, `bundle-arm` or `bundle-x86`, which writes your code and its dependencies for that architecture to `dist/<project root>/bundle-arm` or `dist/<project root>/bundle-x86`. The aggregate `bundle` target depends on it. The `<name>-docker` target then copies that folder, the `Dockerfile` and the `.dockerignore` into `dist/<project root>/docker/<name>`, and builds the image with that folder as the build context (the files the image build can read). It uses the container engine your workspace is set up with, `docker` or [Finch](https://runfinch.com/). The target runs as part of the aggregate `docker` target, which builds every image in the project.
 
 <NxCommands commands={['run your-project:container-docker']} />
 
@@ -361,6 +361,33 @@ secrets     = { API_KEY = aws_secretsmanager_secret.api_key.arn }
 
 </Fragment>
 </Infrastructure>
+
+#### CPU Architecture
+
+The `architecture` option sets the CPU the tasks run on, the platform the image is built for, and the platform the bundle resolves its Python wheels for: `ARM64` or `X86_64`. ARM64 runs on [AWS Graviton](https://aws.amazon.com/ec2/graviton/) processors, which AWS Fargate bills at a lower rate per vCPU and per GB of memory than X86_64. See [AWS Fargate pricing](https://aws.amazon.com/fargate/pricing/) for the rates in your Region.
+
+Leave the option out and the generator uses the architecture of the machine you run it on, so `nx run your-project:container-docker` builds natively and needs no emulator. Re-running the generator keeps the architecture it generated the first time, whatever machine you re-run it on, because that architecture is already in your deployed task definition and in the name of your bundle target.
+
+The architecture is fixed when the service is first generated. The generator never rewrites the infrastructure it vended, so moving an existing service to the other architecture takes two steps:
+
+1. Change the architecture in the vended code. In CDK, the `architecture:` line in `packages/common/constructs/src/app/services/<name>.ts`. In Terraform, `cpu_architecture` in the `module "ecs_service"` block of `packages/common/terraform/src/app/services/<name>/<name>.tf`.
+2. Re-run the generator with `--architecture` set to the same value, so the `<name>-docker` target builds for it and the bundle resolves wheels for it.
+
+Then redeploy. If you pass an architecture that differs from the one the generator recorded, it warns and names the file you have to change.
+
+Doing step 2 and forgetting step 1 fails differently per provider, and neither failure is loud. In Terraform, the task definition keeps the old architecture while the image Terraform pushes has the new one, so the task does not start. In CDK, the deployed image is built from the vended construct, so it has the old architecture, while the bundle inside it holds wheels for the architecture you asked for: the container then crashes on its first compiled import.
+
+A switch also leaves the previous architecture's bundle target in place, because the bundle targets are shared by everything in the project that bundles for their platform. The warning names it; remove it once nothing else uses it.
+
+`architecture` is also a prop of the vended service construct, so a stack can pass a different one for a single instantiation. That changes what deploys but not what the `<name>-docker` and `<name>-trivy` targets build, so keep the two in step yourself.
+
+Building an ARM64 image on an x86_64 machine, or an X86_64 image on an arm64 machine, fails with `exec format error` unless you install an emulator. The generator warns you when the architecture it is about to generate is not the one your machine runs. See <Link path="/troubleshooting/docker">Troubleshooting Docker</Link>.
+
+| Setting | CDK prop | Terraform variable | Default |
+| --- | --- | --- | --- |
+| CPU architecture | `architecture` | `cpu_architecture` | `'ARM64'` |
+
+The generator writes the architecture it chose into your service's construct and module, so that default applies only when you use the generic `EcsService` construct or the `ecs-service` module yourself.
 
 #### Sizing and Scaling
 

@@ -3,7 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { readProjectConfiguration, type Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import {
+  createTreeUsingTsSolutionSetup,
+  onHostArch,
+} from '../../utils/test.js';
 import { tsApiGenerator } from './generator.js';
 import { TsApiGeneratorSchema } from './schema';
 
@@ -161,5 +164,27 @@ describe('ts#api generator', () => {
         'packages/common/constructs/src/core/api/ecs-http-endpoint.ts',
       ),
     ).toBeTruthy();
+  });
+
+  it('should forward the architecture to ts#trpc-api for http-ecs', async () => {
+    // Asked for the architecture this host is not.
+    await onHostArch('arm64', () =>
+      tsApiGenerator(tree, {
+        name: 'TestApi',
+        framework: 'trpc',
+        directory: 'packages',
+        infra: 'http-ecs',
+        auth: 'iam',
+        iac: 'cdk',
+        architecture: 'X86_64',
+      }),
+    );
+
+    expect(
+      tree.read(
+        'packages/common/constructs/src/app/services/test-api-container.ts',
+        'utf-8',
+      ),
+    ).toContain("architecture: 'X86_64',");
   });
 });

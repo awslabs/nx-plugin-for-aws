@@ -3,9 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  compareRuntimeVersions,
+  type RuntimeCeiling,
   type RuntimeResolution,
-} from './lambda-runtime-resolution.js';
+  resolveRuntimeVersions,
+  type UnresolvedRuntime,
+} from './runtime-resolution.js';
 import {
   AGENT_CORE_RUNTIME_VERSIONS,
   type IAgentCoreRuntime,
@@ -15,7 +17,9 @@ import {
  * Resolution of the managed AgentCore Runtime runtimes the version update pins.
  *
  * Lives here rather than beside the script so it is covered by the plugin's test
- * suite; the script supplies the runtime list read from `aws-cdk-lib`.
+ * suite; the script supplies the runtime list read from `aws-cdk-lib`. The
+ * capping and reporting are shared with the Lambda resolution in
+ * `runtime-resolution.ts`.
  */
 
 /**
@@ -38,55 +42,50 @@ export const agentCoreRuntimeIdentifierVersion = (
 };
 
 /**
- * The latest managed runtime for each language in
- * {@link AGENT_CORE_RUNTIME_VERSIONS}, from the runtime identifiers
- * `aws-cdk-lib` publishes as `AgentCoreRuntime` members.
+ * AgentCore runtimes deliberately kept below what `aws-cdk-lib` offers, and why.
  *
- * Mirrors the Lambda resolution: the member list is curated, so a runtime still
- * in preview does not appear. Never moves a runtime backwards, and a language
- * the list says nothing about keeps its current pin and is reported through
- * `unresolved`, so a failure costs this bump alone.
+ * Empty today, because the members the pinned `aws-cdk-lib` publishes
+ * (`PYTHON_3_10` to `PYTHON_3_14` and `NODE_22`) are all runtimes AgentCore
+ * accepts, so there is nothing to hold. The mechanism is here because this list
+ * carries the same risk `Runtime.ALL` turned out to carry: `aws-cdk-lib`
+ * publishes a member when CDK adds it, not when the service makes the runtime
+ * generally available. Without a ceiling, a preview member would be written into
+ * `AGENT_CORE_RUNTIME_VERSIONS` by the next weekly run, vended by
+ * `agentCoreRuntime()`, and rejected when AgentCore creates the runtime — and
+ * nothing local would catch it, since the member exists in CDK by definition.
+ *
+ * Hold one by adding an entry here, with the reason and the lift condition, both
+ * of which reach the weekly PR body. Editing the pin in `versions.ts` instead
+ * does not hold anything: the next run rewrites it.
+ */
+export const AGENT_CORE_RUNTIME_CEILINGS: Partial<
+  Record<IAgentCoreRuntime, RuntimeCeiling>
+> = {};
+
+/**
+ * The runtime each language in {@link AGENT_CORE_RUNTIME_VERSIONS} resolves to,
+ * from the identifiers `aws-cdk-lib` publishes as `AgentCoreRuntime` members.
+ *
+ * Capped at {@link AGENT_CORE_RUNTIME_CEILINGS}, which the tests replace with
+ * their own.
  */
 export const resolveAgentCoreRuntimes = (
   identifiers: readonly string[],
-): RuntimeResolution => {
-  const unresolved: RuntimeResolution['unresolved'][number][] = [];
-
-  const versions = Object.fromEntries(
-    (Object.keys(AGENT_CORE_RUNTIME_VERSIONS) as IAgentCoreRuntime[]).map(
-      (language) => {
-        const current = AGENT_CORE_RUNTIME_VERSIONS[language];
-        const available = identifiers
-          .map(agentCoreRuntimeIdentifierVersion)
-          .filter((parsed) => parsed?.language === language)
-          .map((parsed) => parsed!.version);
-
-        if (available.length === 0) {
-          unresolved.push({
-            language,
-            kept: current,
-            reason: 'no-runtimes-listed',
-          });
-          return [language, current];
-        }
-
-        const latest = available.reduce((best, version) =>
-          compareRuntimeVersions(version, best) > 0 ? version : best,
-        );
-
-        return [
-          language,
-          compareRuntimeVersions(latest, current) > 0 ? latest : current,
-        ];
-      },
-    ),
-  );
-
-  return { versions, unresolved };
-};
+  ceilings: Partial<
+    Record<IAgentCoreRuntime, RuntimeCeiling>
+  > = AGENT_CORE_RUNTIME_CEILINGS,
+): RuntimeResolution =>
+  resolveRuntimeVersions({
+    current: AGENT_CORE_RUNTIME_VERSIONS,
+    identifiers,
+    parse: agentCoreRuntimeIdentifierVersion,
+    ceilings,
+  });
 
 /** The warning a language's unresolved AgentCore runtime reports. */
 export const unresolvedAgentCoreRuntimeWarning = (
-  entry: RuntimeResolution['unresolved'][number],
+  entry: UnresolvedRuntime,
 ): string =>
-  `Found no ${entry.language} runtime in the aws-cdk-lib AgentCoreRuntime list, so it keeps its pinned runtime (${entry.kept})`;
+  entry.reason === 'held-below-ceiling'
+    ? `Holding the ${entry.language} AgentCore runtime at ${entry.kept} although aws-cdk-lib lists a newer one: ${entry.detail}. Lift when ${entry.liftWhen}`
+    : `Found no ${entry.language} runtime in the aws-cdk-lib AgentCoreRuntime list, so it keeps its pinned runtime (${entry.kept})`;

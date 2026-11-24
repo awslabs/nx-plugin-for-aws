@@ -7,6 +7,7 @@ import {
   readJson,
   readProjectConfiguration,
   type Tree,
+  updateProjectConfiguration,
 } from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
@@ -15,6 +16,7 @@ import {
 import { expectHasMetricTags } from '../../utils/metrics-assertions.js';
 import {
   createTreeUsingTsSolutionSetup,
+  onHostArch,
   snapshotTreeDir,
 } from '../../utils/test.js';
 import { terraformLambdaRuntime } from '../../utils/versions.js';
@@ -398,6 +400,22 @@ describe('trpc backend generator', () => {
     expect(tree.read('apps/test-api/src/local-server.ts', 'utf-8')).toContain(
       'middleware: cors()',
     );
+  });
+
+  it('should bind the local server to loopback unless HOST is set', async () => {
+    await tsTrpcApiGenerator(tree, {
+      name: 'TestApi',
+      directory: 'apps',
+      infra: 'http-lambda',
+      auth: 'iam',
+      iac: 'cdk',
+    });
+
+    const localServer = tree.read('apps/test-api/src/local-server.ts', 'utf-8');
+    expect(localServer).toContain(
+      "const HOST = process.env.HOST || '127.0.0.1'",
+    );
+    expect(localServer).toContain('.listen(PORT, HOST)');
   });
 
   it('should add generator metric to app.ts', async () => {
@@ -1576,6 +1594,35 @@ export const echo = publicProcedure.query(() => ({ message: 'hi' }));
       expect(projectConfig.targets['test-api-container-trivy']).toBeDefined();
     });
 
+    // The project's own serve target replaces ts#container's, so its dev
+    // dependency goes with it. Anything else another component put on `dev`
+    // has to survive that, or re-running the generator would stop a local
+    // database or sidecar from starting with the server.
+    it('should keep a dev dependency another component added when re-run', async () => {
+      await tsTrpcApiGenerator(tree, ecsOptions('iam'));
+
+      // What a connection generator adds: the local database the API's
+      // clients read starts alongside the server.
+      const withConnection = readProjectConfiguration(tree, '@proj/test-api');
+      withConnection.targets.dev.dependsOn = [
+        { projects: ['@proj/my-table'], target: 'dev' },
+      ];
+      updateProjectConfiguration(tree, '@proj/test-api', withConnection);
+
+      await tsTrpcApiGenerator(tree, ecsOptions('iam'));
+
+      const projectConfig = readProjectConfiguration(tree, '@proj/test-api');
+      expect(projectConfig.targets.dev.dependsOn).toEqual([
+        { projects: ['@proj/my-table'], target: 'dev' },
+      ]);
+      // ts#container's serve target is still dropped, from the project and
+      // from `dev`, so only one copy of the server starts.
+      expect(projectConfig.targets['test-api-container-serve']).toBeUndefined();
+      expect(projectConfig.targets.dev.options.commands).toEqual([
+        'tsx --watch src/test-api-container/index.ts',
+      ]);
+    });
+
     it('should bundle the container entry point rather than a Lambda handler', async () => {
       await tsTrpcApiGenerator(tree, ecsOptions('iam'));
 
@@ -1662,6 +1709,71 @@ export const echo = publicProcedure.query(() => ({ message: 'hi' }));
           'packages/common/constructs/src/core/api/ecs-http-endpoint.ts',
         ),
       ).toBe(true);
+    });
+
+    describe('architecture', () => {
+      const SERVICE_FILE =
+        'packages/common/constructs/src/app/services/test-api-container.ts';
+
+      // The architecture ts#container recorded for the API's container service.
+      const recordedArchitecture = (): string | undefined =>
+        (
+          readProjectConfiguration(tree, '@proj/test-api').metadata as {
+            components: { architecture?: string }[];
+          }
+        ).components[0].architecture;
+
+      const dockerBuildCommand = (): string =>
+        readProjectConfiguration(tree, '@proj/test-api').targets?.[
+          'test-api-container-docker'
+        ].options.commands[2];
+
+      it.each<[string, string, string]>([
+        ['arm64', 'ARM64', 'linux/arm64'],
+        ['x64', 'X86_64', 'linux/amd64'],
+      ])(
+        'should use the host architecture (%s) when none is given',
+        async (hostArch, expected, platform) => {
+          await onHostArch(hostArch, () =>
+            tsTrpcApiGenerator(tree, ecsOptions('iam')),
+          );
+
+          expect(recordedArchitecture()).toBe(expected);
+          expect(dockerBuildCommand()).toContain(`--platform ${platform} `);
+          expect(tree.read(SERVICE_FILE, 'utf-8')).toContain(
+            `architecture: '${expected}',`,
+          );
+        },
+      );
+
+      it('should use the requested architecture over the host', async () => {
+        await onHostArch('arm64', () =>
+          tsTrpcApiGenerator(tree, {
+            ...ecsOptions('iam'),
+            architecture: 'X86_64',
+          }),
+        );
+
+        expect(recordedArchitecture()).toBe('X86_64');
+        expect(dockerBuildCommand()).toContain('--platform linux/amd64 ');
+        expect(tree.read(SERVICE_FILE, 'utf-8')).toContain(
+          "architecture: 'X86_64',",
+        );
+      });
+
+      it('should keep the recorded architecture when re-run on another host', async () => {
+        await onHostArch('x64', () =>
+          tsTrpcApiGenerator(tree, ecsOptions('iam')),
+        );
+        expect(recordedArchitecture()).toBe('X86_64');
+
+        await onHostArch('arm64', () =>
+          tsTrpcApiGenerator(tree, ecsOptions('iam')),
+        );
+
+        expect(recordedArchitecture()).toBe('X86_64');
+        expect(dockerBuildCommand()).toContain('--platform linux/amd64 ');
+      });
     });
 
     it('should type the procedure context without an API Gateway event', async () => {

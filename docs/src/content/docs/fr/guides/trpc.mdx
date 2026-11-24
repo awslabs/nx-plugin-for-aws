@@ -30,7 +30,7 @@ Vos procédures s'exécutent sur AWS Lambda, il n'y a donc pas de serveur à gé
 </OptionFilter>
 
 <OptionFilter when={{ infra: 'http-ecs' }} description="ECS hosting">
-Vos procédures s'exécutent en tant que serveur HTTP de longue durée dans un conteneur sur Amazon ECS, derrière une API Gateway HTTP API. Voir <a href="#running-on-amazon-ecs">Running on Amazon ECS</a> pour ce que cela change, y compris pourquoi le traçage X-Ray ne produit aucune trace là-bas.
+Vos procédures s'exécutent en tant que serveur HTTP de longue durée dans un conteneur sur Amazon ECS, derrière une API Gateway HTTP API. Voir <a href="#running-on-amazon-ecs">Exécution sur Amazon ECS</a> pour ce que cela change, y compris pourquoi le traçage X-Ray ne produit aucune trace là-bas.
 </OptionFilter>
 
 ## Utilisation
@@ -59,11 +59,11 @@ Avec `infra` défini sur `http-ecs`, l'option est toujours `shared`, car un seul
 
 <OptionFilter when={{ infra: 'http-ecs' }} description="ECS hosting is experimental">
 :::caution[Expérimental]
-`http-ecs` est expérimental. Sa sortie générée peut changer entre les versions sans migration pour transférer un espace de travail existant, donc attendez-vous à réconcilier ces changements vous-même lors de la mise à niveau.
+`http-ecs` est expérimental. Sa sortie générée peut changer entre les versions sans migration pour transporter un espace de travail existant, alors attendez-vous à réconcilier ces changements vous-même lorsque vous mettez à niveau.
 
-Il nécessite le fournisseur IaC CDK : le support Terraform n'est pas encore implémenté. Si l'espace de travail se résout à Terraform, le générateur échoue avec un message indiquant la correction.
+Il nécessite le fournisseur IaC CDK : le support Terraform n'est pas encore implémenté. Si l'espace de travail se résout à Terraform, le générateur échoue avec un message nommant la correction.
 
-`integrationPattern` est toujours `shared` ici. Passer `--integrationPattern=isolated` avec `http-ecs` n'échoue pas : le générateur avertit que l'option est ignorée et utilise `shared`. En exécutant le générateur de manière interactive, il demande `integrationPattern` avant `infra`, avec `isolated` présélectionné, donc cet avertissement est ce que vous voyez si vous laissez la présélection telle quelle et choisissez ensuite `http-ecs`. Dans le générateur de commandes sur cette page, choisir `http-ecs` désactive `isolated` et l'efface s'il était sélectionné, donc la commande qu'il écrit ne porte jamais le drapeau.
+`integrationPattern` est toujours `shared` ici. Passer `--integrationPattern=isolated` avec `http-ecs` n'échoue pas : le générateur avertit que l'option est ignorée et utilise `shared`. En exécutant le générateur de manière interactive, il demande `integrationPattern` avant `infra`, avec `isolated` présélectionné, donc cet avertissement est ce que vous voyez si vous laissez la présélection seule et choisissez ensuite `http-ecs`. Dans le générateur de commandes sur cette page, choisir `http-ecs` désactive `isolated` et l'efface s'il était sélectionné, donc la commande qu'il écrit ne porte jamais le drapeau.
 :::
 </OptionFilter>
 
@@ -346,7 +346,7 @@ Pour plus d'informations, veuillez vous référer à la [documentation AWS Lambd
 
 <OptionFilter when={{ infra: 'http-ecs' }} description="X-Ray produces no traces on ECS">
 :::caution[Aucune trace sur ECS]
-Les appels ci-dessus s'exécutent sans erreur dans un conteneur, mais ne produisent aucune trace. Powertools désactive son traceur lorsqu'il ne s'exécute pas dans Lambda, donc `getSegment()` retourne un sous-segment de remplacement qui n'est jamais envoyé nulle part. Voir <a href="#observability">Observability</a> pour ce que vous obtenez, et ce qu'il faut ajouter si vous avez besoin de traces.
+Les appels ci-dessus s'exécutent sans erreur dans un conteneur, mais ne produisent aucune trace. Powertools désactive son traceur lorsqu'il ne s'exécute pas dans Lambda, donc `getSegment()` retourne un sous-segment de substitution qui n'est jamais envoyé nulle part. Voir <a href="#observability">Observabilité</a> pour ce que vous obtenez, et ce qu'il faut ajouter si vous avez besoin de traces.
 :::
 </OptionFilter>
 
@@ -995,12 +995,12 @@ Les sorties clés du module API que vous pouvez utiliser pour les politiques IAM
 <Snippet name="ts-bundle" />
 
 <OptionFilter when={{ infra: 'http-ecs' }} description="How ECS hosting works, what it costs and what it limits">
-## Running on Amazon ECS
+## Exécution sur Amazon ECS
 
 Avec `infra` défini sur `http-ecs`, vos procédures s'exécutent en tant que serveur HTTP de longue durée dans un conteneur plutôt que dans une fonction Lambda. Une requête suit ce chemin :
 
 1. Un appelant signe une requête vers l'API Gateway HTTP API, qui est le seul point d'entrée public. Chaque route porte l'autorisateur pour l'`auth` que vous avez choisi, donc une requête non authentifiée est rejetée à la périphérie.
-2. API Gateway transmet la requête via un lien VPC, qui est son chemin privé vers votre VPC.
+2. API Gateway transmet la requête via un lien VPC, qui est son chemin privé dans votre VPC.
 3. Le lien VPC atteint un équilibreur de charge interne. L'équilibreur de charge n'a pas d'adresse publique, et sa seule règle entrante autorise le groupe de sécurité du lien VPC sur le port d'écoute.
 4. L'équilibreur de charge transmet la requête à une tâche. La seule règle entrante des tâches autorise le groupe de sécurité de l'équilibreur de charge sur le port du conteneur, donc rien d'autre dans le VPC ne peut ouvrir une connexion vers elles.
 
@@ -1008,25 +1008,25 @@ Les tâches s'exécutent dans des sous-réseaux privés et n'obtiennent jamais d
 
 Par défaut, le service, l'équilibreur de charge et le lien VPC vont dans les sous-réseaux `PRIVATE_WITH_EGRESS` du VPC, qui atteignent AWS via une passerelle NAT. Passer `vpcSubnets: { subnetType: SubnetType.PRIVATE_ISOLATED }` à `defaultIntegrations` supprime la passerelle NAT et ses frais horaires, mais les sous-réseaux isolés n'ont pas de route sortante, donc le VPC a alors besoin de quatre points de terminaison VPC pour que les tâches démarrent : des points de terminaison d'interface pour `ecr.api` et `ecr.dkr` pour extraire l'image, un point de terminaison de passerelle S3 car les couches d'image sont des objets S3, et un point de terminaison d'interface pour `logs` afin que le pilote `awslogs` puisse écrire. Sans eux, une tâche ne peut pas extraire son image et ECS annule le déploiement sur le disjoncteur sans dire pourquoi.
 
-Le lien VPC, l'équilibreur de charge, son écouteur, le groupe cible et le bucket dans lequel l'équilibreur de charge écrit ses journaux d'accès sont créés par un seul construct, `core/api/ecs-http-endpoint.ts` dans `common/constructs`, que chaque API hébergée sur ECS partage. Le construct de votre propre API nomme son service de conteneur et route chaque opération vers ce point de terminaison.
+Le lien VPC, l'équilibreur de charge, son écouteur, le groupe cible et le bucket dans lequel l'équilibreur de charge écrit ses journaux d'accès sont créés par un seul construct, `core/api/ecs-http-endpoint.ts` dans `common/constructs`, que chaque API hébergée sur ECS partage. Le construct propre de votre API nomme son service de conteneur et route chaque opération vers ce point de terminaison.
 
-### What Runs in the Container
+### Ce qui s'exécute dans le conteneur
 
-`src/<api-name>-container/server.ts` est un serveur `node:http` avec deux tâches. `GET /health` répond `{"status":"ok"}`, ce que le groupe cible de l'équilibreur de charge et le contrôle de santé du conteneur appellent. Toute autre requête va à l'[adaptateur autonome tRPC](https://trpc.io/docs/server/adapters/standalone), qui la résout par rapport à votre routeur.
+`src/<api-name>-container/server.ts` est un serveur `node:http` avec deux tâches. `GET /health` répond `{"status":"ok"}`, ce que le groupe cible de l'équilibreur de charge et la vérification de santé du conteneur appellent. Toute autre requête va à l'[adaptateur autonome tRPC](https://trpc.io/docs/server/adapters/standalone), qui la résout par rapport à votre routeur.
 
 Il n'y a pas d'événement API Gateway dans le conteneur, donc le contexte de procédure ne porte aucun champ `event`, `context` ou `info` : pour `http-ecs`, l'`IMiddlewareContext` fourni ne nomme que ce que le middleware y met. L'autorisateur décide toujours si une requête atteint le conteneur, mais ses revendications n'arrivent pas avec la requête, donc les exemples de middleware d'identité ci-dessus ne s'appliquent pas. Pour lire l'identité de l'appelant dans une procédure, mappez le contexte de l'autorisateur sur un en-tête de requête dans votre construct d'API et lisez cet en-tête.
 
-### Observability
+### Observabilité
 
 Les journaux et les métriques fonctionnent comme sur Lambda : le conteneur écrit dans son propre groupe de journaux CloudWatch, et le plugin de métriques publie les métriques de chaque requête au format de métrique intégré pour que CloudWatch Logs les extraie.
 
-Le plugin de métriques construit un objet de métriques pour chaque requête et le transmet à vos procédures en tant que `opts.ctx.metrics`, donc une métrique qu'une requête ajoute n'est jamais publiée avec celle d'une autre. Cela compte plus ici que sur Lambda, où une invocation possède les métriques du début à la fin ; ce serveur gère les requêtes en même temps. Ajoutez vos propres métriques via `opts.ctx.metrics` plutôt qu'un objet `Metrics` de votre propre création, qui partagerait un magasin sur chaque requête dans le processus.
+Le plugin de métriques construit un objet de métriques pour chaque requête et le transmet à vos procédures en tant que `opts.ctx.metrics`, donc une métrique qu'une requête ajoute n'est jamais publiée avec celle d'une autre. Cela compte plus ici que sur Lambda, où une invocation possède les métriques du début à la fin ; ce serveur gère les requêtes en même temps. Ajoutez vos propres métriques via `opts.ctx.metrics` plutôt qu'un objet `Metrics` propre, qui partagerait un magasin à travers chaque requête dans le processus.
 
 Le traçage AWS X-Ray ne fonctionne pas. Powertools désactive son traceur en dehors de Lambda, et il n'y a pas de démon X-Ray dans la tâche pour recevoir les segments, donc les appels `opts.ctx.tracer` s'exécutent sans erreur et ne produisent aucune trace. Ajoutez un démon en tant que sidecar dans votre service de conteneur si vous en avez besoin.
 
 Le journal d'accès de l'API Gateway HTTP API enregistre chaque requête qui atteint l'API. L'équilibreur de charge écrit ses propres journaux d'accès dans un bucket que le construct `EcsHttpEndpoint` crée, c'est là que vous pouvez voir quelle tâche a servi une requête et ce qu'elle a répondu.
 
-### Image Build and Scanning
+### Construction et analyse d'image
 
 Le générateur de conteneur fournit les cibles d'image, nommées d'après votre API :
 
@@ -1035,21 +1035,21 @@ Le générateur de conteneur fournit les cibles d'image, nommées d'après votre
 
 Voir <Link path="/guides/ts-container">TypeScript Container Service</Link> pour comment l'image est construite, et <Link path="/guides/docker-bundling">Docker Bundling</Link> pour comment elle est publiée au moment du déploiement.
 
-### Limits
+### Limites
 
-- **Délai d'intégration.** Les API Gateway HTTP APIs plafonnent une intégration à environ 30 secondes. Une procédure qui prend plus de temps que cela échoue à la passerelle, quelle que soit la durée pendant laquelle le conteneur continue de fonctionner.
+- **Délai d'intégration.** Les API Gateway HTTP plafonnent une intégration à environ 30 secondes. Une procédure qui prend plus de temps que cela échoue à la passerelle, peu importe combien de temps le conteneur continue de travailler.
 - **Pas de streaming.** Les subscriptions tRPC nécessitent l'infrastructure `rest-lambda`. Une API HTTP ne peut pas diffuser une réponse.
 - **Taille de charge utile.** Les requêtes et les réponses suivent la limite de 10 Mo d'API Gateway.
 - **Un service pour chaque opération.** `integrationPattern` est `shared` : il y a un service de conteneur, et chaque route y est routée. L'option se résout toujours à `shared` pour cette infrastructure, et `isolated` est ignoré avec un avertissement.
 
-### Cost
+### Coût
 
 L'équilibreur de charge est le nouveau coût fixe par rapport à Lambda, où vous payez par requête et rien en inactivité. Chiffres mensuels approximatifs dans us-east-1, avant transfert de données :
 
 | Élément | Approximativement |
 | --- | --- |
-| Équilibreur de charge interne | 16 $ plus les unités de capacité de l'équilibreur de charge |
-| Tâche Fargate, 0,25 vCPU / 0,5 Go arm64 | 7 $ par tâche |
+| Équilibreur de charge interne | 16 $ plus unités de capacité d'équilibreur de charge |
+| Tâche Fargate, 0,25 vCPU / 0,5 GB arm64 | 7 $ par tâche |
 | Passerelle NAT, si votre VPC en a une | 33 $ |
 | Lien VPC | pas de frais horaires |
 | Stockage S3 pour les journaux d'accès de l'équilibreur de charge | centimes par Go par mois |
@@ -1068,7 +1068,7 @@ Le point d'entrée du serveur local est `src/local-server.ts`.
 </OptionFilter>
 
 <OptionFilter when={{ infra: 'http-ecs' }} description="Local server entry point when the API runs on ECS">
-Le point d'entrée du serveur local est `src/<api-name>-container/index.ts`, le même fichier que le conteneur exécute. Il écoute sur l'adresse dans `HOST`, qui par défaut est `127.0.0.1`, donc le serveur local n'accepte les connexions que depuis votre propre machine. L'image définit `HOST=0.0.0.0` pour que le serveur écoute sur l'interface réseau propre de la tâche, où le groupe de sécurité de la tâche décide qui peut se connecter.
+Le point d'entrée du serveur local est `src/<api-name>-container/index.ts`, le même fichier que le conteneur exécute. Il écoute sur l'adresse dans `HOST`, qui est par défaut `127.0.0.1`, donc le serveur local n'accepte les connexions que depuis votre propre machine. L'image définit `HOST=0.0.0.0` pour que le serveur écoute sur l'interface réseau propre de la tâche, où le groupe de sécurité de la tâche décide qui peut se connecter.
 
 Vérifiez que le serveur est actif avec sa route de santé, qui retourne le statut 200 et `{"status":"ok"}` :
 
