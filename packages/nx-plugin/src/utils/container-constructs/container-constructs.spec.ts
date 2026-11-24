@@ -9,7 +9,10 @@ import {
   containerBuildPlatform,
   containerPythonPlatform,
   hostArchitecture,
+  recordedContainerArchitecture,
   resolveContainerArchitecture,
+  vendedArchitectureFiles,
+  warnArchitectureSwitchIsPartial,
   warnIfArchitectureNeedsEmulation,
 } from './container-constructs.js';
 
@@ -57,6 +60,24 @@ describe('containerPythonPlatform', () => {
 
   it('should resolve x86_64 wheels for X86_64', () => {
     expect(containerPythonPlatform('X86_64')).toBe('x86_64-manylinux_2_28');
+  });
+});
+
+describe('recordedContainerArchitecture', () => {
+  it('should be undefined for a component this run is creating', () => {
+    expect(recordedContainerArchitecture(undefined)).toBeUndefined();
+  });
+
+  it('should read the recorded architecture', () => {
+    expect(recordedContainerArchitecture({ architecture: 'X86_64' })).toBe(
+      'X86_64',
+    );
+  });
+
+  // The vended code of a component generated before this option existed is
+  // ARM64 whatever machine it was generated on.
+  it('should be ARM64 for a component recorded without an architecture', () => {
+    expect(recordedContainerArchitecture({})).toBe('ARM64');
   });
 });
 
@@ -148,5 +169,83 @@ describe('warnIfArchitectureNeedsEmulation', () => {
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+describe('vendedArchitectureFiles', () => {
+  it('should name the CDK service subclass and the line to change', () => {
+    expect(vendedArchitectureFiles('orders', 'cdk', 'X86_64')).toEqual([
+      {
+        path: 'packages/common/constructs/src/app/services/orders.ts',
+        change: "set architecture: 'X86_64'",
+      },
+    ]);
+  });
+
+  it('should name the Terraform app module and the variable to change', () => {
+    expect(vendedArchitectureFiles('orders', 'terraform', 'ARM64')).toEqual([
+      {
+        path: 'packages/common/terraform/src/app/services/orders/orders.tf',
+        change:
+          'set cpu_architecture = "ARM64" in its module "ecs_service" block',
+      },
+    ]);
+  });
+
+  it('should name nothing for a service with no vended infrastructure', () => {
+    expect(vendedArchitectureFiles('orders', undefined, 'ARM64')).toEqual([]);
+  });
+});
+
+describe('warnArchitectureSwitchIsPartial', () => {
+  const warned = (
+    options: Parameters<typeof warnArchitectureSwitchIsPartial>[0],
+  ): string => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    try {
+      warnArchitectureSwitchIsPartial(options);
+      expect(warn).toHaveBeenCalledTimes(1);
+      return warn.mock.calls[0][0] as string;
+    } finally {
+      warn.mockRestore();
+    }
+  };
+
+  it('should name both architectures and the file the generator did not change', () => {
+    const message = warned({
+      from: 'ARM64',
+      to: 'X86_64',
+      unchangedFiles: vendedArchitectureFiles('orders', 'cdk', 'X86_64'),
+    });
+
+    expect(message).toContain('generated for ARM64 and is now set to X86_64');
+    expect(message).toContain('still deploys ARM64');
+    expect(message).toContain(
+      "packages/common/constructs/src/app/services/orders.ts: set architecture: 'X86_64'",
+    );
+    expect(message).not.toContain('bundle-');
+  });
+
+  it('should name the stale bundle target when one is left behind', () => {
+    const message = warned({
+      from: 'ARM64',
+      to: 'X86_64',
+      unchangedFiles: [],
+      staleBundleTarget: 'bundle-arm',
+    });
+
+    expect(message).toContain('bundle-arm');
+    expect(message).toContain('Remove it once nothing else uses it');
+  });
+
+  it('should still say what happened when no infrastructure was vended', () => {
+    const message = warned({
+      from: 'X86_64',
+      to: 'ARM64',
+      unchangedFiles: [],
+    });
+
+    expect(message).toContain('generated for X86_64 and is now set to ARM64');
+    expect(message).toContain('then redeploy');
   });
 });

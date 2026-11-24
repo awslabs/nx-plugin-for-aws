@@ -330,6 +330,62 @@ describe('ts#container generator', () => {
       expect(architectureOf()).toBeUndefined();
     });
 
+    // Only `project.json` is rewritten on a re-run: the vended construct is
+    // written KeepExisting, so the deployed architecture does not move until
+    // the user changes it. The warning has to name that file, or the service
+    // deploys one architecture and builds the other with nothing said.
+    describe('switching an existing service', () => {
+      const switchTo = async (
+        architecture: ContainerArchitecture,
+      ): Promise<string> => {
+        const warn = vi
+          .spyOn(logger, 'warn')
+          .mockImplementation(() => undefined);
+        try {
+          await run({ architecture });
+          return warn.mock.calls.map(([message]) => String(message)).join('\n');
+        } finally {
+          warn.mockRestore();
+        }
+      };
+
+      it('should warn, naming the vended construct it did not change', async () => {
+        await run({ architecture: 'ARM64' });
+
+        const message = await switchTo('X86_64');
+
+        expect(message).toContain(
+          'generated for ARM64 and is now set to X86_64',
+        );
+        expect(message).toContain(
+          "packages/common/constructs/src/app/services/test-project-container.ts: set architecture: 'X86_64'",
+        );
+        // The generator really has not touched it.
+        expect(tree.read(SERVICE_FILE, 'utf-8')).toContain(
+          "architecture: 'ARM64',",
+        );
+      });
+
+      it('should record the new architecture so a later re-run keeps it', async () => {
+        await run({ architecture: 'ARM64' });
+        await switchTo('X86_64');
+        expect(architectureOf()).toBe('X86_64');
+
+        await onHostArch('arm64', () => run({ architecture: undefined }));
+
+        expect(architectureOf()).toBe('X86_64');
+        expect(dockerBuildCommand()).toContain('--platform linux/amd64 ');
+      });
+
+      it('should say nothing about a switch when the architecture is unchanged', async () => {
+        await run({ architecture: 'ARM64' });
+
+        const message = await switchTo('ARM64');
+
+        expect(message).not.toContain('is now set to');
+      });
+    });
+
     it('should warn how to fix a build the host cannot run natively', async () => {
       const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
 

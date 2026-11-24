@@ -1,0 +1,123 @@
+# Inputs of the reusable ECS service module (AWS Fargate, linux/arm64) in an
+# existing VPC. The module never creates a VPC.
+
+variable "service_name" {
+  description = "Name of the service."
+  type        = string
+}
+
+variable "vpc_id" {
+  description = "VPC the service runs in."
+  type        = string
+}
+
+variable "subnet_ids" {
+  description = "Private subnets with egress for the tasks. Tasks never get a public IP."
+  type        = list(string)
+}
+
+variable "cluster_arn" {
+  description = "ARN of an existing ECS cluster, so several services can share one. Null creates a cluster with Container Insights on."
+  type        = string
+  default     = null
+}
+
+variable "image_uri" {
+  description = "Image to run, pinned by digest. The app module passes the digest it published to the shared asset ECR repository; a prebuilt registry image can be passed instead, and nothing is built locally."
+  type        = string
+}
+
+variable "container_port" {
+  description = "Port the server listens on inside the container, passed as PORT."
+  type        = number
+  default     = 8080
+}
+
+variable "cpu" {
+  description = "Task CPU units."
+  type        = number
+  default     = 256
+}
+
+variable "memory" {
+  description = "Task memory in MiB."
+  type        = number
+  default     = 512
+}
+
+variable "desired_count" {
+  description = "Number of tasks to start with."
+  type        = number
+  default     = 1
+}
+
+variable "min_capacity" {
+  description = "Fewest tasks autoscaling keeps."
+  type        = number
+  default     = 1
+}
+
+variable "max_capacity" {
+  description = "Most tasks autoscaling starts."
+  type        = number
+  default     = 2
+}
+
+variable "target_cpu_utilization" {
+  description = "Average CPU utilisation, in percent, autoscaling keeps the service at."
+  type        = number
+  default     = 70
+}
+
+variable "environment" {
+  description = "Plain environment variables. Never put secret values here; use secrets."
+  type        = map(string)
+  default     = {}
+}
+
+variable "secrets" {
+  description = "Environment variables read from Secrets Manager or SSM Parameter Store, as a map of variable name to secret or parameter ARN. The execution role may read only these."
+  type        = map(string)
+  default     = {}
+}
+
+variable "log_retention_days" {
+  description = "Retention of the container and Container Insights log groups, in days."
+  type        = number
+  default     = 365
+}
+
+variable "task_role_policy_statements" {
+  description = "IAM policy statements added to the task role. The task role has no permissions otherwise; connections add theirs here."
+  type        = list(any)
+  default     = []
+}
+
+variable "tags" {
+  description = "Tags to apply to all resources."
+  type        = map(string)
+  default     = {}
+}
+
+variable "image_repository_arn" {
+  description = "ARN of the ECR repository image_uri is in. The execution role may pull only from it. Null for an image that needs no ECR pull permission."
+  type        = string
+  default     = null
+}
+
+variable "container_user" {
+  description = "Non-root user, as uid or uid:gid, the container runs as."
+  type        = string
+  default     = "1000:1000"
+
+  validation {
+    condition     = !can(regex("^(0|root)(:.*)?$", var.container_user))
+    error_message = "container_user must not be root."
+  }
+}
+
+variable "health_check_command" {
+  description = "Command ECS runs inside the container to check its health, in the task definition healthCheck command form. It must exit non-zero when the server is unhealthy. Null runs no health check."
+  type        = list(string)
+  default     = null
+}

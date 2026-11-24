@@ -62,20 +62,113 @@ export const containerPythonPlatform = (
   architecture === 'ARM64' ? 'aarch64-manylinux_2_28' : 'x86_64-manylinux_2_28';
 
 /**
+ * The architecture a previous run generated this component for, or `undefined`
+ * when this run is creating it.
+ *
+ * A component recorded without an architecture was generated before the option
+ * existed, and its vended code is ARM64 whatever machine it was generated on.
+ */
+export const recordedContainerArchitecture = (recorded?: {
+  readonly architecture?: ContainerArchitecture;
+}): ContainerArchitecture | undefined =>
+  recorded ? (recorded.architecture ?? 'ARM64') : undefined;
+
+/**
  * The architecture to generate a container service for: the one the user asked
  * for, otherwise the one a previous run generated, otherwise the host's.
  *
- * Re-runs never re-detect over a value already in the vended code. A component
- * recorded without an architecture was generated before the option existed, and
- * its vended code is ARM64 whatever machine it was generated on.
+ * Re-runs never re-detect over a value already in the vended code.
  */
 export const resolveContainerArchitecture = (
   requested?: ContainerArchitecture,
   recorded?: { readonly architecture?: ContainerArchitecture },
 ): ContainerArchitecture =>
-  requested ??
-  recorded?.architecture ??
-  (recorded ? 'ARM64' : hostArchitecture());
+  requested ?? recordedContainerArchitecture(recorded) ?? hostArchitecture();
+
+/**
+ * The vended files that hold a service's architecture as a literal, and the
+ * change each one needs to move the service to `architecture`. Empty when the
+ * service has no vended infrastructure.
+ */
+export const vendedArchitectureFiles = (
+  nameKebabCase: string,
+  iac: Iac | undefined,
+  architecture: ContainerArchitecture,
+): { readonly path: string; readonly change: string }[] => {
+  if (iac === 'cdk') {
+    return [
+      {
+        path: joinPathFragments(
+          PACKAGES_DIR,
+          SHARED_CONSTRUCTS_DIR,
+          'src',
+          'app',
+          'services',
+          `${nameKebabCase}.ts`,
+        ),
+        change: `set architecture: '${architecture}'`,
+      },
+    ];
+  }
+  if (iac === 'terraform') {
+    return [
+      {
+        path: joinPathFragments(
+          PACKAGES_DIR,
+          SHARED_TERRAFORM_DIR,
+          'src',
+          'app',
+          'services',
+          nameKebabCase,
+          `${nameKebabCase}.tf`,
+        ),
+        change: `set cpu_architecture = "${architecture}" in its module "ecs_service" block`,
+      },
+    ];
+  }
+  return [];
+};
+
+/**
+ * Warns that a re-run with a different architecture changed only what the
+ * generator owns. The infrastructure it vended is written `KeepExisting`, so
+ * the architecture in it is the user's to change, and the service keeps
+ * deploying on the old architecture until they do.
+ */
+export const warnArchitectureSwitchIsPartial = (options: {
+  /** The architecture a previous run generated the service for. */
+  readonly from: ContainerArchitecture;
+  /** The architecture this run was asked for. */
+  readonly to: ContainerArchitecture;
+  /** Vended files still asking for `from`, and the change each one needs. */
+  readonly unchangedFiles: readonly {
+    readonly path: string;
+    readonly change: string;
+  }[];
+  /** A bundle target the previous architecture left behind, if any. */
+  readonly staleBundleTarget?: string;
+}): void => {
+  const { from, to, unchangedFiles, staleBundleTarget } = options;
+  const lines = [
+    `This container service was generated for ${from} and is now set to ${to}. The generator changed its build targets; it does not change the infrastructure it vended, which still deploys ${from}.`,
+  ];
+  if (unchangedFiles.length > 0) {
+    lines.push(
+      'Change it yourself, then redeploy:',
+      ...unchangedFiles.map((file) => `  - ${file.path}: ${file.change}`),
+    );
+  } else {
+    lines.push(
+      `If you have deployed this service, change the architecture in the construct or module you deployed it with, then redeploy.`,
+    );
+  }
+  if (staleBundleTarget) {
+    lines.push(
+      `The ${from} bundle target, ${staleBundleTarget}, was left in place: other components in this project may bundle for ${from} too. Remove it once nothing else uses it.`,
+    );
+  }
+  logger.warn(lines.join('\n'));
+};
 
 /**
  * Warns when the image this service needs cannot be built natively on this

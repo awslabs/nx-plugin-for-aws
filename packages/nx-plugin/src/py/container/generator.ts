@@ -11,14 +11,20 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { addPyDependencies } from '../../utils/add-dependencies.js';
-import { addPythonBundleTarget } from '../../utils/bundle/bundle.js';
+import {
+  addPythonBundleTarget,
+  pythonBundleTargetName,
+} from '../../utils/bundle/bundle.js';
 import {
   addContainerServiceInfra,
   CONTAINER_PORT,
   containerBuildPlatform,
   containerHealthCheckCommand,
   containerPythonPlatform,
+  recordedContainerArchitecture,
   resolveContainerArchitecture,
+  vendedArchitectureFiles,
+  warnArchitectureSwitchIsPartial,
   warnIfArchitectureNeedsEmulation,
 } from '../../utils/container-constructs/container-constructs.js';
 import type { ContainerMetadata } from '../../utils/container-constructs/container-metadata.js';
@@ -128,11 +134,14 @@ export const pyContainerGenerator = async (
   // the vended code is kept rather than re-detected from this machine. A second
   // architecture would otherwise add a second bundle target beside the first.
   const recorded = recordedMetadata(tree, project.name, targetPrefix);
+  const previousArchitecture = recordedContainerArchitecture(recorded);
   const architecture = resolveContainerArchitecture(
     options.architecture,
     recorded,
   );
   warnIfArchitectureNeedsEmulation(architecture);
+  const switchedArchitecture =
+    previousArchitecture !== undefined && previousArchitecture !== architecture;
 
   const port = assignPort(tree, project, 8081, {
     component: { info: PY_CONTAINER_GENERATOR_INFO, name: targetPrefix },
@@ -161,6 +170,23 @@ export const pyContainerGenerator = async (
   const { bundleTargetName, bundleOutputDir } = addPythonBundleTarget(project, {
     pythonPlatform: containerPythonPlatform(architecture),
   });
+
+  if (switchedArchitecture) {
+    // `addPythonBundleTarget` only adds, and the two bundle targets are shared
+    // by every component in the project that bundles for their platform
+    // (py#agent, py#mcp-server and py#rdb bundle for ARM64, py#fast-api and
+    // py#lambda-function for X86_64), so removing the previous one here could
+    // break a sibling component. Name it instead and let the user decide.
+    const staleBundleTarget = pythonBundleTargetName(
+      containerPythonPlatform(previousArchitecture),
+    );
+    warnArchitectureSwitchIsPartial({
+      from: previousArchitecture,
+      to: architecture,
+      unchangedFiles: vendedArchitectureFiles(name, iac, architecture),
+      ...(project.targets[staleBundleTarget] ? { staleBundleTarget } : {}),
+    });
+  }
 
   const containers = await resolveContainers(tree, 'inherit');
   const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
@@ -285,6 +311,18 @@ export const pyContainerGenerator = async (
         infra: metadata.infra,
         iac: metadata.iac,
       },
+    );
+  }
+  if (switchedArchitecture) {
+    // The run was asked for another architecture, so record it. Otherwise the
+    // next re-run without the option would resolve the old one, put the build
+    // targets back and add the previous bundle target again.
+    updateComponentGeneratorMetadata(
+      tree,
+      project.name,
+      PY_CONTAINER_GENERATOR_INFO,
+      targetPrefix,
+      { architecture },
     );
   }
 

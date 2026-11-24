@@ -20,7 +20,10 @@ import {
   CONTAINER_PORT,
   containerBuildPlatform,
   containerHealthCheckCommand,
+  recordedContainerArchitecture,
   resolveContainerArchitecture,
+  vendedArchitectureFiles,
+  warnArchitectureSwitchIsPartial,
   warnIfArchitectureNeedsEmulation,
 } from '../../utils/container-constructs/container-constructs.js';
 import type { ContainerMetadata } from '../../utils/container-constructs/container-metadata.js';
@@ -125,11 +128,21 @@ export const tsContainerGenerator = async (
   // Read before anything is written, so the architecture a previous run put in
   // the vended code is kept rather than re-detected from this machine.
   const recorded = recordedMetadata(tree, project.name, targetPrefix);
+  const previousArchitecture = recordedContainerArchitecture(recorded);
   const architecture = resolveContainerArchitecture(
     options.architecture,
     recorded,
   );
   warnIfArchitectureNeedsEmulation(architecture);
+  const switchedArchitecture =
+    previousArchitecture !== undefined && previousArchitecture !== architecture;
+  if (switchedArchitecture) {
+    warnArchitectureSwitchIsPartial({
+      from: previousArchitecture,
+      to: architecture,
+      unchangedFiles: vendedArchitectureFiles(name, iac, architecture),
+    });
+  }
 
   const port = assignPort(tree, project, 8081, {
     component: { info: TS_CONTAINER_GENERATOR_INFO, name: targetPrefix },
@@ -276,6 +289,18 @@ export const tsContainerGenerator = async (
         infra: metadata.infra,
         iac: metadata.iac,
       },
+    );
+  }
+  if (switchedArchitecture) {
+    // The run was asked for another architecture, so record it. Otherwise the
+    // next re-run without the option would resolve the old one and quietly put
+    // the build targets back, fighting the vended code the user just changed.
+    updateComponentGeneratorMetadata(
+      tree,
+      project.name,
+      TS_CONTAINER_GENERATOR_INFO,
+      targetPrefix,
+      { architecture },
     );
   }
 

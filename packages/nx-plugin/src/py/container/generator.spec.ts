@@ -6,6 +6,7 @@ import { parse } from '@iarna/toml';
 import {
   addProjectConfiguration,
   joinPathFragments,
+  logger,
   readProjectConfiguration,
   type Tree,
   updateProjectConfiguration,
@@ -391,6 +392,69 @@ describe('py#container generator', () => {
       const { targets } = readProject(tree);
       expect(targets['bundle-x86']).toBeUndefined();
       expect(dockerCommands().at(-1)).toContain('--platform linux/arm64 ');
+    });
+
+    // Only `project.json` is rewritten on a re-run: the vended module is
+    // written KeepExisting, and `addPythonBundleTarget` only adds, so a switch
+    // leaves two things behind that the warning has to name.
+    describe('switching an existing service', () => {
+      const switchTo = async (
+        architecture: ContainerArchitecture,
+      ): Promise<string> => {
+        const warn = vi
+          .spyOn(logger, 'warn')
+          .mockImplementation(() => undefined);
+        try {
+          await pyContainerGenerator(tree, {
+            project: PROJECT,
+            iac: 'terraform',
+            architecture,
+          });
+          return warn.mock.calls.map(([message]) => String(message)).join('\n');
+        } finally {
+          warn.mockRestore();
+        }
+      };
+
+      it('should warn, naming the Terraform module and the stale bundle target', async () => {
+        await pyContainerGenerator(tree, {
+          project: PROJECT,
+          iac: 'terraform',
+          architecture: 'ARM64',
+        });
+
+        const message = await switchTo('X86_64');
+
+        expect(message).toContain(
+          'generated for ARM64 and is now set to X86_64',
+        );
+        expect(message).toContain(
+          'packages/common/terraform/src/app/services/my-proj-container/my-proj-container.tf: set cpu_architecture = "X86_64"',
+        );
+        expect(message).toContain('bundle-arm');
+        // Left in place on purpose: other components in the project may bundle
+        // for ARM64 too.
+        expect(readProject(tree).targets['bundle-arm']).toBeDefined();
+      });
+
+      it('should record the new architecture so a later re-run keeps it', async () => {
+        await pyContainerGenerator(tree, {
+          project: PROJECT,
+          iac: 'terraform',
+          architecture: 'ARM64',
+        });
+        await switchTo('X86_64');
+
+        await onHostArch('arm64', () =>
+          pyContainerGenerator(tree, { project: PROJECT, iac: 'terraform' }),
+        );
+
+        expect(architectureOf()).toBe('X86_64');
+        expect(dockerCommands().at(-1)).toContain('--platform linux/amd64 ');
+        expect(dockerCommands()[2]).toContain(
+          'dist/packages/my_proj/bundle-x86/.',
+        );
+      });
     });
 
     it('should pass the architecture to the vended infrastructure', async () => {

@@ -366,7 +366,16 @@ secrets     = { API_KEY = aws_secretsmanager_secret.api_key.arn }
 
 The `architecture` option sets the CPU the tasks run on and the platform the image is built for: `ARM64` or `X86_64`. ARM64 runs on [AWS Graviton](https://aws.amazon.com/ec2/graviton/) processors, which AWS Fargate bills at a lower rate per vCPU and per GB of memory than X86_64. See [AWS Fargate pricing](https://aws.amazon.com/fargate/pricing/) for the rates in your Region.
 
-Leave the option out and the generator uses the architecture of the machine you run it on, so `nx run your-project:container-docker` builds natively and needs no emulator. Re-running the generator keeps the architecture it generated the first time, whatever machine you re-run it on, because that architecture is already in your deployed task definition. Pass the option to change it.
+Leave the option out and the generator uses the architecture of the machine you run it on, so `nx run your-project:container-docker` builds natively and needs no emulator. Re-running the generator keeps the architecture it generated the first time, whatever machine you re-run it on, because that architecture is already in your deployed task definition.
+
+The architecture is fixed when the service is first generated. The generator never rewrites the infrastructure it vended, so moving an existing service to the other architecture takes two steps:
+
+1. Change the architecture in the vended code. In CDK, the `architecture:` line in `packages/common/constructs/src/app/services/<name>.ts`. In Terraform, `cpu_architecture` in the `module "ecs_service"` block of `packages/common/terraform/src/app/services/<name>/<name>.tf`.
+2. Re-run the generator with `--architecture` set to the same value, so the `<name>-docker` target builds for it.
+
+Then redeploy. If you pass an architecture that differs from the one the generator recorded, it warns and names the file you have to change. Getting only step 2 leaves a service that deploys one architecture and builds the other, which Fargate rejects when it starts the task.
+
+`architecture` is also a prop of the vended service construct, so a stack can pass a different one for a single instantiation. That changes what deploys but not what the `<name>-docker` and `<name>-trivy` targets build, so keep the two in step yourself.
 
 Building an ARM64 image on an x86_64 machine, or an X86_64 image on an arm64 machine, fails with `exec format error` unless you install an emulator. The generator warns you when the architecture it is about to generate is not the one your machine runs. See <Link path="/troubleshooting/docker">Troubleshooting Docker</Link>.
 
@@ -379,6 +388,7 @@ The generator writes the architecture it chose into your service's construct and
 #### Sizing and Scaling
 
 Each task gets 256 CPU units (a quarter of a vCPU) and 512 MiB of memory by default. The service starts one task, and autoscaling keeps between one and two tasks running, adding tasks when average CPU use goes above 70%.
+
 | Setting | CDK prop | Terraform variable | Default |
 | --- | --- | --- | --- |
 | CPU units per task | `cpu` | `cpu` | 256 |
