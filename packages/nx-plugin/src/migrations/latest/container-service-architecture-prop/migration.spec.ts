@@ -135,6 +135,24 @@ describe('container-service-architecture-prop migration', () => {
     return read(fresh, ECS_SERVICE_TS);
   };
 
+  /**
+   * Template additions made after this migration shipped. The migration owns
+   * the architecture input only, so the convergence check compares against
+   * today's construct with these lines taken out. Each one is asserted
+   * present first, so a rename in the template fails here instead of letting
+   * the strip silently match nothing.
+   */
+  const withoutLaterTemplateAdditions = (generated: string): string => {
+    const additions = [
+      / {2}\/\*\*\n {3}\* How long ECS ignores failing health checks[\s\S]*?\*\/\n {2}readonly healthCheckGracePeriod\?: Duration;\n/,
+      / {6}healthCheckGracePeriod: props\.healthCheckGracePeriod,\n/,
+    ];
+    return additions.reduce((text, addition) => {
+      expect(text, `generated construct lacks ${addition}`).toMatch(addition);
+      return text.replace(addition, '');
+    }, generated);
+  };
+
   describe('the CDK construct', () => {
     it('should give the shipped construct the architecture input', async () => {
       await givenShippedCdkConstruct();
@@ -175,7 +193,9 @@ describe('container-service-architecture-prop migration', () => {
       await migration(tree);
       const migrated = read(tree, ECS_SERVICE_TS);
 
-      expect(migrated).toEqual(await generatedCdkConstruct());
+      expect(migrated).toEqual(
+        withoutLaterTemplateAdditions(await generatedCdkConstruct()),
+      );
     });
 
     it('should change nothing and report nothing on a second run', async () => {
