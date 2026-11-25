@@ -485,6 +485,61 @@ module "my_website" {
 
 また、CloudFrontディストリビューションを指すDNSレコード（例：Route 53）を作成する必要があります。
 
+### API Gateway経由のホスティング
+
+CloudFrontの代わりに、既存のREST APIのルートを通じてウェブサイトを提供できます。これにより、APIの独自のオリジンで、CloudFrontディストリビューションなしで、クロスオリジンリクエストなしでウェブサイトを配信できます。これはCDKでのみサポートされています。
+
+まずAPIを生成し（<Link path="guides/ts-smithy-api">`ts#smithy-api`</Link>、または<Link path="guides/trpc">`ts#trpc-api`</Link>や<Link path="guides/fastapi">`py#fast-api`</Link>でRESTインフラストラクチャを使用）、次に`hosting`を`api-gateway`に設定してウェブサイトを生成します：
+
+<RunGenerator generator="ts#react-website" requiredParameters={{ name: 'my-website', hosting: 'api-gateway', apiProject: 'my-api' }} />
+
+生成されたウェブサイトコンストラクトは`ApiGatewayStaticWebsite`を拡張し、APIに以下のルートを追加します：
+
+- `GET /`およびファイル拡張子のないパスは`index.html`を返すため、アプリのルートが直接ロードされます。
+- `GET /runtime-config.json`は<Link path="guides/react-website#runtime-configuration">ランタイム設定</Link>を返します。
+- `GET /assets/{proxy+}`はコンテンツのハッシュで名前が付けられたファイルを返し、1年間キャッシュされます。
+- ファイル拡張子を持つその他のパスは、バンドルからそのファイルを返します。
+
+これらのルートには認証が不要ですが、APIの操作は認証を保持します。IAM認証を持つAPIの場合、リソースポリシーは、IAM許可が必要なAPI独自のIAM操作を除くすべての`GET`を誰にでも許可します。APIのWeb ACLはウェブサイトもカバーします。
+
+ウェブサイトは相対的なVite `base`（`./`）でビルドされ、ルーターの`basepath`はページの`<base href>`から取得されます。コンストラクトは、execute-api URLの`/prod/`やカスタムドメインのベースパスなど、APIに到達する各パスに対して`index.html`のコピーをデプロイし、各リクエストにそのドメインのコピーを提供します。したがって、1つのビルドがAPIのすべてのURLを提供します。
+
+APIをウェブサイトに渡します：
+
+```diff lang="ts" title="packages/infra/src/stacks/application-stack.ts"
+     const identity = new UserIdentity(this, 'Identity');
+     const api = new MyApi(this, 'MyApi', {
+       integrations: MyApi.defaultIntegrations(this).build(),
+     });
+     api.grantInvokeAccess(identity.identityPool.authenticatedRole);
+-    new MyWebsite(this, 'MyWebsite');
++    new MyWebsite(this, 'MyWebsite', { api });
+```
+
+User Poolのウェブクライアントは、ウェブサイトが提供されるすべてのURLをコールバックとして許可するため、サインインは開始したURLに戻ります。
+
+#### カスタムドメイン
+
+ウェブサイトは、APIをマップする各カスタムドメインからも提供されます。APIの`domainName`を設定するか、`addDomainName`を呼び出すか、ウェブサイトコンストラクトの前後に独自の`DomainName`でマップするかに関係なく提供されます。各ドメインでは、マッピングのベースパスの下で提供されます：空のベースパスの場合は`https://app.example.com`、`app`の場合は`https://example.com/app/`。execute-api URLも引き続き提供します。
+
+- `url`は常にexecute-api URLです（例：`https://<api-id>.execute-api.<region>.amazonaws.com/prod/`）。これはすべてのAPIに存在し、追加するドメインに依存しません。スタック出力`WebsiteUrl`がこれを示します。
+- `urls`は、ウェブサイトが提供されるすべてのURLをリストします：最初にexecute-api URL、次にドメイン名とベースパスでソートされた各カスタムドメイン。スタック出力`WebsiteUrls`がスペースで区切ってリストします。
+
+コンストラクトは、あるドメインを別のドメインよりも優先することはありません。正規のドメインが必要な場合は、独自の出力で自分で指定してください：
+
+```ts
+new CfnOutput(this, 'AppUrl', { value: 'https://app.example.com' });
+```
+
+#### 注意点
+
+- デプロイされたウェブサイトは`/prod/`などのパスで実行されますが、ローカル開発サーバーはルートで実行されます。ルーター経由または相対URLでリンクしてください：`/`で始まるリンクはローカルでは機能しますが、デプロイすると壊れます。
+- ランタイム設定はAPIの1つのURLを指定し、ウェブサイトはロードされたURLからそれを呼び出します。APIはデフォルトですべてのオリジンを許可します。`restrictCorsTo`でCORSオリジンを制限する場合は、ウェブサイトの各`urls`のオリジンを含めてください。
+- `index.html`の`<base href="%BASE_URL%" />`を保持してください。コンストラクトは、デプロイする各コピーにウェブサイトのパスを書き込み、ビルドはそれに相対的にすべてをロードします。
+- コンストラクトは、`/`またはトップレベルのパスパラメーター（`/{id}`など）に`GET`操作を持つAPIの合成を拒否します。これらはウェブサイトが提供されるパスを取得するためです。
+- 既存のウェブサイトをCloudFrontから切り替えると、変更していない場合にのみCloudFrontウェブサイトコンストラクトが置き換えられます。それ以外の場合、ジェネレーターは停止します：変更を脇に移動し、コンストラクトを削除して、ジェネレーターを再度実行してください。
+- `RuntimeConfig`、`CognitoAuth`、`UserIdentity`、またはAPIのコンストラクトが古いバージョンのプラグインによって生成された場合、ジェネレーターは停止してそれを示します。`nx migrate @aws/nx-plugin`を実行し、マイグレーションを適用して、ジェネレーターを再度実行してください。
+
 ## ランタイム設定
 
 インフラストラクチャからの設定は、<Link path="guides/runtime-config">ランタイム設定</Link>を介してウェブサイトに提供されます。これにより、ウェブサイトはアプリケーションがデプロイされるまで不明なAPI URLなどの詳細にアクセスできます。
