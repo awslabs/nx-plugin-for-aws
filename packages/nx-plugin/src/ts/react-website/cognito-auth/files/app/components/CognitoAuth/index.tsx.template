@@ -7,7 +7,7 @@ import { useRuntimeConfig } from '../../hooks/useRuntimeConfig';
 /**
  * Sets up the Cognito auth.
  *
- * This assumes a runtime-config.json file is present at '/'. In order for Auth to be set up automatically,
+ * This assumes a runtime-config.json file is present at the app's base path. In order for Auth to be set up automatically,
  * the runtime-config.json must have the cognitoProps set.
  */
 const CognitoAuth: React.FC<PropsWithChildren> = ({ children }) => {
@@ -28,9 +28,29 @@ const CognitoAuth: React.FC<PropsWithChildren> = ({ children }) => {
   const cognitoAuthConfig: AuthProviderProps = {
     authority: `https://cognito-idp.${cognitoProps.region}.amazonaws.com/${cognitoProps.userPoolId}`,
     client_id: cognitoProps.userPoolWebClientId,
-    redirect_uri: window.location.origin,
+    // The app's base path, resolved against the page's base URL so a relative Vite base
+    // works too, or just the origin when the app is served from '/'
+    redirect_uri: window.location.origin + new URL(import.meta.env.BASE_URL, document.baseURI).pathname.replace(/^\/$/, ''),
     response_type: 'code',
     scope: 'email openid profile',
+    // Return to the page the user opened, held in the sign-in state, otherwise to the
+    // page signed in to, without the sign-in's code and state
+    onSigninCallback: (user) => {
+      // Resolved first, so neither '..' nor a host in the state can leave the app
+      const base = new URL(import.meta.env.BASE_URL, document.baseURI).pathname;
+      const returnTo =
+        typeof user?.state === 'string'
+          ? new URL(user.state, window.location.origin)
+          : undefined;
+      window.history.replaceState(
+        null,
+        '',
+        returnTo?.origin === window.location.origin &&
+          returnTo.pathname.startsWith(base)
+          ? `${returnTo.pathname}${returnTo.search}${returnTo.hash}`
+          : window.location.pathname,
+      );
+    },
   };
 
   return (
@@ -45,7 +65,8 @@ const CognitoAuthInternal: React.FC<PropsWithChildren> = ({ children }) => {
 
   useEffect(() => {
     if (!auth.isAuthenticated && !auth.isLoading) {
-      auth.signinRedirect();
+      const { pathname, search, hash } = window.location;
+      auth.signinRedirect({ state: `${pathname}${search}${hash}` });
     }
   }, [auth]);
 

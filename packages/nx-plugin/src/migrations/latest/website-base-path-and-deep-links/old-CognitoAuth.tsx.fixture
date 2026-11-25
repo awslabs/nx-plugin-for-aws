@@ -1,0 +1,70 @@
+import React, { PropsWithChildren, useEffect } from 'react';
+import { AuthProvider, AuthProviderProps, useAuth } from 'react-oidc-context';
+import { Alert } from '../alert';
+import { Spinner } from '../spinner';
+import { useRuntimeConfig } from '../../hooks/useRuntimeConfig';
+
+/**
+ * Sets up the Cognito auth.
+ *
+ * This assumes a runtime-config.json file is present at '/'. In order for Auth to be set up automatically,
+ * the runtime-config.json must have the cognitoProps set.
+ */
+const CognitoAuth: React.FC<PropsWithChildren> = ({ children }) => {
+  const { cognitoProps } = useRuntimeConfig();
+
+  if (!cognitoProps) {
+    if (import.meta.env.MODE === 'local-dev') {
+      // In local-dev mode with no cognitoProps available, we skip login
+      return <AuthProvider>{children}</AuthProvider>;
+    }
+    return (
+      <Alert type="error" header="Runtime config configuration error">
+        <p>The cognitoProps have not been configured in the runtime-config.json.</p>
+      </Alert>
+    );
+  }
+
+  const cognitoAuthConfig: AuthProviderProps = {
+    authority: `https://cognito-idp.${cognitoProps.region}.amazonaws.com/${cognitoProps.userPoolId}`,
+    client_id: cognitoProps.userPoolWebClientId,
+    redirect_uri: window.location.origin,
+    response_type: 'code',
+    scope: 'email openid profile',
+  };
+
+  return (
+    <AuthProvider {...cognitoAuthConfig}>
+      <CognitoAuthInternal>{children}</CognitoAuthInternal>
+    </AuthProvider>
+  );
+};
+
+const CognitoAuthInternal: React.FC<PropsWithChildren> = ({ children }) => {
+  const auth = useAuth();
+
+  useEffect(() => {
+    if (!auth.isAuthenticated && !auth.isLoading) {
+      auth.signinRedirect();
+    }
+  }, [auth]);
+
+  if (auth.isAuthenticated) {
+    return children;
+  }
+
+  if (auth.error) {
+    return (
+      <Alert type="error" header="Configuration error">
+        <p>
+          Error contacting Cognito. Please check your runtime-config.json is configured
+          with the correct endpoints.
+        </p>
+      </Alert>
+    );
+  }
+
+  return <Spinner />;
+};
+
+export default CognitoAuth;
