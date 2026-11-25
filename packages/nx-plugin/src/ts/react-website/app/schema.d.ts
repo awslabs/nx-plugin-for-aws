@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { IacOption } from '../../../utils/iac.js';
+import type { WebsiteHosting } from '../../../utils/website-constructs/website-constructs.js';
 import { UxOption } from './generator.js';
 
 export type WebsiteInfraOption = 'cloudfront-s3' | 'none';
@@ -17,4 +18,6 @@ export interface TsReactWebsiteGeneratorSchema {
   ux?: UxOption;
   infra?: WebsiteInfraOption;
   iac: IacOption;
+  hosting?: WebsiteHosting;
+  apiProject?: string;
 }
