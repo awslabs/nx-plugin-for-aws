@@ -156,6 +156,7 @@ Add capabilities to existing projects:
 | `ts#project`             | Generates a TypeScript project                                                                                     |
 | `ts#website`             | Generates a website application                                                                                    |
 | `ts#website#auth`        | Adds auth to an existing website                                                                                   |
+| `ts#verified-access`     | Put an AWS Verified Access door in front of a private REST API (experimental)                                      |
 | `ts#agent`               | Add an AI Agent to a TypeScript project                                                                            |
 | `ts#agent#guardrails`    | Add an Amazon Bedrock Guardrail to a TypeScript Agent (experimental)                                               |
 | `ts#api`                 | Create a TypeScript API                                                                                            |

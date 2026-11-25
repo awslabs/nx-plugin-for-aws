@@ -101,6 +101,7 @@ pnpm nx g @aws/nx-plugin:ts#infra
 | `ts#lambda-function`   | TypeScript Lambda with type-safe event sources                                                                                           |
 | `ts#mcp-server`        | MCP server (TypeScript)                                                                                                                  |
 | `ts#dcr-proxy`         | OAuth DCR proxy construct for Cognito-authenticated MCP servers                                                                          |
+| `ts#verified-access`   | AWS Verified Access door in front of a private REST API (experimental)                                                                   |
 | `ts#agent`             | [Strands Agent](https://strandsagents.com/) (TypeScript)                                                                                 |
 | `ts#agent#guardrails` | Amazon Bedrock Guardrail for a TypeScript Agent (experimental)                                                                          |
 | `ts#container`         | Containerised service on Amazon ECS (Fargate), private, with no load balancer or API (TypeScript) (experimental) |

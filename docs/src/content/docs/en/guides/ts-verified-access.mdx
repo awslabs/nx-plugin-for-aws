@@ -1,0 +1,103 @@
+---
+title: Verified Access
+description: Put an AWS Verified Access door in front of a private REST API
+generator: ts#verified-access
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+The Verified Access generator makes a REST API private to a VPC, and puts an [AWS Verified Access](https://docs.aws.amazon.com/verified-access/latest/ug/what-is-verified-access.html) endpoint (the door) in front of it, on a domain of your own. The API then has no public endpoint. Users sign in at the door with your Cognito User Pool, and the door applies a [Cedar](https://docs.aws.amazon.com/verified-access/latest/ug/auth-policies.html) policy before any request reaches the API, which still checks its own authorization.
+
+Together with a website <Link path="guides/react-website#hosting-through-api-gateway">hosted through the API</Link>, this serves both the website and the API from the door, with no public endpoint for either.
+
+## Usage
+
+Generate a REST API first, for example with <Link path="guides/ts-smithy-api">`ts#smithy-api`</Link>, and add <Link path="guides/react-website-auth">authentication</Link> to your website so the workspace has a User Pool. Then run:
+
+<RunGenerator generator="ts#verified-access" requiredParameters={{ apiProject: 'my-api' }} />
+
+### Options
+
+<GeneratorParameters generator="ts#verified-access" />
+
+## Generator Output
+
+The generator adds a construct to your shared constructs. It supports CDK only.
+
+<FileTree>
+
+- packages/common/constructs/src/core
+  - verified-access.ts The door, its trust provider, Web ACL and DNS record, and the private custom domain it forwards to
+
+</FileTree>
+
+## Infrastructure Usage
+
+Add the door to your stack, after the API. It needs a VPC of yours to reach the private API from, such as an existing one you look up:
+
+```diff lang="ts" title="packages/infra/src/stacks/application-stack.ts"
++import { Vpc } from 'aws-cdk-lib/aws-ec2';
++import { HostedZone } from 'aws-cdk-lib/aws-route53';
+ import {
+   MyApi,
+   MyWebsite,
+   UserIdentity,
++  VerifiedAccess,
+ } from '@my-scope/common-constructs';
+
+     const identity = new UserIdentity(this, 'Identity');
+     const api = new MyApi(this, 'MyApi', {
+       integrations: MyApi.defaultIntegrations(this).build(),
+     });
+     api.grantInvokeAccess(identity.identityPool.authenticatedRole);
++    new VerifiedAccess(this, 'Door', {
++      api,
++      identity,
++      vpc: Vpc.fromLookup(this, 'Vpc', { vpcId: 'vpc-0123456789abcdef0' }),
++      hostedZone: HostedZone.fromHostedZoneAttributes(this, 'Zone', {
++        hostedZoneId: 'Z0123456789EXAMPLE',
++        zoneName: 'example.com',
++      }),
++      recordName: 'app',
++    });
+```
+
+The door makes the API private to an execute-api endpoint (`door.executeApiEndpoint`), and denies any call not made through it. It allows nothing itself, so the API's own grants still decide who may call what. It points the API's entry in the <Link path="guides/react-website#runtime-configuration">runtime configuration</Link> at `https://app.example.com/prod/`, and allows sign-in to return there.
+
+The VPC needs a subnet in at least one Availability Zone that the execute-api endpoint can use. In it, the door creates:
+
+- unless you pass an `endpoint`, an execute-api interface endpoint, with a security group that admits HTTPS from the door alone, so nothing else in the VPC can skip its sign-in;
+- a security group for the Verified Access endpoint, allowed to the execute-api endpoint on port 443.
+
+It also creates:
+
+- a certificate for `app.example.com`, validated in the hosted zone;
+- a Cognito client of its own, and an OIDC trust provider on your User Pool;
+- a Verified Access instance, group and endpoint, with access logs and a regional Web ACL;
+- a CNAME record for `app.example.com`, pointing at the endpoint;
+- a private custom domain for the API's stage on `app.example.com`, reached through the endpoint.
+
+### Choosing the VPC
+
+`vpc` is required: an existing VPC from `Vpc.fromLookup`, or one your stack creates. If it already has an execute-api endpoint, pass that as `endpoint`, and the door allows its own security group to it on port 443 instead of creating another. An endpoint the door creates has private DNS turned off, so other calls to API Gateway from the VPC are unchanged.
+
+By default the door admits anyone whose email address the User Pool has verified. Pass a Cedar `policyDocument` to change that, referring to the user's claims as `context.cognito`.
+
+This works with a website <Link path="guides/react-website#hosting-through-api-gateway">hosted through the API</Link>, which the door then serves with the API. Each adds its own statement to the stack, in any order.
+
+### Pitfalls
+
+- The hosted zone must be a public zone delegated from its parent, so ACM can validate the certificate and browsers can resolve the door's domain.
+- The first deploy takes about 20 minutes, most of it creating the Verified Access endpoint.
+- Verified Access is charged per hour for each application endpoint, as well as per GB of traffic, whether or not it is used. See [AWS Verified Access pricing](https://aws.amazon.com/verified-access/pricing/).
+- Each door is a Verified Access instance, and instances count against an [account quota](https://docs.aws.amazon.com/verified-access/latest/ug/verified-access-quotas.html).
+- The User Pool requires MFA by default, so users set it up at their first sign-in at the door.
+- The default policy refuses users whose email address the User Pool has not verified.
+- A private API is reachable only through its VPC endpoint, so the website's `serve` target cannot call the deployed API. Use its <Link path="guides/react-website#dev-target">`dev` target</Link>, which runs the API's local server.
+- A URL's `#fragment` is not sent to the server, so it is lost through the door's sign-in. The path and query are kept.
+- A private API can be mapped only to a private custom domain name, which the door creates. So the door refuses, at synth, an API with a public custom domain name or base path mapping of its own.
+- User Pools are retained when the stack is deleted, and have deletion protection on. Delete them by hand afterwards.
+- If `UserIdentity`, your API's construct or the website's `useSigV4` hook was generated by an older version of the plugin, the generator stops and names it. Run `nx migrate @aws/nx-plugin`, apply the migrations, and run the generator again.
