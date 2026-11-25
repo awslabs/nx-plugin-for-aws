@@ -1037,6 +1037,27 @@ API Gateway HTTP API 的访问日志记录到达 API 的每个请求。负载均
 
 请参阅 <Link path="/guides/ts-container">TypeScript Container Service</Link> 了解镜像的构建方式，以及 <Link path="/guides/docker-bundling">Docker Bundling</Link> 了解它在部署时的发布方式。
 
+### 部署和拆除
+
+`deploy-sandbox` 在 <Link path="/guides/typescript-infrastructure#deploying-your-sandbox-stage">CloudFormation express 模式</Link>下部署，该模式在应用每个资源的配置后立即返回，而不是等待 ECS 服务达到稳定状态。因此，目标可以在第一个任务仍在启动时完成，在任务通过相隔 15 秒的两次健康检查之前，负载均衡器没有目标可以发送请求并回答 `503`。等待一两分钟后再次调用。永远不会清除的 `503` 是真正的失败而不是缓慢启动：当没有任务变得健康时，服务的部署断路器会将其回滚。
+
+API 的 URL 是堆栈输出，但不在您猜测的名称下。`CfnOutput` 在您的 API 构造内部创建，没有任何内容覆盖其逻辑 ID，因此 CDK 从构造的路径加上八个字符的哈希构建输出键：添加为 `new MyApi(this, 'MyApi', …)` 的 API 输出 `MyApiMyApiUrl` 和该哈希，而不是 `MyApiUrl`。`cdk deploy` 打印该值，脚本应该匹配后缀而不是整个键：
+
+```bash
+aws cloudformation describe-stacks --stack-name <stack-name> \
+  --query "Stacks[0].Outputs[?contains(OutputKey, 'Url')].OutputValue" --output text
+```
+
+`destroy-sandbox` 会留下 HTTP API 的访问日志组和加密它的客户管理的 KMS 密钥。两者都没有设置删除策略，因此 CDK 的默认 `Retain` 适用，CloudFormation 会跳过它们而不是删除它们。在拆除堆栈之前列出它们，因为已删除的堆栈不再报告其资源：
+
+```bash
+aws cloudformation describe-stack-resources --stack-name <stack-name> \
+  --query "StackResources[?contains(LogicalResourceId, 'AccessLogs') && (ResourceType=='AWS::Logs::LogGroup' || ResourceType=='AWS::KMS::Key')].[ResourceType,PhysicalResourceId]" \
+  --output text
+```
+
+然后使用 `aws logs delete-log-group --log-group-name <log-group-name>` 和 `aws kms schedule-key-deletion --key-id <key-id> --pending-window-in-days 7` 删除它们，七天是 KMS 接受的最短窗口。
+
 ### 限制
 
 - **集成超时。** API Gateway HTTP API 将集成限制在大约 30 秒。无论容器工作多长时间，超过该时间的过程都会在网关处失败。

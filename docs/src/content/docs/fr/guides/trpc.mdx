@@ -1037,6 +1037,27 @@ Le générateur de conteneur fournit les cibles d'image, nommées d'après votre
 
 Voir <Link path="/guides/ts-container">TypeScript Container Service</Link> pour comment l'image est construite, et <Link path="/guides/docker-bundling">Docker Bundling</Link> pour comment elle est publiée au moment du déploiement.
 
+### Déploiement et démontage
+
+`deploy-sandbox` déploie en <Link path="/guides/typescript-infrastructure#deploying-your-sandbox-stage">mode express CloudFormation</Link>, qui retourne une fois que la configuration de chaque ressource est appliquée plutôt que d'attendre que le service ECS atteigne un état stable. Ainsi, la cible peut se terminer pendant que la première tâche démarre encore, et jusqu'à ce qu'une tâche ait réussi deux vérifications de santé espacées de quinze secondes, l'équilibreur de charge n'a pas de cible à laquelle envoyer une requête et répond `503`. Attendez une minute ou deux et réessayez. Un `503` qui ne se résout jamais est un véritable échec plutôt qu'un démarrage lent : le disjoncteur de déploiement du service l'annule lorsqu'aucune tâche ne devient saine.
+
+L'URL de l'API est une sortie de stack, mais pas sous le nom que vous devineriez. Le `CfnOutput` est créé à l'intérieur de votre construct d'API et rien ne remplace son ID logique, donc CDK construit la clé de sortie à partir du chemin du construct plus un hachage de huit caractères : une API ajoutée comme `new MyApi(this, 'MyApi', …)` produit `MyApiMyApiUrl` et ce hachage, pas `MyApiUrl`. `cdk deploy` imprime la valeur, et un script devrait correspondre au suffixe plutôt qu'à la clé entière :
+
+```bash
+aws cloudformation describe-stacks --stack-name <stack-name> \
+  --query "Stacks[0].Outputs[?contains(OutputKey, 'Url')].OutputValue" --output text
+```
+
+`destroy-sandbox` laisse derrière lui le groupe de journaux d'accès de l'API HTTP et la clé KMS gérée par le client qui le chiffre. Aucun ne définit de politique de suppression, donc la valeur par défaut de CDK `Retain` s'applique et CloudFormation les ignore plutôt que de les supprimer. Listez-les avant de démonter la stack, car une stack supprimée ne rapporte plus ses ressources :
+
+```bash
+aws cloudformation describe-stack-resources --stack-name <stack-name> \
+  --query "StackResources[?contains(LogicalResourceId, 'AccessLogs') && (ResourceType=='AWS::Logs::LogGroup' || ResourceType=='AWS::KMS::Key')].[ResourceType,PhysicalResourceId]" \
+  --output text
+```
+
+Ensuite, supprimez-les avec `aws logs delete-log-group --log-group-name <log-group-name>` et `aws kms schedule-key-deletion --key-id <key-id> --pending-window-in-days 7`, sept jours étant la fenêtre la plus courte que KMS accepte.
+
 ### Limites
 
 - **Délai d'intégration.** Les API Gateway HTTP plafonnent une intégration à environ 30 secondes. Une procédure qui prend plus de temps que cela échoue à la passerelle, peu importe combien de temps le conteneur continue de travailler.
