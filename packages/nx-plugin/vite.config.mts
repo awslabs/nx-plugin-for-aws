@@ -26,7 +26,10 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     include: ['src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
-    setupFiles: ['src/utils/mock-project-graph.ts'],
+    setupFiles: [
+      'src/utils/mock-project-graph.ts',
+      'aws-cdk-lib/testhelpers/jest-autoclean',
+    ],
     globalSetup: ['src/utils/test/warm-python-cache.ts'],
     reporters: ['default'],
     coverage: {
