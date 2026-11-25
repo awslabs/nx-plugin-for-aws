@@ -101,6 +101,64 @@ export function Main() {
     expect(mainTsxContent).toMatchSnapshot('main.tsx');
   });
 
+  it('should add the query client and tRPC proxy to the TanStack Router context', async () => {
+    tree.write(
+      'apps/frontend/src/main.tsx',
+      `import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { RouterProvider, createRouter } from '@tanstack/react-router';
+import { routeTree } from './routeTree.gen';
+
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export type RouterProviderContext = {};
+
+const router = createRouter({
+  routeTree,
+  context: {}
+});
+
+const App = () => {
+  return <RouterProvider router={router} context={{}} />;
+};
+
+const root = document.getElementById('root');
+root &&
+  createRoot(root).render(
+    <React.StrictMode>
+      <App/>
+    </React.StrictMode>,
+  );
+`,
+    );
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      backendProjectName: 'backend',
+    });
+    const main = tree.read('apps/frontend/src/main.tsx', 'utf-8')!;
+    expect(main).toMatch(
+      /import \{ useQueryClient \} from ['"]@tanstack\/react-query['"]/,
+    );
+    expect(main).toMatch(
+      /import \{ useTestApi \} from ['"]\.\/hooks\/useTestApi['"]/,
+    );
+    expect(main).toContain('queryClient?: ReturnType<typeof useQueryClient>');
+    expect(main).toContain('testApi?: ReturnType<typeof useTestApi>');
+    expect(main).toContain('const queryClient = useQueryClient();');
+    expect(main).toContain('const testApi = useTestApi();');
+    expect(main).toMatch(/context=\{\{[^}]*queryClient,\s*testApi\s*\}\}/);
+
+    // Re-running does not duplicate anything
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      backendProjectName: 'backend',
+    });
+    const again = tree.read('apps/frontend/src/main.tsx', 'utf-8')!;
+    expect(again.match(/const queryClient = useQueryClient\(\)/g)).toHaveLength(
+      1,
+    );
+    expect(again.match(/const testApi = useTestApi\(\)/g)).toHaveLength(1);
+  });
+
   it('should add required dependencies', async () => {
     await reactGenerator(tree, {
       frontendProjectName: 'frontend',

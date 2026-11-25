@@ -11,13 +11,14 @@ import {
 import { addTargetToLocalDev } from '../../connection/local-dev.js';
 import { runtimeConfigGenerator } from '../../ts/react-website/runtime-config/generator.js';
 import { addTsDependencies } from '../../utils/add-dependencies.js';
+import { addHookResultToRouterProviderContext } from '../../utils/ast/website.js';
 import { addSingleImport, applyGritQL } from '../../utils/ast.js';
 import { declareDependencies } from '../../utils/declared-dependencies.js';
 import { formatFilesInSubtree } from '../../utils/format.js';
 import { installDependencies } from '../../utils/install.js';
 import { addLocalProjectDependency } from '../../utils/local-project-dependency.js';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
-import { toClassName } from '../../utils/names.js';
+import { camelCase, toClassName } from '../../utils/names.js';
 import {
   addComponentGeneratorMetadata,
   getGeneratorInfo,
@@ -179,6 +180,20 @@ export async function reactGenerator(
     mainTsxPath,
     `\`<App />\` => \`<${clientProviderName}><App /></${clientProviderName}>\` where { $program <: not contains \`<${clientProviderName}>$_</${clientProviderName}>\` }`,
   );
+
+  // When the website uses TanStack Router, expose the query client and the
+  // tRPC options proxy on the router context (e.g. to prefetch in loaders).
+  // This is a no-op for websites that do not use TanStack Router.
+  await addHookResultToRouterProviderContext(tree, mainTsxPath, {
+    hook: 'useQueryClient',
+    module: '@tanstack/react-query',
+    contextProp: 'queryClient',
+  });
+  await addHookResultToRouterProviderContext(tree, mainTsxPath, {
+    hook: `use${apiNameClassName}`,
+    module: `./hooks/use${apiNameClassName}`,
+    contextProp: camelCase(apiNameClassName),
+  });
 
   await addTargetToLocalDev(
     tree,
