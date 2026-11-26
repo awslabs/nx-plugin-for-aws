@@ -1,0 +1,103 @@
+---
+title: Verified Access
+description: 프라이빗 REST API 앞에 AWS Verified Access 도어 배치하기
+generator: ts#verified-access
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+Verified Access 생성기는 REST API를 VPC에 프라이빗하게 만들고, 사용자의 도메인에 [AWS Verified Access](https://docs.aws.amazon.com/verified-access/latest/ug/what-is-verified-access.html) 엔드포인트(도어)를 그 앞에 배치합니다. 그러면 API는 퍼블릭 엔드포인트가 없게 됩니다. 사용자는 Cognito User Pool로 도어에서 로그인하고, 도어는 요청이 API에 도달하기 전에 [Cedar](https://docs.aws.amazon.com/verified-access/latest/ug/auth-policies.html) 정책을 적용하며, API는 여전히 자체 권한 부여를 확인합니다.
+
+<Link path="guides/react-website#hosting-through-api-gateway">API를 통해 호스팅되는</Link> 웹사이트와 함께 사용하면, 웹사이트와 API 모두를 도어에서 제공하며 둘 다 퍼블릭 엔드포인트가 없습니다.
+
+## 사용법
+
+먼저 REST API를 생성하세요. 예를 들어 <Link path="guides/ts-smithy-api">`ts#smithy-api`</Link>로 생성하고, 워크스페이스에 User Pool이 있도록 웹사이트에 <Link path="guides/react-website-auth">인증</Link>을 추가하세요. 그런 다음 실행하세요:
+
+<RunGenerator generator="ts#verified-access" requiredParameters={{ apiProject: 'my-api' }} />
+
+### 옵션
+
+<GeneratorParameters generator="ts#verified-access" />
+
+## 생성기 출력
+
+생성기는 공유 컨스트럭트에 컨스트럭트를 추가합니다. CDK만 지원합니다.
+
+<FileTree>
+
+- packages/common/constructs/src/core
+  - verified-access.ts 도어, 트러스트 프로바이더, Web ACL 및 DNS 레코드, 그리고 전달되는 프라이빗 커스텀 도메인
+
+</FileTree>
+
+## 인프라 사용법
+
+API 다음에 스택에 도어를 추가하세요. 프라이빗 API에 도달하기 위해 사용자의 VPC가 필요합니다. 예를 들어 조회하는 기존 VPC:
+
+```diff lang="ts" title="packages/infra/src/stacks/application-stack.ts"
++import { Vpc } from 'aws-cdk-lib/aws-ec2';
++import { HostedZone } from 'aws-cdk-lib/aws-route53';
+ import {
+   MyApi,
+   MyWebsite,
+   UserIdentity,
++  VerifiedAccess,
+ } from '@my-scope/common-constructs';
+
+     const identity = new UserIdentity(this, 'Identity');
+     const api = new MyApi(this, 'MyApi', {
+       integrations: MyApi.defaultIntegrations(this).build(),
+     });
+     api.grantInvokeAccess(identity.identityPool.authenticatedRole);
++    new VerifiedAccess(this, 'Door', {
++      api,
++      identity,
++      vpc: Vpc.fromLookup(this, 'Vpc', { vpcId: 'vpc-0123456789abcdef0' }),
++      hostedZone: HostedZone.fromHostedZoneAttributes(this, 'Zone', {
++        hostedZoneId: 'Z0123456789EXAMPLE',
++        zoneName: 'example.com',
++      }),
++      recordName: 'app',
++    });
+```
+
+도어는 API를 execute-api 엔드포인트(`door.executeApiEndpoint`)에 프라이빗하게 만들고, 이를 통하지 않은 모든 호출을 거부합니다. 도어 자체는 아무것도 허용하지 않으므로, API 자체의 권한 부여가 여전히 누가 무엇을 호출할 수 있는지 결정합니다. <Link path="guides/react-website#runtime-configuration">런타임 구성</Link>에서 API의 항목을 `https://app.example.com/prod/`로 지정하고, 로그인이 거기로 돌아갈 수 있도록 허용합니다.
+
+VPC는 execute-api 엔드포인트가 사용할 수 있는 최소 하나의 가용 영역에 서브넷이 필요합니다. 그 안에서 도어는 다음을 생성합니다:
+
+- `endpoint`를 전달하지 않는 한, VPC의 주소 범위에서 HTTPS를 허용하는 보안 그룹이 있는 execute-api 인터페이스 엔드포인트;
+- Verified Access 엔드포인트를 위한 보안 그룹, 포트 443에서 execute-api 엔드포인트로 허용됨.
+
+또한 다음을 생성합니다:
+
+- 호스팅 영역에서 검증된 `app.example.com`에 대한 인증서;
+- 자체 Cognito 클라이언트 및 User Pool의 OIDC 트러스트 프로바이더;
+- 액세스 로그 및 리전별 Web ACL이 있는 Verified Access 인스턴스, 그룹 및 엔드포인트;
+- 엔드포인트를 가리키는 `app.example.com`에 대한 CNAME 레코드;
+- 엔드포인트를 통해 도달하는 `app.example.com`의 API 스테이지에 대한 프라이빗 커스텀 도메인.
+
+### VPC 선택
+
+`vpc`는 필수입니다: `Vpc.fromLookup`의 기존 VPC 또는 스택이 생성하는 VPC. 이미 execute-api 엔드포인트가 있는 경우, 이를 `endpoint`로 전달하면 도어는 다른 것을 생성하는 대신 포트 443에서 자체 보안 그룹을 허용합니다. 도어가 생성하는 엔드포인트는 프라이빗 DNS가 꺼져 있으므로, VPC에서 API Gateway로의 다른 호출은 변경되지 않습니다.
+
+기본적으로 도어는 User Pool이 이메일 주소를 확인한 모든 사용자를 허용합니다. 사용자의 클레임을 `context.cognito`로 참조하여 이를 변경하려면 Cedar `policyDocument`를 전달하세요.
+
+이것은 <Link path="guides/react-website#hosting-through-api-gateway">API를 통해 호스팅되는</Link> 웹사이트와 함께 작동하며, 도어는 API와 함께 웹사이트를 제공합니다. 각각은 스택에 자체 문을 추가하며, 순서는 상관없습니다.
+
+### 주의사항
+
+- 호스팅 영역은 ACM이 인증서를 검증하고 브라우저가 도어의 도메인을 확인할 수 있도록 상위에서 위임된 퍼블릭 영역이어야 합니다.
+- 첫 번째 배포는 약 20분이 걸리며, 대부분은 Verified Access 엔드포인트를 생성하는 데 소요됩니다.
+- Verified Access는 사용 여부와 관계없이 각 애플리케이션 엔드포인트에 대해 시간당 요금이 부과되며, 트래픽 GB당 요금도 부과됩니다. [AWS Verified Access 요금](https://aws.amazon.com/verified-access/pricing/)을 참조하세요.
+- 각 도어는 Verified Access 인스턴스이며, 인스턴스는 [계정 할당량](https://docs.aws.amazon.com/verified-access/latest/ug/verified-access-quotas.html)에 포함됩니다.
+- User Pool은 기본적으로 MFA를 요구하므로, 사용자는 도어에서 첫 번째 로그인 시 이를 설정합니다.
+- 기본 정책은 User Pool이 이메일 주소를 확인하지 않은 사용자를 거부합니다.
+- 프라이빗 API는 VPC 엔드포인트를 통해서만 도달할 수 있으므로, 웹사이트의 `serve` 타겟은 배포된 API를 호출할 수 없습니다. API의 로컬 서버를 실행하는 <Link path="guides/react-website#dev-target">`dev` 타겟</Link>을 사용하세요.
+- URL의 `#fragment`는 서버로 전송되지 않으므로 도어의 로그인을 통해 손실됩니다. 경로와 쿼리는 유지됩니다.
+- 프라이빗 API는 프라이빗 커스텀 도메인 이름에만 매핑될 수 있으며, 도어가 이를 생성합니다. 따라서 도어는 synth 시 퍼블릭 커스텀 도메인 이름 또는 자체 기본 경로 매핑이 있는 API를 거부합니다.
+- User Pool은 스택이 삭제될 때 보존되며 삭제 보호가 켜져 있습니다. 나중에 수동으로 삭제하세요.
+- `UserIdentity`, API의 컨스트럭트 또는 웹사이트의 `useSigV4` 훅이 플러그인의 이전 버전에서 생성된 경우, 생성기가 중지되고 이름을 지정합니다. `nx migrate @aws/nx-plugin`을 실행하고, 마이그레이션을 적용한 다음, 생성기를 다시 실행하세요.

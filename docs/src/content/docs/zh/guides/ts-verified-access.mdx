@@ -1,0 +1,103 @@
+---
+title: Verified Access
+description: 在私有 REST API 前面放置一个 AWS Verified Access 门户
+generator: ts#verified-access
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+Verified Access 生成器将 REST API 设为 VPC 私有，并在其前面放置一个 [AWS Verified Access](https://docs.aws.amazon.com/verified-access/latest/ug/what-is-verified-access.html) 端点（门户），位于您自己的域名上。然后 API 就没有公共端点了。用户使用您的 Cognito User Pool 在门户处登录，门户在任何请求到达 API 之前应用 [Cedar](https://docs.aws.amazon.com/verified-access/latest/ug/auth-policies.html) 策略，而 API 仍然检查自己的授权。
+
+与<Link path="guides/react-website#hosting-through-api-gateway">通过 API 托管</Link>的网站一起，这将从门户同时提供网站和 API，两者都没有公共端点。
+
+## 用法
+
+首先生成一个 REST API，例如使用 <Link path="guides/ts-smithy-api">`ts#smithy-api`</Link>，并向您的网站添加<Link path="guides/react-website-auth">身份验证</Link>，以便工作区有一个 User Pool。然后运行：
+
+<RunGenerator generator="ts#verified-access" requiredParameters={{ apiProject: 'my-api' }} />
+
+### 选项
+
+<GeneratorParameters generator="ts#verified-access" />
+
+## 生成器输出
+
+生成器将一个构造添加到您的共享构造中。它仅支持 CDK。
+
+<FileTree>
+
+- packages/common/constructs/src/core
+  - verified-access.ts 门户、其信任提供者、Web ACL 和 DNS 记录，以及它转发到的私有自定义域
+
+</FileTree>
+
+## 基础设施用法
+
+在 API 之后，将门户添加到您的堆栈中。它需要您的 VPC 才能访问私有 API，例如您查找的现有 VPC：
+
+```diff lang="ts" title="packages/infra/src/stacks/application-stack.ts"
++import { Vpc } from 'aws-cdk-lib/aws-ec2';
++import { HostedZone } from 'aws-cdk-lib/aws-route53';
+ import {
+   MyApi,
+   MyWebsite,
+   UserIdentity,
++  VerifiedAccess,
+ } from '@my-scope/common-constructs';
+
+     const identity = new UserIdentity(this, 'Identity');
+     const api = new MyApi(this, 'MyApi', {
+       integrations: MyApi.defaultIntegrations(this).build(),
+     });
+     api.grantInvokeAccess(identity.identityPool.authenticatedRole);
++    new VerifiedAccess(this, 'Door', {
++      api,
++      identity,
++      vpc: Vpc.fromLookup(this, 'Vpc', { vpcId: 'vpc-0123456789abcdef0' }),
++      hostedZone: HostedZone.fromHostedZoneAttributes(this, 'Zone', {
++        hostedZoneId: 'Z0123456789EXAMPLE',
++        zoneName: 'example.com',
++      }),
++      recordName: 'app',
++    });
+```
+
+门户使 API 对 execute-api 端点（`door.executeApiEndpoint`）私有，并拒绝任何不通过它进行的调用。它本身不允许任何内容，因此 API 自己的授权仍然决定谁可以调用什么。它将<Link path="guides/react-website#runtime-configuration">运行时配置</Link>中 API 的条目指向 `https://app.example.com/prod/`，并允许登录返回到那里。
+
+VPC 需要在至少一个可用区中有一个子网，供 execute-api 端点使用。在其中，门户创建：
+
+- 除非您传递 `endpoint`，否则创建一个 execute-api 接口端点，带有一个允许来自 VPC 地址范围的 HTTPS 的安全组；
+- 一个用于 Verified Access 端点的安全组，允许在端口 443 上访问 execute-api 端点。
+
+它还创建：
+
+- `app.example.com` 的证书，在托管区域中验证；
+- 自己的 Cognito 客户端，以及您的 User Pool 上的 OIDC 信任提供��；
+- 一个 Verified Access 实例、组和端点，带有访问日志和区域 Web ACL；
+- `app.example.com` 的 CNAME 记录，指向端点；
+- API 阶段在 `app.example.com` 上的私有自定义域，通过端点访问。
+
+### 选择 VPC
+
+`vpc` 是必需的：来自 `Vpc.fromLookup` 的现有 VPC，或您的堆栈创建的 VPC。如果它已经有一个 execute-api 端点，将其作为 `endpoint` 传递，门户将允许其自己的安全组在端口 443 上访问它，而不是创建另一个。门户创建的端点关闭了私有 DNS，因此从 VPC 对 API Gateway 的其他调用不会改变。
+
+默认情况下，门户允许任何电子邮件地址已被 User Pool 验证的人。传递 Cedar `policyDocument` 来更改它，将用户的声明引用为 `context.cognito`。
+
+这适用于<Link path="guides/react-website#hosting-through-api-gateway">通过 API 托管</Link>的网站，然后门户将与 API 一起提供该网站。每个都向堆栈添加自己的语句，顺序任意。
+
+### 陷阱
+
+- 托管区域必须是从其父级委派的公共区域，以便 ACM 可以验证证书，浏览器可以解析门户的域。
+- 首次部署大约需要 20 分钟，其中大部分时间用于创建 Verified Access 端点。
+- Verified Access 按每个应用程序端点每小时收费，以及按流量 GB 收费，无论是否使用。请参阅 [AWS Verified Access 定价](https://aws.amazon.com/verified-access/pricing/)。
+- 每个门户都是一个 Verified Access 实例，实例计入[账户配额](https://docs.aws.amazon.com/verified-access/latest/ug/verified-access-quotas.html)。
+- User Pool 默认需要 MFA，因此用户在门户首次登录时设置它。
+- 默认策略拒绝 User Pool 未验证其电子邮件地址的用户。
+- 私有 API 只能通过其 VPC 端点访问，因此网站的 `serve` 目标无法调用已部署的 API。使用其 <Link path="guides/react-website#dev-target">`dev` 目标</Link>，它运行 API 的本地服务器。
+- URL 的 `#fragment` 不会发送到服务器，因此通过门户的登录会丢失它。路径和查询会保留。
+- 私有 API 只能映射到私有自定义域名，门户会创建该域名。因此，门户在合成时拒绝具有自己的公共自定义域名或基本路径映射的 API。
+- 删除堆栈时会保留 User Pool，并且启用了删除保护。之后手动删除它们。
+- 如果 `UserIdentity`、您的 API 构造或网站的 `useSigV4` 钩子是由旧版本的插件生成的，生成器会停止并命名它。运行 `nx migrate @aws/nx-plugin`，应用迁移，然后再次运行生成器。
