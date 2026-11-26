@@ -116,7 +116,7 @@ describe('cognito-auth generator', () => {
       'const runtimeConfig = useRuntimeConfig();',
     );
     expect(mainTsxContent).toContain(
-      '<RouterProvider router={router} context={{ runtimeConfig, auth }} />',
+      '<RouterProvider router={router} context={{ auth, runtimeConfig }} />',
     );
 
     // Create snapshot of the generated files
@@ -230,7 +230,7 @@ describe('cognito-auth generator', () => {
       'const runtimeConfig = useRuntimeConfig();',
     );
     expect(mainTsxContent).toContain(
-      '<RouterProvider router={router} context={{ runtimeConfig, auth }} />',
+      '<RouterProvider router={router} context={{ auth, runtimeConfig }} />',
     );
   });
 
@@ -275,7 +275,7 @@ describe('cognito-auth generator', () => {
 
     // Verify RouterProvider receives the context values (auth and runtimeConfig)
     expect(mainTsxContent).toContain(
-      '<RouterProvider router={router} context={{ runtimeConfig, auth }} />',
+      '<RouterProvider router={router} context={{ auth, runtimeConfig }} />',
     );
   });
 

@@ -5,19 +5,21 @@
 import {
   generateFiles,
   joinPathFragments,
+  logger,
   OverwriteStrategy,
   type Tree,
 } from '@nx/devkit';
 import { addTargetToLocalDev } from '../../connection/local-dev.js';
 import { runtimeConfigGenerator } from '../../ts/react-website/runtime-config/generator.js';
 import { addTsDependencies } from '../../utils/add-dependencies.js';
+import { addHookResultToRouterProviderContext } from '../../utils/ast/website.js';
 import { addSingleImport, applyGritQL } from '../../utils/ast.js';
 import { declareDependencies } from '../../utils/declared-dependencies.js';
 import { formatFilesInSubtree } from '../../utils/format.js';
 import { installDependencies } from '../../utils/install.js';
 import { addLocalProjectDependency } from '../../utils/local-project-dependency.js';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
-import { toClassName } from '../../utils/names.js';
+import { camelCase, toClassName } from '../../utils/names.js';
 import {
   addComponentGeneratorMetadata,
   getGeneratorInfo,
@@ -62,6 +64,18 @@ export const DEPENDENCIES = declareDependencies<TrpcReactMetadata>()({
     },
   ],
 });
+
+/** Router context properties and hooks owned by other generators. */
+const RESERVED_ROUTER_CONTEXT_PROPS = new Set([
+  'queryClient',
+  'auth',
+  'runtimeConfig',
+]);
+const RESERVED_ROUTER_CONTEXT_HOOKS = new Set([
+  'useQueryClient',
+  'useAuth',
+  'useRuntimeConfig',
+]);
 
 export const TRPC_REACT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -179,6 +193,35 @@ export async function reactGenerator(
     mainTsxPath,
     `\`<App />\` => \`<${clientProviderName}><App /></${clientProviderName}>\` where { $program <: not contains \`<${clientProviderName}>$_</${clientProviderName}>\` }`,
   );
+
+  // When the website uses TanStack Router, expose the query client and the
+  // tRPC options proxy on the router context (e.g. to prefetch in loaders).
+  // This is a no-op for websites that do not use TanStack Router.
+  await addHookResultToRouterProviderContext(tree, mainTsxPath, {
+    hook: 'useQueryClient',
+    module: '@tanstack/react-query',
+    contextProp: 'queryClient',
+  });
+  // Names the router context already uses (query client, Cognito auth, runtime
+  // config). An API whose hook or property matches one would produce a duplicate
+  // identifier in main.tsx (e.g. an API named Auth: `useAuth` and `auth`), so
+  // skip the router context for it and warn instead.
+  const apiContextProp = camelCase(apiNameClassName);
+  const apiHook = `use${apiNameClassName}`;
+  if (
+    RESERVED_ROUTER_CONTEXT_PROPS.has(apiContextProp) ||
+    RESERVED_ROUTER_CONTEXT_HOOKS.has(apiHook)
+  ) {
+    logger.warn(
+      `The API name "${apiName}" clashes with "${apiHook}" or the "${apiContextProp}" router context property that main.tsx already uses, so it was not added to the TanStack Router context. The API is still usable through ./hooks/${apiHook}. Rename the API to expose it on the router context.`,
+    );
+  } else {
+    await addHookResultToRouterProviderContext(tree, mainTsxPath, {
+      hook: apiHook,
+      module: `./hooks/${apiHook}`,
+      contextProp: apiContextProp,
+    });
+  }
 
   await addTargetToLocalDev(
     tree,

@@ -127,6 +127,67 @@ export default App;`;
       expect(updatedContent).toContain('auth: undefined');
     });
 
+    it('should not produce double commas when chaining hooks on a formatted multi-line context', async () => {
+      // The generators run biome after every call, which wraps the object across
+      // lines and leaves a trailing comma once it has three or more properties.
+      tree.write(
+        'main.tsx',
+        `import { createRouter, RouterProvider } from '@tanstack/react-router';
+
+type RouterProviderContext = {};
+
+const router = createRouter({
+  routeTree,
+  context: {
+    runtimeConfig: undefined,
+    queryClient: undefined,
+    apiOne: undefined,
+  },
+});
+
+const App = () => {
+  return (
+    <RouterProvider
+      router={router}
+      context={{
+        runtimeConfig,
+        queryClient,
+        apiOne,
+      }}
+    />
+  );
+};
+`,
+      );
+
+      const names = ['apiTwo', 'apiThree', 'apiFour'];
+      for (const name of names) {
+        await addHookResultToRouterProviderContext(tree, 'main.tsx', {
+          hook: `use${name}`,
+          module: `./hooks/use${name}`,
+          contextProp: name,
+        });
+      }
+
+      const content = tree.read('main.tsx', 'utf-8')!;
+      expect(content).not.toMatch(/,\s*,/);
+      const all = ['runtimeConfig', 'queryClient', 'apiOne', ...names];
+      const routerContext = content.match(/context: \{([^}]*)\}/)![1];
+      const jsxContext = content.match(/context=\{\{([^}]*)\}\}/)![1];
+      for (const name of all.filter((n) => n !== 'apiOne')) {
+        expect(routerContext).toContain(`${name}: undefined`);
+      }
+      for (const name of all) {
+        expect(jsxContext).toContain(name);
+        expect(
+          routerContext.match(new RegExp(`\\b${name}:`, 'g')),
+        ).toHaveLength(1);
+        expect(jsxContext.match(new RegExp(`\\b${name}\\b`, 'g'))).toHaveLength(
+          1,
+        );
+      }
+    });
+
     it('should add hook call to App component when it has expression body', async () => {
       const expressionBodyContent = baseMainTsxContent.replace(
         "const App = () => {\n  return <RouterProvider router={router} context={{ existingContext: 'value' }} />;\n};",
@@ -190,7 +251,7 @@ export default App;`;
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
       expect(updatedContent).toContain(
-        "context={{ existingContext: 'value', auth }}",
+        "context={{ auth, existingContext: 'value' }}",
       );
     });
 
@@ -371,7 +432,7 @@ export default App;`;
         'const customContext = useCustomHook();',
       );
       expect(updatedContent).toContain('customContext: undefined');
-      expect(updatedContent).toContain('customContext }');
+      expect(updatedContent).toContain('context={{ customContext, ');
     });
 
     it('should handle complex router context with multiple existing properties', async () => {
