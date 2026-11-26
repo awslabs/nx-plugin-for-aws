@@ -5,6 +5,7 @@
 import {
   generateFiles,
   joinPathFragments,
+  logger,
   OverwriteStrategy,
   type Tree,
 } from '@nx/devkit';
@@ -63,6 +64,18 @@ export const DEPENDENCIES = declareDependencies<TrpcReactMetadata>()({
     },
   ],
 });
+
+/** Router context properties and hooks owned by other generators. */
+const RESERVED_ROUTER_CONTEXT_PROPS = new Set([
+  'queryClient',
+  'auth',
+  'runtimeConfig',
+]);
+const RESERVED_ROUTER_CONTEXT_HOOKS = new Set([
+  'useQueryClient',
+  'useAuth',
+  'useRuntimeConfig',
+]);
 
 export const TRPC_REACT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -189,11 +202,26 @@ export async function reactGenerator(
     module: '@tanstack/react-query',
     contextProp: 'queryClient',
   });
-  await addHookResultToRouterProviderContext(tree, mainTsxPath, {
-    hook: `use${apiNameClassName}`,
-    module: `./hooks/use${apiNameClassName}`,
-    contextProp: camelCase(apiNameClassName),
-  });
+  // Names the router context already uses (query client, Cognito auth, runtime
+  // config). An API whose hook or property matches one would produce a duplicate
+  // identifier in main.tsx (e.g. an API named Auth: `useAuth` and `auth`), so
+  // skip the router context for it and warn instead.
+  const apiContextProp = camelCase(apiNameClassName);
+  const apiHook = `use${apiNameClassName}`;
+  if (
+    RESERVED_ROUTER_CONTEXT_PROPS.has(apiContextProp) ||
+    RESERVED_ROUTER_CONTEXT_HOOKS.has(apiHook)
+  ) {
+    logger.warn(
+      `The API name "${apiName}" clashes with "${apiHook}" or the "${apiContextProp}" router context property that main.tsx already uses, so it was not added to the TanStack Router context. The API is still usable through ./hooks/${apiHook}. Rename the API to expose it on the router context.`,
+    );
+  } else {
+    await addHookResultToRouterProviderContext(tree, mainTsxPath, {
+      hook: apiHook,
+      module: `./hooks/${apiHook}`,
+      contextProp: apiContextProp,
+    });
+  }
 
   await addTargetToLocalDev(
     tree,

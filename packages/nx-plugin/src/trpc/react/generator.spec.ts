@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { type Tree, updateJson } from '@nx/devkit';
+import { logger, type Tree, updateJson } from '@nx/devkit';
 import ts from 'typescript';
 import { tsReactWebsiteGenerator } from '../../ts/react-website/app/generator.js';
 import { tsReactWebsiteAuthGenerator } from '../../ts/react-website/cognito-auth/generator.js';
@@ -672,5 +672,39 @@ describe('trpc react generator with real react and trpc projects', () => {
         1,
       );
     }
+  });
+  it('should keep main.tsx free of duplicate identifiers when an API is named Auth on a Cognito website', async () => {
+    await tsTrpcApiGenerator(tree, {
+      name: 'Auth',
+      auth: 'IAM',
+      infra: 'rest-lambda',
+      iac: 'cdk',
+    });
+    await tsReactWebsiteAuthGenerator(tree, {
+      project: 'frontend',
+      allowSignup: false,
+      cognitoDomain: 'frontend',
+      iac: 'cdk',
+    });
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      backendProjectName: 'auth',
+    });
+
+    const main = tree.read('frontend/src/main.tsx', 'utf-8')!;
+    // The Cognito hook stays the only `useAuth` in main.tsx
+    expect(main.match(/\buseAuth\b/g)!.length).toBeGreaterThan(0);
+    expect(main).not.toMatch(/from ['"]\.\/hooks\/useAuth['"]/);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('"Auth"'));
+    // The API's own hook and client provider are still generated
+    expect(tree.exists('frontend/src/hooks/useAuth.tsx')).toBeTruthy();
+    expect(main).toContain('AuthClientProvider');
+    expect(main.match(/import \{[^}]*\buseAuth\b[^}]*\}/g)).toHaveLength(1);
+    expect(main.match(/const auth = /g)).toHaveLength(1);
+    expect(main.match(/\bauth: undefined/g)).toHaveLength(1);
+    expect(main.match(/\bauth\?:/g)).toHaveLength(1);
+    // Cognito's own context entry is untouched
+    expect(main).toContain('auth?: ReturnType<typeof useAuth>');
   });
 });
