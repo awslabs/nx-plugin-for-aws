@@ -3,7 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { type Tree, updateJson } from '@nx/devkit';
+import ts from 'typescript';
 import { tsReactWebsiteGenerator } from '../../ts/react-website/app/generator.js';
+import { tsReactWebsiteAuthGenerator } from '../../ts/react-website/cognito-auth/generator.js';
 import { declareDependencies } from '../../utils/declared-dependencies.js';
 import { expectHasMetricTags } from '../../utils/metrics-assertions.js';
 import {
@@ -145,7 +147,9 @@ root &&
     expect(main).toContain('testApi?: ReturnType<typeof useTestApi>');
     expect(main).toContain('const queryClient = useQueryClient();');
     expect(main).toContain('const testApi = useTestApi();');
-    expect(main).toMatch(/context=\{\{[^}]*queryClient,\s*testApi\s*\}\}/);
+    const jsxContext = main.match(/context=\{\{([^}]*)\}\}/)![1];
+    expect(jsxContext).toMatch(/\bqueryClient\b/);
+    expect(jsxContext).toMatch(/\btestApi\b/);
 
     // Re-running does not duplicate anything
     await reactGenerator(tree, {
@@ -595,5 +599,78 @@ describe('trpc react generator with real react and trpc projects', () => {
     expect(runtimeConfigContent).toContain('http://localhost:2022/');
     expect(runtimeConfigContent).toContain('runtimeConfig.apis.SecondApi');
     expect(runtimeConfigContent).toContain('http://localhost:2023/');
+  });
+  it('should keep main.tsx valid when several APIs and Cognito auth are connected to one website', async () => {
+    const apis = ['FirstApi', 'SecondApi', 'ThirdApi'];
+    for (const name of apis) {
+      await tsTrpcApiGenerator(tree, {
+        name,
+        auth: 'IAM',
+        infra: 'rest-lambda',
+        iac: 'cdk',
+      });
+    }
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      backendProjectName: 'first-api',
+    });
+    await tsReactWebsiteAuthGenerator(tree, {
+      project: 'frontend',
+      allowSignup: false,
+      cognitoDomain: 'frontend',
+      iac: 'cdk',
+    });
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      backendProjectName: 'second-api',
+    });
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      backendProjectName: 'third-api',
+    });
+    // Re-running a connection must not change anything
+    const before = tree.read('frontend/src/main.tsx', 'utf-8')!;
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      backendProjectName: 'second-api',
+    });
+    const main = tree.read('frontend/src/main.tsx', 'utf-8')!;
+    expect(main).toEqual(before);
+
+    // main.tsx must parse without syntax errors (the double comma was TS1136)
+    const { diagnostics } = ts.transpileModule(main, {
+      fileName: 'main.tsx',
+      reportDiagnostics: true,
+      compilerOptions: { jsx: ts.JsxEmit.ReactJSX },
+    });
+    expect(diagnostics?.map((d) => d.messageText)).toEqual([]);
+    expect(main).not.toMatch(/,\s*,/);
+
+    for (const prop of [
+      'firstApi',
+      'secondApi',
+      'thirdApi',
+      'queryClient',
+      'auth',
+      'runtimeConfig',
+    ]) {
+      expect(main.match(new RegExp(`\\b${prop}: undefined`, 'g'))).toHaveLength(
+        1,
+      );
+      expect(main.match(new RegExp(`\\b${prop}\\?:`, 'g'))).toHaveLength(1);
+    }
+    const jsxContext = main.match(/context=\{\{([^}]*)\}\}/)![1];
+    for (const prop of [
+      'firstApi',
+      'secondApi',
+      'thirdApi',
+      'queryClient',
+      'auth',
+      'runtimeConfig',
+    ]) {
+      expect(jsxContext.match(new RegExp(`\\b${prop}\\b`, 'g'))).toHaveLength(
+        1,
+      );
+    }
   });
 });
