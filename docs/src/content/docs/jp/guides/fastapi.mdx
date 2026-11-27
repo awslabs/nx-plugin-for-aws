@@ -912,10 +912,33 @@ API Gateway HTTP APIのアクセスログは、APIに到達するすべてのリ
 
 コンテナジェネレーターは、APIにちなんで名付けられたイメージターゲットを提供します:
 
-- `<api-name>-container-docker`は、linux/arm64イメージをビルドし、最初にバンドルを実行してイメージにパッケージとその依存関係を保持します。
+- `<api-name>-container-docker`は、`architecture`オプションのCPUアーキテクチャ、`linux/arm64`または`linux/amd64`のイメージをビルドします。オプションはジェネレーターを実行するマシンのアーキテクチャにデフォルト設定され、`--architecture`で設定します。ターゲットは最初に一致するバンドルターゲット、`bundle-arm`または`bundle-x86`を実行するため、イメージにはそのアーキテクチャ用にビルドされたパッケージとその依存関係が保持されます。
 - `<api-name>-container-trivy`は、そのイメージの脆弱性をスキャンします。
 
 イメージのビルド方法については<Link path="/guides/py-container">Python Container Service</Link>を、デプロイ時の公開方法については<Link path="/guides/docker-bundling">Docker Bundling</Link>を参照してください。
+
+### デプロイと削除
+
+`deploy-sandbox`は<Link path="/guides/typescript-infrastructure#deploying-your-sandbox-stage">CloudFormation expressモード</Link>でデプロイします。これは、ECSサービスが安定状態に達するのを待つのではなく、各リソースの設定が適用されると戻ります。そのため、最初のタスクがまだ起動している間にターゲットが完了する可能性があり、タスクが15秒間隔で2回のヘルスチェックに合格するまで、ロードバランサーにはリクエストを送信するターゲットがなく、`503`を返します。デプロイが戻った後、約1分間それを予期してください。1〜2分待ってから再度呼び出してください。クリアされない`503`は、遅い起動ではなく実際の失敗です: タスクが正常にならない場合、サービスのデプロイメントサーキットブレーカーがロールバックします。
+
+ECSはコンテナ内で独自のヘルスチェックを実行します。30秒ごとに`GET /health`を呼び出し、タスク開始後の最初の30秒間の失敗はカウントされません。そのチェックが最初に報告されるまで、`aws ecs describe-tasks`はタスクに`UNKNOWN`の`healthStatus`を与え、合格すると`HEALTHY`に変わります。`UNKNOWN`は、チェックが失敗したのではなく、まだ報告されていないことを意味します。
+
+APIのURLはスタック出力ですが、推測する名前ではありません。`CfnOutput`はAPIコンストラクト内で作成され、何もその論理IDをオーバーライドしないため、CDKはコンストラクトのパスに8文字のハッシュを加えて出力キーを構築します: `new MyApi(this, 'MyApi', …)`として追加されたAPIは、`MyApiUrl`ではなく`MyApiMyApiUrl`とそのハッシュを出力します。`cdk deploy`は値を出力し、スクリプトはキー全体ではなくサフィックスでマッチする必要があります:
+
+```bash
+aws cloudformation describe-stacks --stack-name <stack-name> \
+  --query "Stacks[0].Outputs[?contains(OutputKey, 'Url')].OutputValue" --output text
+```
+
+`destroy-sandbox`は、HTTP APIのアクセスログループとそれを暗号化する顧客管理KMSキーを残します。どちらも削除ポリシーを設定しないため、CDKのデフォルトの`Retain`が適用され、CloudFormationはそれらを削除するのではなくスキップします。削除されたスタックはそのリソースを報告しなくなるため、スタックを削除する前にそれらをリストアップしてください:
+
+```bash
+aws cloudformation describe-stack-resources --stack-name <stack-name> \
+  --query "StackResources[?contains(LogicalResourceId, 'AccessLogs') && (ResourceType=='AWS::Logs::LogGroup' || ResourceType=='AWS::KMS::Key')].[ResourceType,PhysicalResourceId]" \
+  --output text
+```
+
+次に、`aws logs delete-log-group --log-group-name <log-group-name>`と`aws kms schedule-key-deletion --key-id <key-id> --pending-window-in-days 7`で削除します。7日間はKMSが受け入れる最短のウィンドウです。
 
 ### 制限
 
@@ -931,12 +954,12 @@ API Gateway HTTP APIのアクセスログは、APIに到達するすべてのリ
 | 項目 | おおよそ |
 | --- | --- |
 | 内部ロードバランサー | $16 + ロードバランサー容量ユニット |
-| Fargateタスク、0.25 vCPU / 0.5 GB arm64 | タスクあたり$7 |
+| Fargateタスク、0.25 vCPU / 0.5 GB | ARM64でタスクあたり$7、X86_64ではさらに多く、FargateはvCPUあたりおよびGBあたりより高いレートで請求します |
 | NATゲートウェイ、VPCに存在する場合 | $33 |
 | VPCリンク | 時間料金なし |
 | ロードバランサーのアクセスログ用S3ストレージ | 月あたりGBあたり数セント |
 
-したがって、1タスクサービスは、トラフィックがない状態で月額約$23かかり、渡すVPCにNATゲートウェイがある場合はさらに多くなります。アクセスログはトラフィックとともに増加します: `endpoint.accessLogsBucket`にライフサイクルルールを追加して期限切れにしてください。リージョンの現在の価格については、[Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/)および[AWS Fargate](https://aws.amazon.com/fargate/pricing/)の価格ページを確認してください。
+したがって、1タスクサービスは、トラフィックがない状態でARM64で月額約$23かかり、渡すVPCにNATゲートウェイがある場合はさらに多くなります。アクセスログはトラフィックとともに増加します: `endpoint.accessLogsBucket`にライフサイクルルールを追加して期限切れにしてください。リージョンの現在の価格については、[Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/)および[AWS Fargate](https://aws.amazon.com/fargate/pricing/)の価格ページを確認してください。
 </OptionFilter>
 
 ## FastAPIの呼び出し

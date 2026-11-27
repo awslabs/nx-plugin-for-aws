@@ -912,10 +912,33 @@ API Gateway HTTP API 的访问日志记录到达 API 的每个请求。负载均
 
 容器生成器提供镜像目标，以您的 API 命名：
 
-- `<api-name>-container-docker` 构建 linux/arm64 镜像，首先运行 bundle，以便镜像包含您的包及其依赖项。
+- `<api-name>-container-docker` 为 `architecture` 选项中的 CPU 架构构建镜像，`linux/arm64` 或 `linux/amd64`。该选项默认为运行生成器的机器的架构，您可以使用 `--architecture` 设置它。该目标首先运行匹配的 bundle 目标，`bundle-arm` 或 `bundle-x86`，因此镜像包含为该架构构建的包及其依赖项。
 - `<api-name>-container-trivy` 扫描该镜像的漏洞。
 
 请参阅 <Link path="/guides/py-container">Python Container Service</Link> 了解镜像的构建方式，以及 <Link path="/guides/docker-bundling">Docker Bundling</Link> 了解它在部署时的发布方式。
+
+### 部署和拆除
+
+`deploy-sandbox` 在 <Link path="/guides/typescript-infrastructure#deploying-your-sandbox-stage">CloudFormation 快速模式</Link>下部署，一旦应用每个资源的配置就返回，而不是等待 ECS 服务达到稳定状态。因此，目标可以在第一个任务仍在启动时完成，在任务通过两次相隔十五秒的健康检查之前，负载均衡器没有目标可以发送请求，并回答 `503`。部署返回后预计大约一分钟。等待一两分钟后再次调用。永远不会清除的 `503` 是真正的失败而不是缓慢启动：当没有任务变得健康时，服务的部署断路器会回滚它。
+
+ECS 在容器内运行自己的健康检查。它每 30 秒调用一次 `GET /health`，任务启动后前 30 秒内的失败不计入其中。在该检查首次报告之前，`aws ecs describe-tasks` 给任务一个 `UNKNOWN` 的 `healthStatus`，一旦通过就变为 `HEALTHY`。`UNKNOWN` 意味着检查尚未报告，而不是它失败了。
+
+API 的 URL 是堆栈输出，但不在您猜测的名称下。`CfnOutput` 在您的 API 构造内创建，没有任何东西覆盖其逻辑 ID，因此 CDK 从构造的路径加上八个字符的哈希构建输出键：添加为 `new MyApi(this, 'MyApi', …)` 的 API 输出 `MyApiMyApiUrl` 和该哈希，而不是 `MyApiUrl`。`cdk deploy` 打印该值，脚本应该匹配后缀而不是整个键：
+
+```bash
+aws cloudformation describe-stacks --stack-name <stack-name> \
+  --query "Stacks[0].Outputs[?contains(OutputKey, 'Url')].OutputValue" --output text
+```
+
+`destroy-sandbox` 会留下 HTTP API 的访问日志组和加密它的客户管理的 KMS 密钥。两者都没有设置删除策略，因此 CDK 的默认 `Retain` 适用，CloudFormation 跳过它们而不是删除它们。在拆除堆栈之前列出它们，因为已删除的堆栈不再报告其资源：
+
+```bash
+aws cloudformation describe-stack-resources --stack-name <stack-name> \
+  --query "StackResources[?contains(LogicalResourceId, 'AccessLogs') && (ResourceType=='AWS::Logs::LogGroup' || ResourceType=='AWS::KMS::Key')].[ResourceType,PhysicalResourceId]" \
+  --output text
+```
+
+然后使用 `aws logs delete-log-group --log-group-name <log-group-name>` 和 `aws kms schedule-key-deletion --key-id <key-id> --pending-window-in-days 7` 删除它们，七天是 KMS 接受的最短窗口。
 
 ### 限制
 
@@ -931,12 +954,12 @@ API Gateway HTTP API 的访问日志记录到达 API 的每个请求。负载均
 | 项目 | 大约 |
 | --- | --- |
 | 内部负载均衡器 | $16 加上负载均衡器容量单位 |
-| Fargate 任务，0.25 vCPU / 0.5 GB arm64 | 每个任务 $7 |
+| Fargate 任务，0.25 vCPU / 0.5 GB | 在 ARM64 上每个任务 $7，在 X86_64 上更多，Fargate 对每个 vCPU 和每 GB 的收费率更高 |
 | NAT 网关，如果您的 VPC 有一个 | $33 |
 | VPC 链接 | 无每小时费用 |
 | 负载均衡器访问日志的 S3 存储 | 每月每 GB 几美分 |
 
-因此，一个单任务服务在任何流量之前每月花费大约 $23，如果您传入的 VPC 有 NAT 网关，则更多。访问日志随流量增长：向 `endpoint.accessLogsBucket` 添加生命周期规则以使其过期。查看 [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) 和 [AWS Fargate](https://aws.amazon.com/fargate/pricing/) 定价页面以获取您所在区域的当前价格。
+因此，一个单任务服务在 ARM64 上任何流量之前每月花费大约 $23，如果您传入的 VPC 有 NAT 网关，则更多。访问日志随流量增长：向 `endpoint.accessLogsBucket` 添加生命周期规则以使其过期。查看 [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) 和 [AWS Fargate](https://aws.amazon.com/fargate/pricing/) 定价页面以获取您所在区域的当前价格。
 </OptionFilter>
 
 ## 调用您的 FastAPI

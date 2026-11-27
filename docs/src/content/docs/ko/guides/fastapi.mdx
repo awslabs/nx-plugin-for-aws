@@ -912,10 +912,33 @@ API Gateway HTTP API의 액세스 로그는 API에 도달하는 모든 요청을
 
 컨테이너 생성기는 API 이름을 따서 명명된 이미지 타겟을 제공합니다:
 
-- `<api-name>-container-docker`는 linux/arm64 이미지를 빌드하며, 먼저 번들을 실행하여 이미지가 패키지와 종속성을 보유하도록 합니다.
+- `<api-name>-container-docker`는 `architecture` 옵션의 CPU 아키텍처, `linux/arm64` 또는 `linux/amd64`에 대한 이미지를 빌드합니다. 옵션은 생성기를 실행하는 머신의 아키텍처로 기본 설정되며, `--architecture`로 설정합니다. 타겟은 먼저 일치하는 번들 타겟, `bundle-arm` 또는 `bundle-x86`을 실행하므로 이미지가 해당 아키텍처용으로 빌드된 패키지와 종속성을 보유합니다.
 - `<api-name>-container-trivy`는 해당 이미지의 취약점을 스캔합니다.
 
 이미지가 빌드되는 방법은 <Link path="/guides/py-container">Python Container Service</Link>를 참조하고, 배포 시 게시되는 방법은 <Link path="/guides/docker-bundling">Docker Bundling</Link>을 참조하세요.
+
+### 배포 및 해체
+
+`deploy-sandbox`는 <Link path="/guides/typescript-infrastructure#deploying-your-sandbox-stage">CloudFormation express mode</Link>로 배포하며, ECS 서비스가 안정 상태에 도달할 때까지 기다리지 않고 각 리소스의 구성이 적용되면 반환합니다. 따라서 첫 번째 태스크가 여전히 시작 중일 때 타겟이 완료될 수 있으며, 태스크가 15초 간격으로 두 번의 상태 확인을 통과할 때까지 로드 밸런서에는 요청을 보낼 타겟이 없고 `503`으로 응답합니다. 배포가 반환된 후 약 1분 정도 예상하세요. 1~2분 기다렸다가 다시 호출하세요. 절대 해결되지 않는 `503`은 느린 시작이 아닌 실제 실패입니다: 서비스의 배포 회로 차단기는 태스크가 정상 상태가 되지 않으면 롤백합니다.
+
+ECS는 컨테이너 내부에서 자체 상태 확인을 실행합니다. 30초마다 `GET /health`를 호출하며, 태스크가 시작된 후 처음 30초 동안의 실패는 계산되지 않습니다. 해당 확인이 처음 보고될 때까지 `aws ecs describe-tasks`는 태스크에 `UNKNOWN`의 `healthStatus`를 제공하며, 통과하면 `HEALTHY`로 바뀝니다. `UNKNOWN`은 확인이 실패했다기보다는 아직 보고되지 않았음을 의미합니다.
+
+API의 URL은 스택 출력이지만 예상하는 이름 아래에 있지 않습니다. `CfnOutput`은 API 구성체 내부에 생성되며 아무것도 논리적 ID를 재정의하지 않으므로 CDK는 구성체의 경로와 8자 해시에서 출력 키를 빌드합니다: `new MyApi(this, 'MyApi', …)`로 추가된 API는 `MyApiMyApiUrl`과 해당 해시를 출력하며, `MyApiUrl`이 아닙니다. `cdk deploy`는 값을 출력하며, 스크립트는 전체 키가 아닌 접미사와 일치해야 합니다:
+
+```bash
+aws cloudformation describe-stacks --stack-name <stack-name> \
+  --query "Stacks[0].Outputs[?contains(OutputKey, 'Url')].OutputValue" --output text
+```
+
+`destroy-sandbox`는 HTTP API의 액세스 로그 그룹과 이를 암호화하는 고객 관리형 KMS 키를 남겨둡니다. 둘 다 제거 정책을 설정하지 않으므로 CDK의 기본값인 `Retain`이 적용되고 CloudFormation은 삭제하지 않고 건너뜁니다. 스택을 해체하기 전에 나열하세요. 삭제된 스택은 더 이상 리소스를 보고하지 않기 때문입니다:
+
+```bash
+aws cloudformation describe-stack-resources --stack-name <stack-name> \
+  --query "StackResources[?contains(LogicalResourceId, 'AccessLogs') && (ResourceType=='AWS::Logs::LogGroup' || ResourceType=='AWS::KMS::Key')].[ResourceType,PhysicalResourceId]" \
+  --output text
+```
+
+그런 다음 `aws logs delete-log-group --log-group-name <log-group-name>` 및 `aws kms schedule-key-deletion --key-id <key-id> --pending-window-in-days 7`로 제거하세요. 7일은 KMS가 허용하는 가장 짧은 기간입니다.
 
 ### 제한 사항
 
@@ -931,12 +954,12 @@ API Gateway HTTP API의 액세스 로그는 API에 도달하는 모든 요청을
 | 항목 | 대략 |
 | --- | --- |
 | 내부 로드 밸런서 | $16 + 로드 밸런서 용량 단위 |
-| Fargate 태스크, 0.25 vCPU / 0.5 GB arm64 | 태스크당 $7 |
+| Fargate 태스크, 0.25 vCPU / 0.5 GB | ARM64에서 태스크당 $7, X86_64에서는 더 많음. Fargate는 vCPU당 및 GB당 더 높은 요금을 청구합니다 |
 | NAT 게이트웨이, VPC에 있는 경우 | $33 |
 | VPC 링크 | 시간당 요금 없음 |
 | 로드 밸런서의 액세스 로그를 위한 S3 스토리지 | 월 GB당 센트 |
 
-따라서 단일 태스크 서비스는 트래픽이 없을 때 월 약 $23의 비용이 들며, 전달하는 VPC에 NAT 게이트웨이가 있으면 더 많이 듭니다. 액세스 로그는 트래픽과 함께 증가합니다: `endpoint.accessLogsBucket`에 수명 주기 규칙을 추가하여 만료시키세요. 리전의 현재 가격은 [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) 및 [AWS Fargate](https://aws.amazon.com/fargate/pricing/) 가격 페이지를 확인하세요.
+따라서 단일 태스크 서비스는 트래픽이 없을 때 ARM64에서 월 약 $23의 비용이 들며, 전달하는 VPC에 NAT 게이트웨이가 있으면 더 많이 듭니다. 액세스 로그는 트래픽과 함께 증가합니다: `endpoint.accessLogsBucket`에 수명 주기 규칙을 추가하여 만료시키세요. 리전의 현재 가격은 [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) 및 [AWS Fargate](https://aws.amazon.com/fargate/pricing/) 가격 페이지를 확인하세요.
 </OptionFilter>
 
 ## FastAPI 호출

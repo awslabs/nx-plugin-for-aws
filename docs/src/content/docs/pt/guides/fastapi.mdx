@@ -912,10 +912,33 @@ O log de acesso da API Gateway HTTP API registra cada solicitação que chega à
 
 O gerador de contêiner fornece os alvos de imagem, nomeados após sua API:
 
-- `<api-name>-container-docker` constrói uma imagem linux/arm64, executando o bundle primeiro para que a imagem contenha seu pacote e suas dependências.
+- `<api-name>-container-docker` constrói uma imagem para a arquitetura de CPU na opção `architecture`, `linux/arm64` ou `linux/amd64`. A opção tem como padrão a arquitetura da máquina em que você executa o gerador, e você a define com `--architecture`. O alvo executa o alvo de bundle correspondente primeiro, `bundle-arm` ou `bundle-x86`, então a imagem contém seu pacote e suas dependências construídas para essa arquitetura.
 - `<api-name>-container-trivy` varre essa imagem em busca de vulnerabilidades.
 
 Veja <Link path="/guides/py-container">Python Container Service</Link> para como a imagem é construída, e <Link path="/guides/docker-bundling">Docker Bundling</Link> para como ela é publicada no momento da implantação.
+
+### Implantando e Desmontando
+
+`deploy-sandbox` implanta em <Link path="/guides/typescript-infrastructure#deploying-your-sandbox-stage">modo expresso do CloudFormation</Link>, que retorna uma vez que a configuração de cada recurso é aplicada em vez de esperar que o serviço ECS atinja um estado estável. Então o alvo pode terminar enquanto a primeira tarefa ainda está iniciando, e até que uma tarefa tenha passado duas verificações de saúde com quinze segundos de intervalo, o load balancer não tem alvo para enviar uma solicitação e responde `503`. Espere cerca de um minuto disso após o deploy retornar. Aguarde um ou dois minutos e chame novamente. Um `503` que nunca limpa é uma falha real em vez de um início lento: o circuit breaker de implantação do serviço o reverte quando nenhuma tarefa se torna saudável.
+
+O ECS executa uma verificação de saúde própria dentro do contêiner. Ele chama `GET /health` a cada 30 segundos, e falhas nos primeiros 30 segundos após o início de uma tarefa não contam contra ela. Até que essa verificação relate pela primeira vez, `aws ecs describe-tasks` dá à tarefa um `healthStatus` de `UNKNOWN`, que se torna `HEALTHY` uma vez que passa. `UNKNOWN` significa que a verificação ainda não relatou em vez de que falhou.
+
+A URL da API é uma saída de stack, mas não sob o nome que você adivinharia. O `CfnOutput` é criado dentro do seu construto de API e nada substitui seu ID lógico, então o CDK constrói a chave de saída a partir do caminho do construto mais um hash de oito caracteres: uma API adicionada como `new MyApi(this, 'MyApi', …)` produz `MyApiMyApiUrl` e esse hash, não `MyApiUrl`. `cdk deploy` imprime o valor, e um script deve corresponder ao sufixo em vez da chave inteira:
+
+```bash
+aws cloudformation describe-stacks --stack-name <stack-name> \
+  --query "Stacks[0].Outputs[?contains(OutputKey, 'Url')].OutputValue" --output text
+```
+
+`destroy-sandbox` deixa o grupo de logs de acesso da HTTP API e a chave KMS gerenciada pelo cliente que o criptografa para trás. Nenhum define uma política de remoção, então o padrão `Retain` do CDK se aplica e o CloudFormation os pula em vez de excluí-los. Liste-os antes de desmontar a stack, já que uma stack excluída não relata mais seus recursos:
+
+```bash
+aws cloudformation describe-stack-resources --stack-name <stack-name> \
+  --query "StackResources[?contains(LogicalResourceId, 'AccessLogs') && (ResourceType=='AWS::Logs::LogGroup' || ResourceType=='AWS::KMS::Key')].[ResourceType,PhysicalResourceId]" \
+  --output text
+```
+
+Em seguida, remova-os com `aws logs delete-log-group --log-group-name <log-group-name>` e `aws kms schedule-key-deletion --key-id <key-id> --pending-window-in-days 7`, sendo sete dias a janela mais curta que o KMS aceita.
 
 ### Limites
 
@@ -931,12 +954,12 @@ O load balancer é o novo custo fixo comparado com Lambda, onde você paga por s
 | Item | Aproximadamente |
 | --- | --- |
 | Load balancer interno | $16 mais unidades de capacidade do load balancer |
-| Tarefa Fargate, 0.25 vCPU / 0.5 GB arm64 | $7 por tarefa |
+| Tarefa Fargate, 0.25 vCPU / 0.5 GB | $7 por tarefa em ARM64, e mais em X86_64, que o Fargate cobra a uma taxa mais alta por vCPU e por GB |
 | NAT gateway, se sua VPC tiver um | $33 |
 | VPC link | sem cobrança por hora |
 | Armazenamento S3 para os logs de acesso do load balancer | centavos por GB por mês |
 
-Então um serviço de uma tarefa custa aproximadamente $23 por mês antes de qualquer tráfego, e mais se a VPC que você passa tiver um NAT gateway. Os logs de acesso crescem com o tráfego: adicione uma regra de ciclo de vida a `endpoint.accessLogsBucket` para expirá-los. Verifique as páginas de preços do [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) e [AWS Fargate](https://aws.amazon.com/fargate/pricing/) para preços atuais em sua Região.
+Então um serviço de uma tarefa custa aproximadamente $23 por mês em ARM64 antes de qualquer tráfego, e mais se a VPC que você passa tiver um NAT gateway. Os logs de acesso crescem com o tráfego: adicione uma regra de ciclo de vida a `endpoint.accessLogsBucket` para expirá-los. Verifique as páginas de preços do [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) e [AWS Fargate](https://aws.amazon.com/fargate/pricing/) para preços atuais em sua Região.
 </OptionFilter>
 
 ## Invocando seu FastAPI

@@ -912,10 +912,33 @@ Access log của API Gateway HTTP API ghi lại mọi request đến API. Load b
 
 Trình tạo container cung cấp các image target, được đặt tên theo API của bạn:
 
-- `<api-name>-container-docker` build một linux/arm64 image, chạy bundle trước để image chứa package của bạn và các dependency của nó.
+- `<api-name>-container-docker` build một image cho kiến trúc CPU trong tùy chọn `architecture`, `linux/arm64` hoặc `linux/amd64`. Tùy chọn mặc định là kiến trúc của máy bạn chạy trình tạo, và bạn đặt nó với `--architecture`. Target chạy bundle target phù hợp trước, `bundle-arm` hoặc `bundle-x86`, vì vậy image chứa package của bạn và các dependency của nó được build cho kiến trúc đó.
 - `<api-name>-container-trivy` quét image đó để tìm lỗ hổng.
 
 Xem <Link path="/guides/py-container">Python Container Service</Link> để biết cách image được build, và <Link path="/guides/docker-bundling">Docker Bundling</Link> để biết cách nó được publish tại thời điểm deploy.
+
+### Triển khai và Dỡ bỏ
+
+`deploy-sandbox` triển khai trong <Link path="/guides/typescript-infrastructure#deploying-your-sandbox-stage">CloudFormation express mode</Link>, trả về một khi cấu hình của mỗi resource được áp dụng thay vì chờ ECS service đạt trạng thái ổn định. Vì vậy, target có thể kết thúc trong khi task đầu tiên vẫn đang khởi động, và cho đến khi một task đã vượt qua hai health check cách nhau mười lăm giây, load balancer không có target để gửi request đến và trả lời `503`. Mong đợi khoảng một phút sau khi deploy trả về. Đợi một hoặc hai phút và gọi lại. Một `503` không bao giờ xóa là một lỗi thực sự thay vì khởi động chậm: deployment circuit breaker của service roll back nó khi không có task nào trở nên healthy.
+
+ECS chạy một health check của riêng nó bên trong container. Nó gọi `GET /health` mỗi 30 giây, và các lỗi trong 30 giây đầu tiên sau khi một task khởi động không được tính vào nó. Cho đến khi kiểm tra đó báo cáo lần đầu, `aws ecs describe-tasks` cung cấp cho task một `healthStatus` là `UNKNOWN`, chuyển thành `HEALTHY` một khi nó vượt qua. `UNKNOWN` có nghĩa là kiểm tra chưa báo cáo chứ không phải là nó thất bại.
+
+URL của API là một stack output, nhưng không dưới tên bạn đoán. `CfnOutput` được tạo bên trong API construct của bạn và không có gì ghi đè logical ID của nó, vì vậy CDK xây dựng output key từ đường dẫn của construct cộng với một hash tám ký tự: một API được thêm dưới dạng `new MyApi(this, 'MyApi', …)` xuất `MyApiMyApiUrl` và hash đó, không phải `MyApiUrl`. `cdk deploy` in giá trị, và một script nên khớp với hậu tố thay vì toàn bộ key:
+
+```bash
+aws cloudformation describe-stacks --stack-name <stack-name> \
+  --query "Stacks[0].Outputs[?contains(OutputKey, 'Url')].OutputValue" --output text
+```
+
+`destroy-sandbox` để lại access log group của HTTP API và customer-managed KMS key mã hóa nó phía sau. Không cái nào đặt removal policy, vì vậy mặc định `Retain` của CDK áp dụng và CloudFormation bỏ qua chúng thay vì xóa chúng. Liệt kê chúng trước khi bạn dỡ bỏ stack, vì một stack đã xóa không còn báo cáo các resource của nó:
+
+```bash
+aws cloudformation describe-stack-resources --stack-name <stack-name> \
+  --query "StackResources[?contains(LogicalResourceId, 'AccessLogs') && (ResourceType=='AWS::Logs::LogGroup' || ResourceType=='AWS::KMS::Key')].[ResourceType,PhysicalResourceId]" \
+  --output text
+```
+
+Sau đó xóa chúng bằng `aws logs delete-log-group --log-group-name <log-group-name>` và `aws kms schedule-key-deletion --key-id <key-id> --pending-window-in-days 7`, bảy ngày là cửa sổ ngắn nhất mà KMS chấp nhận.
 
 ### Giới hạn
 
@@ -931,12 +954,12 @@ Load balancer là chi phí cố định mới so với Lambda, nơi bạn trả 
 | Mục | Khoảng |
 | --- | --- |
 | Internal load balancer | $16 cộng với load balancer capacity unit |
-| Fargate task, 0.25 vCPU / 0.5 GB arm64 | $7 mỗi task |
+| Fargate task, 0.25 vCPU / 0.5 GB | $7 mỗi task trên ARM64, và nhiều hơn trên X86_64, mà Fargate tính phí ở mức cao hơn cho mỗi vCPU và mỗi GB |
 | NAT gateway, nếu VPC của bạn có một cái | $33 |
 | VPC link | không có phí hàng giờ |
 | S3 storage cho access log của load balancer | cent mỗi GB một tháng |
 
-Vì vậy, một service một task có giá khoảng $23 một tháng trước bất kỳ traffic nào, và nhiều hơn nếu VPC bạn truyền vào có NAT gateway. Access log tăng theo traffic: thêm một lifecycle rule vào `endpoint.accessLogsBucket` để hết hạn chúng. Kiểm tra các trang giá [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) và [AWS Fargate](https://aws.amazon.com/fargate/pricing/) để biết giá hiện tại trong Region của bạn.
+Vì vậy, một service một task có giá khoảng $23 một tháng trên ARM64 trước bất kỳ traffic nào, và nhiều hơn nếu VPC bạn truyền vào có NAT gateway. Access log tăng theo traffic: thêm một lifecycle rule vào `endpoint.accessLogsBucket` để hết hạn chúng. Kiểm tra các trang giá [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) và [AWS Fargate](https://aws.amazon.com/fargate/pricing/) để biết giá hiện tại trong Region của bạn.
 </OptionFilter>
 
 ## Gọi FastAPI của bạn

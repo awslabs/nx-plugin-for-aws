@@ -28,7 +28,7 @@ El backend utiliza AWS Lambda para despliegue serverless, y el trazado de AWS X-
 </OptionFilter>
 
 <OptionFilter when={{ infra: 'http-ecs' }} description="ECS hosting">
-Tu API se ejecuta como un servidor uvicorn de larga duración en un contenedor en Amazon ECS, detrás de una API Gateway HTTP API, en lugar de en una función Lambda. Consulta <a href="#running-on-amazon-ecs">Ejecución en Amazon ECS</a> para ver qué cambia, incluyendo por qué el trazado de X-Ray no produce trazas allí.
+Tu API se ejecuta como un servidor uvicorn de larga duración en un contenedor en Amazon ECS, detrás de una API Gateway HTTP API, en lugar de en una función Lambda. Consulta <a href="#ejecución-en-amazon-ecs">Ejecución en Amazon ECS</a> para ver qué cambia, incluyendo por qué el trazado de X-Ray no produce trazas allí.
 </OptionFilter>
 
 ## Uso
@@ -912,10 +912,33 @@ El log de acceso de la API Gateway HTTP API registra cada solicitud que llega a 
 
 El generador de contenedor proporciona los objetivos de imagen, nombrados según tu API:
 
-- `<api-name>-container-docker` construye una imagen linux/arm64, ejecutando el bundle primero para que la imagen contenga tu paquete y sus dependencias.
+- `<api-name>-container-docker` construye una imagen para la arquitectura de CPU en la opción `architecture`, `linux/arm64` o `linux/amd64`. La opción tiene como valor predeterminado la arquitectura de la máquina en la que ejecutas el generador, y la estableces con `--architecture`. El objetivo ejecuta primero el objetivo de bundle correspondiente, `bundle-arm` o `bundle-x86`, por lo que la imagen contiene tu paquete y sus dependencias construidas para esa arquitectura.
 - `<api-name>-container-trivy` escanea esa imagen en busca de vulnerabilidades.
 
 Consulta <Link path="/guides/py-container">Python Container Service</Link> para ver cómo se construye la imagen, y <Link path="/guides/docker-bundling">Docker Bundling</Link> para ver cómo se publica en tiempo de despliegue.
+
+### Despliegue y Desmontaje
+
+`deploy-sandbox` despliega en <Link path="/guides/typescript-infrastructure#deploying-your-sandbox-stage">modo express de CloudFormation</Link>, que retorna una vez que se aplica la configuración de cada recurso en lugar de esperar a que el servicio ECS alcance un estado estable. Por lo tanto, el objetivo puede finalizar mientras la primera tarea aún se está iniciando, y hasta que una tarea haya pasado dos verificaciones de salud con quince segundos de diferencia, el balanceador de carga no tiene destino al que enviar una solicitud y responde `503`. Espera aproximadamente un minuto después de que el despliegue retorne. Espera un minuto o dos y llama de nuevo. Un `503` que nunca se despeja es un fallo real en lugar de un inicio lento: el circuit breaker de despliegue del servicio lo revierte cuando ninguna tarea se vuelve saludable.
+
+ECS ejecuta una verificación de salud propia dentro del contenedor. Llama a `GET /health` cada 30 segundos, y los fallos en los primeros 30 segundos después de que una tarea se inicia no cuentan en su contra. Hasta que esa verificación reporte por primera vez, `aws ecs describe-tasks` da a la tarea un `healthStatus` de `UNKNOWN`, que se convierte en `HEALTHY` una vez que pasa. `UNKNOWN` significa que la verificación aún no ha reportado en lugar de que falló.
+
+La URL de la API es una salida de stack, pero no bajo el nombre que adivinarías. El `CfnOutput` se crea dentro de tu constructo de API y nada anula su ID lógico, por lo que CDK construye la clave de salida desde la ruta del constructo más un hash de ocho caracteres: una API agregada como `new MyApi(this, 'MyApi', …)` produce `MyApiMyApiUrl` y ese hash, no `MyApiUrl`. `cdk deploy` imprime el valor, y un script debe coincidir con el sufijo en lugar de la clave completa:
+
+```bash
+aws cloudformation describe-stacks --stack-name <stack-name> \
+  --query "Stacks[0].Outputs[?contains(OutputKey, 'Url')].OutputValue" --output text
+```
+
+`destroy-sandbox` deja atrás el grupo de logs de acceso de la HTTP API y la clave KMS administrada por el cliente que lo cifra. Ninguno establece una política de eliminación, por lo que se aplica el valor predeterminado de CDK de `Retain` y CloudFormation los omite en lugar de eliminarlos. Enuméralos antes de desmontar el stack, ya que un stack eliminado ya no reporta sus recursos:
+
+```bash
+aws cloudformation describe-stack-resources --stack-name <stack-name> \
+  --query "StackResources[?contains(LogicalResourceId, 'AccessLogs') && (ResourceType=='AWS::Logs::LogGroup' || ResourceType=='AWS::KMS::Key')].[ResourceType,PhysicalResourceId]" \
+  --output text
+```
+
+Luego elimínalos con `aws logs delete-log-group --log-group-name <log-group-name>` y `aws kms schedule-key-deletion --key-id <key-id> --pending-window-in-days 7`, siendo siete días la ventana más corta que KMS acepta.
 
 ### Límites
 
@@ -931,12 +954,12 @@ El balanceador de carga es el nuevo costo fijo en comparación con Lambda, donde
 | Elemento | Aproximadamente |
 | --- | --- |
 | Balanceador de carga interno | $16 más unidades de capacidad del balanceador de carga |
-| Tarea Fargate, 0.25 vCPU / 0.5 GB arm64 | $7 por tarea |
+| Tarea Fargate, 0.25 vCPU / 0.5 GB | $7 por tarea en ARM64, y más en X86_64, que Fargate factura a una tasa más alta por vCPU y por GB |
 | NAT gateway, si tu VPC tiene uno | $33 |
 | Enlace VPC | sin cargo por hora |
 | Almacenamiento S3 para los logs de acceso del balanceador de carga | centavos por GB al mes |
 
-Así que un servicio de una tarea cuesta aproximadamente $23 al mes antes de cualquier tráfico, y más si la VPC que pasas tiene un NAT gateway. Los logs de acceso crecen con el tráfico: agrega una regla de ciclo de vida a `endpoint.accessLogsBucket` para que expiren. Consulta las páginas de precios de [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) y [AWS Fargate](https://aws.amazon.com/fargate/pricing/) para precios actuales en tu Región.
+Así que un servicio de una tarea cuesta aproximadamente $23 al mes en ARM64 antes de cualquier tráfico, y más si la VPC que pasas tiene un NAT gateway. Los logs de acceso crecen con el tráfico: agrega una regla de ciclo de vida a `endpoint.accessLogsBucket` para que expiren. Consulta las páginas de precios de [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) y [AWS Fargate](https://aws.amazon.com/fargate/pricing/) para precios actuales en tu Región.
 </OptionFilter>
 
 ## Invocar tu FastAPI

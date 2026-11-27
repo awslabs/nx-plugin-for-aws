@@ -912,10 +912,33 @@ Le journal d'accès de l'API Gateway HTTP API enregistre chaque requête qui att
 
 Le générateur de conteneur fournit les cibles d'image, nommées d'après votre API :
 
-- `<api-name>-container-docker` construit une image linux/arm64, exécutant d'abord le bundle pour que l'image contienne votre package et ses dépendances.
+- `<api-name>-container-docker` construit une image pour l'architecture CPU dans l'option `architecture`, `linux/arm64` ou `linux/amd64`. L'option est définie par défaut sur l'architecture de la machine sur laquelle vous exécutez le générateur, et vous la définissez avec `--architecture`. La cible exécute d'abord la cible de bundle correspondante, `bundle-arm` ou `bundle-x86`, de sorte que l'image contient votre package et ses dépendances construits pour cette architecture.
 - `<api-name>-container-trivy` scanne cette image pour les vulnérabilités.
 
 Voir <Link path="/guides/py-container">Python Container Service</Link> pour comment l'image est construite, et <Link path="/guides/docker-bundling">Docker Bundling</Link> pour comment elle est publiée au moment du déploiement.
+
+### Déploiement et démontage
+
+`deploy-sandbox` déploie en <Link path="/guides/typescript-infrastructure#deploying-your-sandbox-stage">mode express CloudFormation</Link>, qui retourne une fois que la configuration de chaque ressource est appliquée plutôt que d'attendre que le service ECS atteigne un état stable. Ainsi, la cible peut se terminer pendant que la première tâche démarre encore, et jusqu'à ce qu'une tâche ait réussi deux contrôles de santé à quinze secondes d'intervalle, le load balancer n'a pas de cible à laquelle envoyer une requête et répond `503`. Attendez-vous à environ une minute de cela après le retour du déploiement. Attendez une minute ou deux et appelez à nouveau. Un `503` qui ne se résout jamais est un véritable échec plutôt qu'un démarrage lent : le disjoncteur de déploiement du service l'annule lorsqu'aucune tâche ne devient saine.
+
+ECS exécute son propre contrôle de santé à l'intérieur du conteneur. Il appelle `GET /health` toutes les 30 secondes, et les échecs dans les 30 premières secondes après le démarrage d'une tâche ne comptent pas contre elle. Jusqu'à ce que ce contrôle rapporte pour la première fois, `aws ecs describe-tasks` donne à la tâche un `healthStatus` de `UNKNOWN`, qui devient `HEALTHY` une fois qu'il réussit. `UNKNOWN` signifie que le contrôle n'a pas encore rapporté plutôt qu'il a échoué.
+
+L'URL de l'API est une sortie de stack, mais pas sous le nom que vous devineriez. Le `CfnOutput` est créé à l'intérieur de votre construct API et rien ne remplace son ID logique, donc CDK construit la clé de sortie à partir du chemin du construct plus un hachage de huit caractères : une API ajoutée comme `new MyApi(this, 'MyApi', …)` sort `MyApiMyApiUrl` et ce hachage, pas `MyApiUrl`. `cdk deploy` imprime la valeur, et un script devrait correspondre au suffixe plutôt qu'à la clé entière :
+
+```bash
+aws cloudformation describe-stacks --stack-name <stack-name> \
+  --query "Stacks[0].Outputs[?contains(OutputKey, 'Url')].OutputValue" --output text
+```
+
+`destroy-sandbox` laisse derrière lui le groupe de journaux d'accès de l'API HTTP et la clé KMS gérée par le client qui le chiffre. Aucun ne définit de politique de suppression, donc la valeur par défaut de CDK de `Retain` s'applique et CloudFormation les ignore plutôt que de les supprimer. Listez-les avant de démonter la stack, car une stack supprimée ne rapporte plus ses ressources :
+
+```bash
+aws cloudformation describe-stack-resources --stack-name <stack-name> \
+  --query "StackResources[?contains(LogicalResourceId, 'AccessLogs') && (ResourceType=='AWS::Logs::LogGroup' || ResourceType=='AWS::KMS::Key')].[ResourceType,PhysicalResourceId]" \
+  --output text
+```
+
+Ensuite, supprimez-les avec `aws logs delete-log-group --log-group-name <log-group-name>` et `aws kms schedule-key-deletion --key-id <key-id> --pending-window-in-days 7`, sept jours étant la fenêtre la plus courte que KMS accepte.
 
 ### Limites
 
@@ -931,12 +954,12 @@ Le load balancer est le nouveau coût fixe par rapport à Lambda, où vous payez
 | Élément | Approximativement |
 | --- | --- |
 | Load balancer interne | 16 $ plus les unités de capacité du load balancer |
-| Tâche Fargate, 0,25 vCPU / 0,5 Go arm64 | 7 $ par tâche |
+| Tâche Fargate, 0,25 vCPU / 0,5 Go | 7 $ par tâche sur ARM64, et plus sur X86_64, que Fargate facture à un tarif plus élevé par vCPU et par Go |
 | Passerelle NAT, si votre VPC en a une | 33 $ |
 | VPC link | pas de frais horaires |
 | Stockage S3 pour les journaux d'accès du load balancer | centimes par Go par mois |
 
-Donc un service à une tâche coûte environ 23 $ par mois avant tout trafic, et plus si le VPC que vous passez a une passerelle NAT. Les journaux d'accès augmentent avec le trafic : ajoutez une règle de cycle de vie à `endpoint.accessLogsBucket` pour les faire expirer. Consultez les pages de tarification [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) et [AWS Fargate](https://aws.amazon.com/fargate/pricing/) pour les prix actuels dans votre région.
+Donc un service à une tâche coûte environ 23 $ par mois sur ARM64 avant tout trafic, et plus si le VPC que vous passez a une passerelle NAT. Les journaux d'accès augmentent avec le trafic : ajoutez une règle de cycle de vie à `endpoint.accessLogsBucket` pour les faire expirer. Consultez les pages de tarification [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) et [AWS Fargate](https://aws.amazon.com/fargate/pricing/) pour les prix actuels dans votre région.
 </OptionFilter>
 
 ## Invoquer votre FastAPI
