@@ -21,7 +21,15 @@ import { PY_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/vers
 
 [FastAPI](https://fastapi.tiangolo.com/) es un framework para construir APIs en Python.
 
-El generador de FastAPI crea una nueva FastAPI con configuración de infraestructura AWS CDK o Terraform. El backend generado utiliza AWS Lambda para despliegue serverless, expuesto a través de una API de AWS API Gateway. Configura [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) para observabilidad, incluyendo logging, trazado de AWS X-Ray y métricas de Cloudwatch.
+El generador de FastAPI crea una nueva FastAPI con configuración de infraestructura AWS CDK o Terraform. El backend generado se expone a través de una API de AWS API Gateway. Configura [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) para observabilidad, incluyendo logging estructurado y métricas de CloudWatch.
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Lambda hosting">
+El backend utiliza AWS Lambda para despliegue serverless, y el trazado de AWS X-Ray también está configurado.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="ECS hosting">
+Tu API se ejecuta como un servidor uvicorn de larga duración en un contenedor en Amazon ECS, detrás de una API Gateway HTTP API, en lugar de en una función Lambda. Consulta <a href="#ejecución-en-amazon-ecs">Ejecución en Amazon ECS</a> para ver qué cambia, incluyendo por qué el trazado de X-Ray no produce trazas allí.
+</OptionFilter>
 
 ## Uso
 
@@ -43,7 +51,21 @@ Selecciona `rest-lambda` (predeterminado) como tu `infra` si tienes la intenció
 
 :::tip[Patrón de Integración]
 La opción `integrationPattern` tiene como valor predeterminado `isolated`, que crea un Lambda por operación de FastAPI. Selecciona `shared` si prefieres un único Lambda handler compartido para toda la API, con anulaciones opcionales por operación.
+
+Con `infra` establecido en `http-ecs` la opción es siempre `shared`, ya que un servicio de contenedor responde a cada operación.
 :::
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="ECS hosting is experimental">
+:::caution[Experimental]
+`http-ecs` es experimental. Su salida generada puede cambiar entre versiones sin una migración para llevar un espacio de trabajo existente, así que espera reconciliar esos cambios tú mismo cuando actualices.
+
+Necesita el proveedor de IaC CDK: el soporte de Terraform aún no está implementado. Si el espacio de trabajo se resuelve a Terraform, el generador falla con un mensaje que indica la solución.
+
+`integrationPattern` es siempre `shared` aquí. Pasar `--integrationPattern=isolated` junto con `http-ecs` no falla: el generador advierte que la opción se ignora y usa `shared`. Al ejecutar el generador de forma interactiva, pregunta por `integrationPattern` antes de `infra`, con `isolated` preseleccionado, por lo que esa advertencia es lo que ves si dejas la preselección y luego eliges `http-ecs`. En el constructor de comandos de esta página, elegir `http-ecs` desactiva `isolated` y lo borra si estaba seleccionado, por lo que el comando que escribe nunca lleva la bandera.
+
+La opción `architecture` establece si el contenedor se ejecuta en `ARM64` o `X86_64`, y las wheels de Python en su bundle lo siguen. Omítela para usar la arquitectura de la máquina en la que ejecutas el generador. Consulta <Link path="/guides/py-container#cpu-architecture">CPU Architecture</Link> en la guía de contenedores.
+:::
+</OptionFilter>
 
 ## Salida del Generador
 
@@ -62,6 +84,20 @@ El generador creará la siguiente estructura de proyecto en el directorio `<dire
   - generate_open_api.py Script para generar un esquema OpenAPI desde la aplicación FastAPI
 
 </FileTree>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="Files that differ when the API runs on ECS">
+Con `infra` establecido en `http-ecs` la API se ejecuta como su propio servidor HTTP en lugar de detrás del Lambda Web Adapter, por lo que `run.sh` no se genera. En su lugar obtienes una carpeta de contenedor dentro de tu módulo, nombrada según tu API:
+
+<FileTree>
+- \<module_name>
+  - \<api_name>_container
+    - main.py Punto de entrada: agrega `GET /health`, escribe las métricas que recopila la API, e inicia uvicorn en `HOST` y `PORT`. El bundle, la imagen y el objetivo `serve` todos comienzan desde este archivo
+    - Dockerfile Definición de imagen de contenedor
+    - .dockerignore Archivos excluidos del contexto de construcción de la imagen
+</FileTree>
+
+Tu `init.py`, `main.py` y las operaciones que les agregues son las mismas para cada valor de `infra`.
+</OptionFilter>
 
 ### Infraestructura
 
@@ -101,8 +137,18 @@ El generador configura varias características automáticamente:
 2. Middleware de manejo de errores
 3. Correlación de solicitud/respuesta
 4. Recopilación de métricas
-5. Despliegue de AWS Lambda a través de [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) con uvicorn
-6. Streaming con seguridad de tipos (solo REST API)
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Streaming, which needs a REST API">
+El streaming con seguridad de tipos también está configurado, solo para la infraestructura `rest-lambda`.
+</OptionFilter>
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="How the Lambda variants serve the app">
+La aplicación se sirve en una función Lambda mediante el [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) ejecutando uvicorn.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="How the ECS variant serves the app">
+La aplicación se sirve mediante uvicorn en el contenedor, sin Lambda Web Adapter. Consulta <a href="#running-on-amazon-ecs">Ejecución en Amazon ECS</a>.
+</OptionFilter>
 
 ### Observabilidad con AWS Lambda Powertools
 
@@ -139,6 +185,12 @@ def read_item(item_id: int):
         # Your logic here
         return {"item_id": item_id}
 ```
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="X-Ray produces no traces on ECS">
+:::caution[Sin trazas en ECS]
+El decorador y el subsegmento anterior se ejecutan sin error en un contenedor, pero no producen trazas. Powertools desactiva su tracer cuando no se está ejecutando en Lambda. Consulta <a href="#observability">Observabilidad</a> para ver qué obtienes y qué agregar si necesitas trazas.
+:::
+</OptionFilter>
 
 #### Métricas
 
@@ -187,9 +239,17 @@ Se recomienda especificar modelos de respuesta para tus operaciones de API para 
 
 ### Acceder al Usuario que Llama
 
+<OptionFilter when={{ infra: 'http-ecs' }} description="Identity on ECS — the authorizer context does not arrive">
+En ECS no hay Lambda Web Adapter ni encabezado de contexto de solicitud de API Gateway: API Gateway no reenvía las claims del autorizador a una integración de balanceador de carga privado. El autorizador aún decide si una solicitud llega al contenedor en absoluto, pero tus manejadores no pueden leer el llamador de la solicitud como se escribe a continuación.
+
+Para leer la identidad del llamador en una operación, mapea el contexto del autorizador a un encabezado de solicitud en tu constructo de API, y lee ese encabezado desde el `Request` de FastAPI.
+</OptionFilter>
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Identity on the Lambda variants">
 Cuando tu API está protegida por autenticación, tus manejadores de ruta a menudo necesitan saber quién está llamando. La FastAPI generada se ejecuta dentro de AWS Lambda a través del [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter), que reenvía el contexto de solicitud de API Gateway como JSON en el encabezado `x-amzn-request-context`. Puedes leerlo desde el `Request` de FastAPI para extraer la identidad del llamador.
 
 Como ejemplo, agreguemos un endpoint `/me` que devuelva detalles sobre el usuario que llama. Implementaremos la extracción como una [dependencia de FastAPI](https://fastapi.tiangolo.com/tutorial/dependencies/) para que pueda reutilizarse en todas las rutas. La forma del contexto de solicitud — y por lo tanto cómo extraes la identidad — depende tanto de tu método `auth` seleccionado como de si desplegaste una REST o HTTP API.
+</OptionFilter>
 
 <OptionFilter when={{ auth: 'iam' }} description="Extracción de identidad para APIs autenticadas con IAM">
 Para autenticación `IAM`, buscamos al llamador en Cognito usando el sub extraído del contexto de solicitud de API Gateway, lo que requiere `boto3`. Agrégalo a tu proyecto de API:
@@ -444,6 +504,7 @@ El generador de FastAPI crea infraestructura como código CDK o Terraform basada
 
 <Infrastructure>
 <Fragment slot="cdk">
+<OptionFilter not when={{ infra: 'http-ecs' }} description="CDK usage for the Lambda variants">
 El constructo CDK para desplegar tu API en la carpeta `common/constructs`. Puedes usar esto en una aplicación CDK:
 
 ```ts {6-8}
@@ -467,6 +528,47 @@ Esto configura:
 4. Grupo de logs de CloudWatch
 5. Configuración de trazado de X-Ray
 6. Namespace de métricas de CloudWatch
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="CDK usage when the API runs on ECS — pass the VPC">
+`defaultIntegrations` toma la VPC en la que se ejecuta tu servicio, y construye todo dentro de ella: el servicio ECS, el balanceador de carga interno frente a él, y el enlace VPC a través del cual API Gateway alcanza ese balanceador de carga. El constructo nunca crea una VPC, por lo que creas o importas una en tu stack.
+
+```ts {10,13-15}
+import { MyApi } from '@my-scope/common-constructs';
+import { Stack } from 'aws-cdk-lib';
+import { Vpc } from 'aws-cdk-lib/aws-ec2';
+import { Construct } from 'constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    const vpc = new Vpc(this, 'Vpc', { natGateways: 1 });
+
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this, { vpc }).build(),
+    });
+  }
+}
+```
+
+Para usar una VPC existente, búscala con `Vpc.fromLookup(this, 'Vpc', { vpcId: '<vpc-id>' })` y pásala como `vpc`.
+
+Pasa `service` para cambiar el servicio de contenedor en sí — su `cpu`, `memoryLimitMiB`, `desiredCount`, `environment`, o `grantTaskRole` para dar un permiso al rol de tarea:
+
+```ts
+MyApi.defaultIntegrations(this, {
+  vpc,
+  service: {
+    cpu: 512,
+    memoryLimitMiB: 1024,
+    grantTaskRole: (taskRole) => myTable.grantReadWriteData(taskRole),
+  },
+}).build();
+```
+
+Esto configura una AWS API Gateway HTTP API con autenticación basada en tu método `auth` elegido, un servicio Amazon ECS ejecutando tu contenedor, un balanceador de carga interno frente a él, y el enlace VPC a través del cual API Gateway alcanza ese balanceador de carga.
+</OptionFilter>
 
 <Snippet name="api/cors-configuration-cdk-note" />
 
@@ -502,6 +604,12 @@ Los resultados del autorizador se almacenan en caché durante 5 minutos, con cla
 </OptionFilter>
 </Fragment>
 <Fragment slot="terraform">
+<OptionFilter when={{ infra: 'http-ecs' }} description="Terraform is not implemented for ECS hosting">
+:::caution[Solo CDK]
+`http-ecs` no está implementado para Terraform. El generador falla con un mensaje que lo indica. Elige `rest-lambda` o `http-lambda` para un espacio de trabajo Terraform.
+:::
+</OptionFilter>
+
 Los módulos Terraform para desplegar tu API están en la carpeta `common/terraform`. Puedes usar esto en una configuración Terraform.
 
 El módulo de API almacena su zip de despliegue Lambda en un bucket S3 de activos compartido — consulta la <Link path="/guides/terraform-project">guía de infraestructura Terraform</Link> para más detalles. Instancia el módulo `core/asset-bucket` una vez por despliegue y pasa su salida `bucket_name` a cada módulo de API / Lambda a través de la entrada `asset_bucket_name`:
@@ -730,15 +838,129 @@ El generador configura un servidor de desarrollo local que puedes ejecutar con:
 
 <NxCommands commands={['serve <project-name>']} />
 
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Local server for the Lambda variants">
 Esto inicia un servidor de desarrollo FastAPI local con:
 
 - Recarga automática en cambios de código
 - Documentación interactiva de API en `/docs` o `/redoc`
 - Esquema OpenAPI en `/openapi.json`
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="Local server when the API runs on ECS">
+Esto inicia el punto de entrada del contenedor, el mismo archivo que ejecuta la imagen, con:
+
+- `GET /health`, respondiendo como lo hace para el balanceador de carga
+- Documentación interactiva de API en `/docs` o `/redoc`
+- Esquema OpenAPI en `/openapi.json`
+
+El servidor se vincula a `127.0.0.1`, por lo que responde solo en tu propia máquina. No recarga nada: reinícialo para recoger un cambio de código. Para alcanzarlo desde otra máquina, una VM o un contenedor, establece `HOST=0.0.0.0` en el objetivo `serve` — lo que hace que la API sea alcanzable por cualquier cosa que pueda alcanzar tu máquina, sin autenticación.
+</OptionFilter>
 
 :::note[Nombres de Proyecto]
 Los nombres de proyecto Python usan guiones bajos, por lo que una API generada con `--name=MyApi` se direcciona como `my_api` (o por su nombre completamente calificado, `<scope>.my_api`). El puerto en el que escucha el servidor se asigna por proyecto — léelo del objetivo `serve` en el `project.json` de tu proyecto.
 :::
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="How ECS hosting works, what it costs and what it limits">
+## Ejecución en Amazon ECS
+
+Con `infra` establecido en `http-ecs`, tu API se ejecuta como un servidor uvicorn de larga duración en un contenedor en lugar de en una función Lambda detrás del Lambda Web Adapter. Una solicitud toma esta ruta:
+
+1. Un llamador firma una solicitud a la API Gateway HTTP API, que es el único punto de entrada público. Cada ruta lleva el autorizador para el `auth` que elegiste, por lo que una solicitud no autenticada se rechaza en el borde.
+2. API Gateway reenvía la solicitud a través de un enlace VPC, que es su ruta privada hacia tu VPC.
+3. El enlace VPC alcanza un balanceador de carga interno. El balanceador de carga no tiene dirección pública, y su única regla de entrada permite el grupo de seguridad del enlace VPC en el puerto del listener.
+4. El balanceador de carga reenvía la solicitud a una tarea. La única regla de entrada de las tareas permite el grupo de seguridad del balanceador de carga en el puerto del contenedor, por lo que nada más en la VPC puede abrir una conexión a ellas.
+
+Las tareas se ejecutan en subredes privadas y nunca obtienen una dirección IP pública. Nada en esta ruta permite un rango de direcciones de entrada.
+
+Por defecto, el servicio, el balanceador de carga y el enlace VPC van en las subredes `PRIVATE_WITH_EGRESS` de la VPC, que alcanzan AWS a través de un NAT gateway. Pasar `vpcSubnets: { subnetType: SubnetType.PRIVATE_ISOLATED }` a `defaultIntegrations` elimina el NAT gateway y su cargo por hora, pero las subredes aisladas no tienen ruta de salida, por lo que la VPC entonces necesita cuatro endpoints VPC para que las tareas se inicien: endpoints de interfaz para `ecr.api` y `ecr.dkr` para extraer la imagen, un endpoint de gateway S3 porque las capas de imagen son objetos S3, y un endpoint de interfaz para `logs` para que el driver `awslogs` pueda escribir. Sin ellos, una tarea no puede extraer su imagen y ECS revierte el despliegue en el circuit breaker sin decir por qué.
+
+El enlace VPC, el balanceador de carga, su listener, el grupo de destino y el bucket al que el balanceador de carga escribe sus logs de acceso son creados por un constructo, `core/api/ecs-http-endpoint.ts` en `common/constructs`, que cada API alojada en ECS comparte. El constructo de tu propia API nombra su servicio de contenedor y enruta cada operación a ese endpoint.
+
+### Qué se Ejecuta en el Contenedor
+
+`<module_name>/<api_name>_container/main.py` importa la aplicación desde tu `main.py`, por lo que cada operación que escribes se sirve exactamente como está en Lambda. Agrega dos cosas propias:
+
+- `GET /health`, que el grupo de destino del balanceador de carga y la verificación de salud del contenedor llaman. Se declara `include_in_schema=False`, por lo que se mantiene fuera de tu especificación OpenAPI y por lo tanto fuera de las rutas de API Gateway y los clientes generados. También se deja fuera de las métricas de solicitud, por lo que la llamada del grupo de destino cada 15 segundos no cuenta como una solicitud de API.
+- Un middleware que escribe las métricas que el propio middleware de la API recopila. En Lambda el handler hace eso al final de cada invocación; este servidor vive a través de solicitudes, por lo que las vacía él mismo.
+
+Las rutas de API Gateway aún provienen de tu especificación OpenAPI, por lo que una operación que agregues se despliega una vez que `nx build` ha regenerado la especificación.
+
+### Observabilidad
+
+Los logs y las métricas funcionan como lo hacen en Lambda: el contenedor escribe en su propio grupo de logs de CloudWatch, y las métricas se escriben en el formato de métrica embebida para que CloudWatch Logs las extraiga.
+
+Una cosa sobre las métricas es diferente aquí, y vale la pena saberlo antes de leer un dashboard o agregar una métrica propia. `metrics`, el objeto que la sección <a href="#metrics">Métricas</a> anterior te dice que importes desde `.init`, es un `Metrics` de Powertools, y cada objeto `Metrics` en un proceso comparte un almacén de métricas. En Lambda una invocación posee ese almacén de principio a fin. Un servidor uvicorn maneja solicitudes al mismo tiempo, y tanto las métricas por solicitud de la propia API como cualquiera que agregues van a ese único almacén, por lo que dos solicitudes en vuelo juntas pueden tener sus métricas escritas en un documento y atribuidas a la ruta que se agregó primero. El documento de la otra solicitud puede salir sin dimensión `route` en absoluto, conteniendo solo las métricas agregadas después del primer vaciado, y Powertools registra `PowertoolsUserWarning: Dimension 'route' has already been added` cuando sucede. Bajo tráfico ligero, donde las solicitudes rara vez se superponen, no lo verás.
+
+Así que trata `RequestCount` y `Success` por ruta como aproximados en ECS. Si necesitas una métrica atribuida a exactamente una solicitud, agrégala a un `EphemeralMetrics` que crees en la solicitud y vacíes antes de devolver, que mantiene un almacén propio:
+
+```python
+from aws_lambda_powertools.metrics import EphemeralMetrics, MetricUnit
+
+@app.get("/items/{item_id}")
+def read_item(item_id: int):
+    request_metrics = EphemeralMetrics()
+    request_metrics.add_metric(name="ItemViewed", unit=MetricUnit.Count, value=1)
+    request_metrics.flush_metrics()
+    return {"item_id": item_id}
+```
+
+El trazado de AWS X-Ray no lo hace. `@tracer.capture_method` es un no-op fuera de Lambda, y tampoco hay un demonio X-Ray en la tarea para recibir segmentos. Agrega uno como sidecar en tu servicio de contenedor si necesitas trazas.
+
+El log de acceso de la API Gateway HTTP API registra cada solicitud que llega a la API. El balanceador de carga escribe sus propios logs de acceso en un bucket que el constructo `EcsHttpEndpoint` crea, que es donde puedes ver qué tarea sirvió una solicitud y qué respondió.
+
+### Construcción y Escaneo de Imagen
+
+El generador de contenedor proporciona los objetivos de imagen, nombrados según tu API:
+
+- `<api-name>-container-docker` construye una imagen para la arquitectura de CPU en la opción `architecture`, `linux/arm64` o `linux/amd64`. La opción tiene como valor predeterminado la arquitectura de la máquina en la que ejecutas el generador, y la estableces con `--architecture`. El objetivo ejecuta primero el objetivo de bundle correspondiente, `bundle-arm` o `bundle-x86`, por lo que la imagen contiene tu paquete y sus dependencias construidas para esa arquitectura.
+- `<api-name>-container-trivy` escanea esa imagen en busca de vulnerabilidades.
+
+Consulta <Link path="/guides/py-container">Python Container Service</Link> para ver cómo se construye la imagen, y <Link path="/guides/docker-bundling">Docker Bundling</Link> para ver cómo se publica en tiempo de despliegue.
+
+### Despliegue y Desmontaje
+
+`deploy-sandbox` despliega en <Link path="/guides/typescript-infrastructure#deploying-your-sandbox-stage">modo express de CloudFormation</Link>, que retorna una vez que se aplica la configuración de cada recurso en lugar de esperar a que el servicio ECS alcance un estado estable. Por lo tanto, el objetivo puede finalizar mientras la primera tarea aún se está iniciando, y hasta que una tarea haya pasado dos verificaciones de salud con quince segundos de diferencia, el balanceador de carga no tiene destino al que enviar una solicitud y responde `503`. Espera aproximadamente un minuto después de que el despliegue retorne. Espera un minuto o dos y llama de nuevo. Un `503` que nunca se despeja es un fallo real en lugar de un inicio lento: el circuit breaker de despliegue del servicio lo revierte cuando ninguna tarea se vuelve saludable.
+
+ECS ejecuta una verificación de salud propia dentro del contenedor. Llama a `GET /health` cada 30 segundos, y los fallos en los primeros 30 segundos después de que una tarea se inicia no cuentan en su contra. Hasta que esa verificación reporte por primera vez, `aws ecs describe-tasks` da a la tarea un `healthStatus` de `UNKNOWN`, que se convierte en `HEALTHY` una vez que pasa. `UNKNOWN` significa que la verificación aún no ha reportado en lugar de que falló.
+
+La URL de la API es una salida de stack, pero no bajo el nombre que adivinarías. El `CfnOutput` se crea dentro de tu constructo de API y nada anula su ID lógico, por lo que CDK construye la clave de salida desde la ruta del constructo más un hash de ocho caracteres: una API agregada como `new MyApi(this, 'MyApi', …)` produce `MyApiMyApiUrl` y ese hash, no `MyApiUrl`. `cdk deploy` imprime el valor, y un script debe coincidir con el sufijo en lugar de la clave completa:
+
+```bash
+aws cloudformation describe-stacks --stack-name <stack-name> \
+  --query "Stacks[0].Outputs[?contains(OutputKey, 'Url')].OutputValue" --output text
+```
+
+`destroy-sandbox` deja atrás el grupo de logs de acceso de la HTTP API y la clave KMS administrada por el cliente que lo cifra. Ninguno establece una política de eliminación, por lo que se aplica el valor predeterminado de CDK de `Retain` y CloudFormation los omite en lugar de eliminarlos. Enuméralos antes de desmontar el stack, ya que un stack eliminado ya no reporta sus recursos:
+
+```bash
+aws cloudformation describe-stack-resources --stack-name <stack-name> \
+  --query "StackResources[?contains(LogicalResourceId, 'AccessLogs') && (ResourceType=='AWS::Logs::LogGroup' || ResourceType=='AWS::KMS::Key')].[ResourceType,PhysicalResourceId]" \
+  --output text
+```
+
+Luego elimínalos con `aws logs delete-log-group --log-group-name <log-group-name>` y `aws kms schedule-key-deletion --key-id <key-id> --pending-window-in-days 7`, siendo siete días la ventana más corta que KMS acepta.
+
+### Límites
+
+- **Tiempo de espera de integración.** Las API Gateway HTTP APIs limitan una integración a aproximadamente 30 segundos. Una operación que toma más tiempo que eso falla en el gateway sin importar cuánto tiempo siga trabajando el contenedor.
+- **Sin streaming.** Las operaciones de streaming necesitan la infraestructura `rest-lambda`. Una HTTP API no puede transmitir una respuesta.
+- **Tamaño de payload.** Las solicitudes y respuestas siguen el límite de 10 MB de API Gateway.
+- **Un servicio para cada operación.** `integrationPattern` es `shared`: hay un servicio de contenedor, y cada ruta se enruta a él. La opción siempre se resuelve a `shared` para esta infraestructura, y `isolated` se ignora con una advertencia.
+
+### Costo
+
+El balanceador de carga es el nuevo costo fijo en comparación con Lambda, donde pagas por solicitud y nada cuando está inactivo. Cifras mensuales aproximadas en us-east-1, antes de transferencia de datos:
+
+| Elemento | Aproximadamente |
+| --- | --- |
+| Balanceador de carga interno | $16 más unidades de capacidad del balanceador de carga |
+| Tarea Fargate, 0.25 vCPU / 0.5 GB | $7 por tarea en ARM64, y más en X86_64, que Fargate factura a una tasa más alta por vCPU y por GB |
+| NAT gateway, si tu VPC tiene uno | $33 |
+| Enlace VPC | sin cargo por hora |
+| Almacenamiento S3 para los logs de acceso del balanceador de carga | centavos por GB al mes |
+
+Así que un servicio de una tarea cuesta aproximadamente $23 al mes en ARM64 antes de cualquier tráfico, y más si la VPC que pasas tiene un NAT gateway. Los logs de acceso crecen con el tráfico: agrega una regla de ciclo de vida a `endpoint.accessLogsBucket` para que expiren. Consulta las páginas de precios de [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) y [AWS Fargate](https://aws.amazon.com/fargate/pricing/) para precios actuales en tu Región.
+</OptionFilter>
 
 ## Invocar tu FastAPI
 

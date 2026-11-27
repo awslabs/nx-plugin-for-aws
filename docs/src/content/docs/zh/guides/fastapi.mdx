@@ -21,7 +21,15 @@ import { PY_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/vers
 
 [FastAPI](https://fastapi.tiangolo.com/) 是一个用于在 Python 中构建 API 的框架。
 
-FastAPI 生成器创建一个新的 FastAPI，并配置 AWS CDK 或 Terraform 基础设施。生成的后端使用 AWS Lambda 进行无服务器部署，通过 AWS API Gateway API 公开。它设置了 [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) 以实现可观测性，包括日志记录、AWS X-Ray 追踪和 Cloudwatch 指标。
+FastAPI 生成器创建一个新的 FastAPI，并配置 AWS CDK 或 Terraform 基础设施。生成的后端通过 AWS API Gateway API 公开。它设置了 [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) 以实现可观测性，包括结构化日志记录和 CloudWatch 指标。
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Lambda hosting">
+后端使用 AWS Lambda 进行无服务器部署，并且还设置了 AWS X-Ray 追踪。
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="ECS hosting">
+您的 API 作为长期运行的 uvicorn 服务器在 Amazon ECS 上的容器中运行，位于 API Gateway HTTP API 后面，而不是在 Lambda 函数中。请参阅<a href="#running-on-amazon-ecs">在 Amazon ECS 上运行</a>了解这会改变什么，包括为什么 X-Ray 追踪在那里不产生追踪。
+</OptionFilter>
 
 ## 用法
 
@@ -43,7 +51,21 @@ FastAPI 生成器创建一个新的 FastAPI，并配置 AWS CDK 或 Terraform �
 
 :::tip[集成模式]
 `integrationPattern` 选项默认为 `isolated`，这会为每个 FastAPI 操作创建一个 Lambda。如果您更喜欢为整个 API 使用单个共享的 Lambda 处理程序，并可选择按操作覆盖，请选择 `shared`。
+
+当 `infra` 设置为 `http-ecs` 时，该选项始终为 `shared`，因为一个容器服务响应每个操作。
 :::
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="ECS hosting is experimental">
+:::caution[实验性]
+`http-ecs` 是实验性的。其生成的输出可能会在版本之间发生变化，而不会提供迁移来迁移现有工作区，因此在升级时请自行协调这些变化。
+
+它需要 CDK IaC 提供程序：尚未实现 Terraform 支持。如果工作区解析为 Terraform，生成器会失败并显示一条消息说明修复方法。
+
+`integrationPattern` 在这里始终为 `shared`。在 `http-ecs` 旁边传递 `--integrationPattern=isolated` 不会失败：生成器会警告该选项被忽略并使用 `shared`。以交互方式运行生成器时，它会在 `infra` 之前询问 `integrationPattern`，并预选 `isolated`，因此如果您保持预选不变然后选择 `http-ecs`，您会看到该警告。在此页面的命令构建器中，选择 `http-ecs` 会禁用 `isolated` 并在已选择时清除它，因此它编写的命令永远不会携带该标志。
+
+`architecture` 选项设置容器是在 `ARM64` 还是 `X86_64` 上运行，其 bundle 中的 Python wheels 会跟随它。省略它以使用运行生成器的机器的架构。请参阅容器指南中的 <Link path="/guides/py-container#cpu-architecture">CPU 架构</Link>。
+:::
+</OptionFilter>
 
 ## 生成器输出
 
@@ -62,6 +84,20 @@ FastAPI 生成器创建一个新的 FastAPI，并配置 AWS CDK 或 Terraform �
   - generate_open_api.py 从 FastAPI 应用生成 OpenAPI 架构的脚本
 
 </FileTree>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="Files that differ when the API runs on ECS">
+当 `infra` 设置为 `http-ecs` 时，API 作为自己的 HTTP 服务器运行，而不是在 Lambda Web Adapter 后面，因此不会生成 `run.sh`。取而代之的是，您会在模块内获得一个容器文件夹，以您的 API 命名：
+
+<FileTree>
+- \<module_name>
+  - \<api_name>_container
+    - main.py 入口点：添加 `GET /health`，写出 API 收集的指标，并在 `HOST` 和 `PORT` 上启动 uvicorn。bundle、镜像和 `serve` 目标都从此文件开始
+    - Dockerfile 容器镜像定义
+    - .dockerignore 镜像构建上下文中排除的文件
+</FileTree>
+
+您的 `init.py`、`main.py` 以及您添加到它们的操作对于每个 `infra` 值都是相同的。
+</OptionFilter>
 
 ### 基础设施
 
@@ -101,8 +137,18 @@ def create_item(item: Item) -> Item:
 2. 错误处理中间件
 3. 请求/响应关联
 4. 指标收集
-5. 通过 [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) 使用 uvicorn 进行 AWS Lambda 部署
-6. 类型安全的流式传输（仅限 REST API）
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Streaming, which needs a REST API">
+类型安全的流式传输也已设置，仅适用于 `rest-lambda` 基础设施。
+</OptionFilter>
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="How the Lambda variants serve the app">
+应用程序在 Lambda 函数中由运行 uvicorn 的 [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) 提供服务。
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="How the ECS variant serves the app">
+应用程序由容器中的 uvicorn 提供服务，没有 Lambda Web Adapter。请参阅<a href="#running-on-amazon-ecs">在 Amazon ECS 上运行</a>。
+</OptionFilter>
 
 ### 使用 AWS Lambda Powertools 实现可观测性
 
@@ -139,6 +185,12 @@ def read_item(item_id: int):
         # Your logic here
         return {"item_id": item_id}
 ```
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="X-Ray produces no traces on ECS">
+:::caution[ECS 上无追踪]
+上面的装饰器和子段在容器中运行时不会出错，但不会产生追踪。Powertools 在不在 Lambda 中运行时会关闭其追踪器。请参阅<a href="#observability">可观测性</a>了解您能获得什么，以及如果需要追踪应该添加什么。
+:::
+</OptionFilter>
 
 #### 指标
 
@@ -187,9 +239,17 @@ def read_item(item_id: int):
 
 ### 访问调用用户
 
+<OptionFilter when={{ infra: 'http-ecs' }} description="Identity on ECS — the authorizer context does not arrive">
+在 ECS 上没有 Lambda Web Adapter 和 API Gateway 请求上下文标头：API Gateway 不会将授权器的声明转发到私有负载均衡器集成。授权器仍然决定请求是否到达容器，但您的处理程序无法从请求中读取调用者，如下所述。
+
+要在操作中读取调用者的身份，请将授权器的上下文映射到 API 构造中的请求标头，并从 FastAPI `Request` 中读取该标头。
+</OptionFilter>
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Identity on the Lambda variants">
 当您的 API 受身份验证保护时，您的路由处理程序通常需要知道谁在调用。生成的 FastAPI 通过 [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) 在 AWS Lambda 内运行，它将 API Gateway 请求上下文作为 JSON 转发到 `x-amzn-request-context` 标头。您可以从 FastAPI `Request` 中读取它以提取调用者的身份。
 
 例如，让我们添加一个 `/me` 端点，返回有关调用用户的详细信息。我们将提取实现为 [FastAPI 依赖项](https://fastapi.tiangolo.com/tutorial/dependencies/)，以便可以在路由之间重用。请求上下文的形状——因此您如何提取身份——取决于您选择的 `auth` 方法以及您是否部署了 REST 或 HTTP API。
+</OptionFilter>
 
 <OptionFilter when={{ auth: 'iam' }} description="IAM 身份验证 API 的身份提取">
 对于 `IAM` 身份验证，我们使用从 API Gateway 请求上下文中提取的 sub 在 Cognito 中查找调用者，这需要 `boto3`。将其添加到您的 API 项目：
@@ -444,6 +504,7 @@ FastAPI 生成器根据您选择的 `iac` 创建 CDK 或 Terraform 基础设施�
 
 <Infrastructure>
 <Fragment slot="cdk">
+<OptionFilter not when={{ infra: 'http-ecs' }} description="CDK usage for the Lambda variants">
 用于部署 API 的 CDK 构造在 `common/constructs` 文件夹中。您可以在 CDK 应用程序中使用它：
 
 ```ts {6-8}
@@ -467,6 +528,47 @@ export class ExampleStack extends Stack {
 4. CloudWatch 日志组
 5. X-Ray 追踪配置
 6. CloudWatch 指标命名空间
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="CDK usage when the API runs on ECS — pass the VPC">
+`defaultIntegrations` 接受您的服务运行所在的 VPC，并在其中构建所有内容：ECS 服务、其前面的内部负载均衡器以及 API Gateway 通过其到达该负载均衡器的 VPC 链接。该构造从不创建 VPC，因此您在堆栈中创建或导入一个。
+
+```ts {10,13-15}
+import { MyApi } from '@my-scope/common-constructs';
+import { Stack } from 'aws-cdk-lib';
+import { Vpc } from 'aws-cdk-lib/aws-ec2';
+import { Construct } from 'constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    const vpc = new Vpc(this, 'Vpc', { natGateways: 1 });
+
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this, { vpc }).build(),
+    });
+  }
+}
+```
+
+要使用现有 VPC，请使用 `Vpc.fromLookup(this, 'Vpc', { vpcId: '<vpc-id>' })` 查找它并将其作为 `vpc` 传递。
+
+传递 `service` 以更改容器服务本身——其 `cpu`、`memoryLimitMiB`、`desiredCount`、`environment`，或 `grantTaskRole` 以授予任务角色权限：
+
+```ts
+MyApi.defaultIntegrations(this, {
+  vpc,
+  service: {
+    cpu: 512,
+    memoryLimitMiB: 1024,
+    grantTaskRole: (taskRole) => myTable.grantReadWriteData(taskRole),
+  },
+}).build();
+```
+
+这会设置一个基于您选择的 `auth` 方法进行身份验证的 AWS API Gateway HTTP API、运行您的容器的 Amazon ECS 服务、其前面的内部负载均衡器以及 API Gateway 通过其到达该负载均衡器的 VPC 链接。
+</OptionFilter>
 
 <Snippet name="api/cors-configuration-cdk-note" />
 
@@ -502,6 +604,12 @@ export class ExampleStack extends Stack {
 </OptionFilter>
 </Fragment>
 <Fragment slot="terraform">
+<OptionFilter when={{ infra: 'http-ecs' }} description="Terraform is not implemented for ECS hosting">
+:::caution[仅限 CDK]
+`http-ecs` 未为 Terraform 实现。生成器会失败并显示一条消息说明。为 Terraform 工作区选择 `rest-lambda` 或 `http-lambda`。
+:::
+</OptionFilter>
+
 用于部署 API 的 Terraform 模块在 `common/terraform` 文件夹中。您可以在 Terraform 配置中使用它。
 
 API 模块将其 Lambda 部署 zip 暂存在共享的 S3 资产存储桶中——有关详细信息，请参阅 <Link path="/guides/terraform-project">Terraform 基础设施指南</Link>。每次部署实例化一次 `core/asset-bucket` 模块，并通过 `asset_bucket_name` 输入将其 `bucket_name` 输出传递到每个 API / Lambda 模块：
@@ -730,15 +838,129 @@ resource "aws_iam_role_policy_attachment" "api_invoke_access_existing" {
 
 <NxCommands commands={['serve <project-name>']} />
 
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Local server for the Lambda variants">
 这会启动一个本地 FastAPI 开发服务器，具有：
 
 - 代码更改时自动重新加载
 - `/docs` 或 `/redoc` 上的交互式 API 文档
 - `/openapi.json` 上的 OpenAPI 架构
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="Local server when the API runs on ECS">
+这会启动容器的入口点，即镜像运行的同一文件，具有：
+
+- `GET /health`，像为负载均衡器响应一样响应
+- `/docs` 或 `/redoc` 上的交互式 API 文档
+- `/openapi.json` 上的 OpenAPI 架构
+
+服务器绑定 `127.0.0.1`，因此它仅在您自己的机器上响应。它不会重新加载任何内容：重新启动它以获取代码更改。要从另一台机器、VM 或容器访问它，请在 `serve` 目标上设置 `HOST=0.0.0.0`——这使得 API 可以被任何可以访问您的机器的东西访问，且未经身份验证。
+</OptionFilter>
 
 :::note[项目名称]
 Python 项目名称使用下划线，因此使用 `--name=MyApi` 生成的 API 被称为 `my_api`（或其完全限定名称 `<scope>.my_api`）。服务器监听的端口是按项目分配的——从项目的 `project.json` 中的 `serve` 目标读取它。
 :::
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="How ECS hosting works, what it costs and what it limits">
+## 在 Amazon ECS 上运行
+
+当 `infra` 设置为 `http-ecs` 时，您的 API 作为长期运行的 uvicorn 服务器在容器中运行，而不是在 Lambda Web Adapter 后面的 Lambda 函数中。请求采用以下路径：
+
+1. 调用者对 API Gateway HTTP API 签名请求，这是唯一的公共入口点。每个路由都带有您选择的 `auth` 的授权器，因此未经身份验证的请求会在边缘被拒绝。
+2. API Gateway 通过 VPC 链接转发请求，这是它进入您的 VPC 的私有路径。
+3. VPC 链接到达内部负载均衡器。负载均衡器没有公共地址，其唯一的入站规则允许 VPC 链接的安全组在侦听器端口上。
+4. 负载均衡器将请求转发到任务。任务的唯一入站规则允许负载均衡器的安全组在容器端口上，因此 VPC 中的其他任何东西都无法打开与它们的连接。
+
+任务在私有子网中运行，永远不会获得公共 IP 地址。此路径中没有任何内容允许地址范围入站。
+
+默认情况下，服务、负载均衡器和 VPC 链接位于 VPC 的 `PRIVATE_WITH_EGRESS` 子网中，这些子网通过 NAT 网关到达 AWS。将 `vpcSubnets: { subnetType: SubnetType.PRIVATE_ISOLATED }` 传递给 `defaultIntegrations` 会删除 NAT 网关及其每小时费用，但隔离的子网没有出站路由，因此 VPC 需要四个 VPC 端点才能启动任务：用于拉取镜像的 `ecr.api` 和 `ecr.dkr` 的接口端点，一个 S3 网关端点（因为镜像层是 S3 对象），以及一个用于 `logs` 的接口端点，以便 `awslogs` 驱动程序可以写入。没有它们，任务无法拉取其镜像，ECS 会在断路器上回滚部署而不说明原因。
+
+VPC 链接、负载均衡器、其侦听器、目标组以及负载均衡器将其访问日志写入的存储桶由一个构造创建，即 `common/constructs` 中的 `core/api/ecs-http-endpoint.ts`，每个托管在 ECS 上的 API 都共享它。您的 API 自己的构造命名其容器服务并将每个操作路由到该端点。
+
+### 容器中运行的内容
+
+`<module_name>/<api_name>_container/main.py` 从您的 `main.py` 导入应用程序，因此您编写的每个操作都像在 Lambda 上一样提供服务。它添加了两个自己的东西：
+
+- `GET /health`，负载均衡器的目标组和容器健康检查调用它。它被声明为 `include_in_schema=False`，因此它不会出现在您的 OpenAPI 规范中，因此也不会出现在 API Gateway 路由和生成的客户端中。它也被排除在请求指标之外，因此目标组每 15 秒的调用不会计为 API 请求。
+- 一个中间件，写出 API 自己的中间件收集的指标。在 Lambda 上，处理程序在每次调用结束时执行此操作；此服务器跨请求存在，因此它自己刷新它们。
+
+API Gateway 路由仍然来自您的 OpenAPI 规范，因此一旦 `nx build` 重新生成规范，您添加的操作就会被部署。
+
+### 可观测性
+
+日志和指标的工作方式与在 Lambda 上相同：容器写入自己的 CloudWatch 日志组，指标以嵌入式指标格式写入，供 CloudWatch Logs 提取。
+
+关于指标，这里有一点不同，在您阅读仪表板或添加自己的指标之前值得了解。`metrics`，即上面的<a href="#metrics">指标</a>部分告诉您从 `.init` 导入的对象，是一个 Powertools `Metrics`，进程中的每个 `Metrics` 对象共享一个指标存储。在 Lambda 上，一次调用从头到尾拥有该存储。uvicorn 服务器同时处理请求，API 自己的每个请求指标和您添加的任何指标都进入该一个存储，因此同时进行的两个请求可以将它们的指标写入一个文档中，并归因于首先添加的路由。另一个请求的文档可能根本没有 `route` 维度，只保存第一次刷新后添加的指标，当发生这种情况时，Powertools 会记录 `PowertoolsUserWarning: Dimension 'route' has already been added`。在轻流量下，请求很少重叠的地方，您不会看到它。
+
+因此，在 ECS 上将每个路由的 `RequestCount` 和 `Success` 视为近似值。如果您需要将指标精确归因于一个请求，请将其添加到您在请求中创建的 `EphemeralMetrics` 并在返回之前刷新，它保留自己的存储：
+
+```python
+from aws_lambda_powertools.metrics import EphemeralMetrics, MetricUnit
+
+@app.get("/items/{item_id}")
+def read_item(item_id: int):
+    request_metrics = EphemeralMetrics()
+    request_metrics.add_metric(name="ItemViewed", unit=MetricUnit.Count, value=1)
+    request_metrics.flush_metrics()
+    return {"item_id": item_id}
+```
+
+AWS X-Ray 追踪则不然。`@tracer.capture_method` 在 Lambda 之外是无操作的，任务中也没有 X-Ray 守护进程来接收段。如果您需要追踪，请在容器服务中添加一个作为 sidecar。
+
+API Gateway HTTP API 的访问日志记录到达 API 的每个请求。负载均衡器将其自己的访问日志写入 `EcsHttpEndpoint` 构造创建的存储桶，您可以在其中查看哪个任务为请求提供服务以及它的响应。
+
+### 镜像构建和扫描
+
+容器生成器提供镜像目标，以您的 API 命名：
+
+- `<api-name>-container-docker` 为 `architecture` 选项中的 CPU 架构构建镜像，`linux/arm64` 或 `linux/amd64`。该选项默认为运行生成器的机器的架构，您可以使用 `--architecture` 设置它。该目标首先运行匹配的 bundle 目标，`bundle-arm` 或 `bundle-x86`，因此镜像包含为该架构构建的包及其依赖项。
+- `<api-name>-container-trivy` 扫描该镜像的漏洞。
+
+请参阅 <Link path="/guides/py-container">Python Container Service</Link> 了解镜像的构建方式，以及 <Link path="/guides/docker-bundling">Docker Bundling</Link> 了解它在部署时的发布方式。
+
+### 部署和拆除
+
+`deploy-sandbox` 在 <Link path="/guides/typescript-infrastructure#deploying-your-sandbox-stage">CloudFormation 快速模式</Link>下部署，一旦应用每个资源的配置就返回，而不是等待 ECS 服务达到稳定状态。因此，目标可以在第一个任务仍在启动时完成，在任务通过两次相隔十五秒的健康检查之前，负载均衡器没有目标可以发送请求，并回答 `503`。部署返回后预计大约一分钟。等待一两分钟后再次调用。永远不会清除的 `503` 是真正的失败而不是缓慢启动：当没有任务变得健康时，服务的部署断路器会回滚它。
+
+ECS 在容器内运行自己的健康检查。它每 30 秒调用一次 `GET /health`，任务启动后前 30 秒内的失败不计入其中。在该检查首次报告之前，`aws ecs describe-tasks` 给任务一个 `UNKNOWN` 的 `healthStatus`，一旦通过就变为 `HEALTHY`。`UNKNOWN` 意味着检查尚未报告，而不是它失败了。
+
+API 的 URL 是堆栈输出，但不在您猜测的名称下。`CfnOutput` 在您的 API 构造内创建，没有任何东西覆盖其逻辑 ID，因此 CDK 从构造的路径加上八个字符的哈希构建输出键：添加为 `new MyApi(this, 'MyApi', …)` 的 API 输出 `MyApiMyApiUrl` 和该哈希，而不是 `MyApiUrl`。`cdk deploy` 打印该值，脚本应该匹配后缀而不是整个键：
+
+```bash
+aws cloudformation describe-stacks --stack-name <stack-name> \
+  --query "Stacks[0].Outputs[?contains(OutputKey, 'Url')].OutputValue" --output text
+```
+
+`destroy-sandbox` 会留下 HTTP API 的访问日志组和加密它的客户管理的 KMS 密钥。两者都没有设置删除策略，因此 CDK 的默认 `Retain` 适用，CloudFormation 跳过它们而不是删除它们。在拆除堆栈之前列出它们，因为已删除的堆栈不再报告其资源：
+
+```bash
+aws cloudformation describe-stack-resources --stack-name <stack-name> \
+  --query "StackResources[?contains(LogicalResourceId, 'AccessLogs') && (ResourceType=='AWS::Logs::LogGroup' || ResourceType=='AWS::KMS::Key')].[ResourceType,PhysicalResourceId]" \
+  --output text
+```
+
+然后使用 `aws logs delete-log-group --log-group-name <log-group-name>` 和 `aws kms schedule-key-deletion --key-id <key-id> --pending-window-in-days 7` 删除它们，七天是 KMS 接受的最短窗口。
+
+### 限制
+
+- **集成超时。** API Gateway HTTP API 将集成限制在大约 30 秒。无论容器工作多长时间，超过该时间的操作都会在网关处失败。
+- **无流式传输。** 流式操作需要 `rest-lambda` 基础设施。HTTP API 无法流式传输响应。
+- **有效负载大小。** 请求和响应遵循 API Gateway 的 10 MB 限制。
+- **每个操作一个服务。** `integrationPattern` 是 `shared`：有一个容器服务，每个路由都路由到它。该选项始终解析为此基础设施的 `shared`，`isolated` 会被忽略并发出警告。
+
+### 成本
+
+与 Lambda 相比，负载均衡器是新的固定成本，在 Lambda 中您按请求付费，空闲时不付费。us-east-1 中的大致月度数字，数据传输之前：
+
+| 项目 | 大约 |
+| --- | --- |
+| 内部负载均衡器 | $16 加上负载均衡器容量单位 |
+| Fargate 任务，0.25 vCPU / 0.5 GB | 在 ARM64 上每个任务 $7，在 X86_64 上更多，Fargate 对每个 vCPU 和每 GB 的收费率更高 |
+| NAT 网关，如果您的 VPC 有一个 | $33 |
+| VPC 链接 | 无每小时费用 |
+| 负载均衡器访问日志的 S3 存储 | 每月每 GB 几美分 |
+
+因此，一个单任务服务在 ARM64 上任何流量之前每月花费大约 $23，如果您传入的 VPC 有 NAT 网关，则更多。访问日志随流量增长：向 `endpoint.accessLogsBucket` 添加生命周期规则以使其过期。查看 [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) 和 [AWS Fargate](https://aws.amazon.com/fargate/pricing/) 定价页面以获取您所在区域的当前价格。
+</OptionFilter>
 
 ## 调用您的 FastAPI
 

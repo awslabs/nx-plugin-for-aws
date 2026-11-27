@@ -21,7 +21,15 @@ import { PY_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/vers
 
 [FastAPI](https://fastapi.tiangolo.com/)は、PythonでAPIを構築するためのフレームワークです。
 
-FastAPIジェネレーターは、AWS CDKまたはTerraformインフラストラクチャのセットアップを含む新しいFastAPIを作成します。生成されたバックエンドは、サーバーレスデプロイメントにAWS Lambdaを使用し、AWS API Gateway APIを介して公開されます。可観測性のために[AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/)をセットアップし、ロギング、AWS X-Rayトレーシング、Cloudwatch Metricsを含みます。
+FastAPIジェネレーターは、AWS CDKまたはTerraformインフラストラクチャのセットアップを含む新しいFastAPIを作成します。生成されたバックエンドは、AWS API Gateway APIを介して公開されます。可観測性のために[AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/)をセットアップし、構造化ロギングとCloudWatchメトリクスを含みます。
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Lambdaホスティング">
+バックエンドはサーバーレスデプロイメントにAWS Lambdaを使用し、AWS X-Rayトレーシングもセットアップされます。
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="ECSホスティング">
+APIは、Lambda関数ではなく、Amazon ECS上のコンテナ内で長時間実行されるuvicornサーバーとして、API Gateway HTTP APIの背後で実行されます。X-Rayトレーシングがそこでトレースを生成しない理由を含め、何が変わるかについては<a href="#running-on-amazon-ecs">Running on Amazon ECS</a>を参照してください。
+</OptionFilter>
 
 ## 使用方法
 
@@ -43,7 +51,21 @@ FastAPIジェネレーターは、AWS CDKまたはTerraformインフラストラ
 
 :::tip[統合パターン]
 `integrationPattern`オプションはデフォルトで`isolated`に設定されており、FastAPI操作ごとに1つのLambdaを作成します。API全体で単一の共有Lambdaハンドラーを使用し、オプションで操作ごとのオーバーライドを行いたい場合は、`shared`を選択してください。
+
+`infra`が`http-ecs`に設定されている場合、オプションは常に`shared`です。1つのコンテナサービスがすべての操作に応答するためです。
 :::
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="ECSホスティングは実験的です">
+:::caution[実験的]
+`http-ecs`は実験的です。生成される出力は、既存のワークスペースを引き継ぐマイグレーションなしにリリース間で変更される可能性があるため、アップグレード時にこれらの変更を自分で調整することを期待してください。
+
+CDK IaCプロバイダーが必要です: Terraformサポートはまだ実装されていません。ワークスペースがTerraformに解決される場合、ジェネレーターは修正方法を示すメッセージで失敗します。
+
+`integrationPattern`はここでは常に`shared`です。`http-ecs`と一緒に`--integrationPattern=isolated`を渡しても失敗しません: ジェネレーターはオプションが無視されることを警告し、`shared`を使用します。ジェネレーターを対話的に実行すると、`infra`の前に`integrationPattern`を尋ね、`isolated`が事前選択されているため、事前選択をそのままにして`http-ecs`を選択すると、その警告が表示されます。このページのコマンドビルダーでは、`http-ecs`を選択すると`isolated`が無効になり、選択されていた場合はクリアされるため、書き込まれるコマンドにフラグが含まれることはありません。
+
+`architecture`オプションは、コンテナが`ARM64`または`X86_64`のどちらで実行されるかを設定し、バンドル内のPythonホイールもそれに従います。ジェネレーターを実行するマシンのアーキテクチャを使用するには、省略してください。コンテナガイドの<Link path="/guides/py-container#cpu-architecture">CPU Architecture</Link>を参照してください。
+:::
+</OptionFilter>
 
 ## ジェネレーターの出力
 
@@ -62,6 +84,20 @@ FastAPIジェネレーターは、AWS CDKまたはTerraformインフラストラ
   - generate_open_api.py FastAPIアプリからOpenAPIスキーマを生成するスクリプト
 
 </FileTree>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="APIがECS上で実行される場合に異なるファイル">
+`infra`が`http-ecs`に設定されている場合、APIはLambda Web Adapterの背後ではなく、独自のHTTPサーバーとして実行されるため、`run.sh`は生成されません。その代わりに、APIにちなんで名付けられたコンテナフォルダーがモジュール内に作成されます:
+
+<FileTree>
+- \<module_name>
+  - \<api_name>_container
+    - main.py エントリーポイント: `GET /health`を追加し、APIが収集するメトリクスを書き出し、`HOST`と`PORT`でuvicornを起動します。バンドル、イメージ、`serve`ターゲットはすべてこのファイルから開始されます
+    - Dockerfile コンテナイメージ定義
+    - .dockerignore イメージビルドコンテキストから除外されるファイル
+</FileTree>
+
+`init.py`、`main.py`、およびそれらに追加する操作は、すべての`infra`値で同じです。
+</OptionFilter>
 
 ### インフラストラクチャ
 
@@ -101,8 +137,18 @@ def create_item(item: Item) -> Item:
 2. エラーハンドリングミドルウェア
 3. リクエスト/レスポンスの相関
 4. メトリクス収集
-5. [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter)とuvicornを介したAWS Lambdaデプロイメント
-6. 型安全なストリーミング(REST APIのみ)
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="ストリーミング、REST APIが必要">
+型安全なストリーミングも、`rest-lambda`インフラストラクチャのみでセットアップされます。
+</OptionFilter>
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Lambdaバリアントがアプリを提供する方法">
+アプリは、uvicornを実行する[Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter)によってLambda関数内で提供されます。
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="ECSバリアントがアプリを提供する方法">
+アプリは、Lambda Web Adapterなしで、コンテナ内のuvicornによって提供されます。<a href="#running-on-amazon-ecs">Running on Amazon ECS</a>を参照してください。
+</OptionFilter>
 
 ### AWS Lambda Powertoolsによる可観測性
 
@@ -139,6 +185,12 @@ def read_item(item_id: int):
         # Your logic here
         return {"item_id": item_id}
 ```
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="X-RayはECS上でトレースを生成しません">
+:::caution[ECS上ではトレースなし]
+上記のデコレーターとサブセグメントはコンテナ内でエラーなく実行されますが、トレースを生成しません。PowertoolsはLambda内で実行されていない場合、トレーサーをオフにします。取得できるものと、トレースが必要な場合に追加するものについては、<a href="#observability">Observability</a>を参照してください。
+:::
+</OptionFilter>
 
 #### メトリクス
 
@@ -187,9 +239,17 @@ def read_item(item_id: int):
 
 ### 呼び出し元ユーザーへのアクセス
 
+<OptionFilter when={{ infra: 'http-ecs' }} description="ECS上のID — オーソライザーコンテキストは到着しません">
+ECS上では、Lambda Web AdapterもAPI Gatewayリクエストコンテキストヘッダーもありません: API Gatewayは、プライベートロードバランサー統合にオーソライザーのクレームを転送しません。オーソライザーは、リクエストがコンテナに到達するかどうかを決定しますが、ハンドラーは以下に記載されているようにリクエストから呼び出し元を読み取ることはできません。
+
+操作で呼び出し元のIDを読み取るには、APIコンストラクト内でオーソライザーのコンテキストをリクエストヘッダーにマッピングし、FastAPIの`Request`からそのヘッダーを読み取ります。
+</OptionFilter>
+
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Lambdaバリアント上のID">
 APIが認証によって保護されている場合、ルートハンドラーは誰が呼び出しているかを知る必要があることがよくあります。生成されたFastAPIは、[Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter)を介してAWS Lambda内で実行され、API Gatewayリクエストコンテキストを`x-amzn-request-context`ヘッダーにJSON形式で転送します。FastAPIの`Request`から読み取って、呼び出し元のIDを抽出できます。
 
 例として、呼び出し元ユーザーの詳細を返す`/me`エンドポイントを追加しましょう。抽出を[FastAPI依存関係](https://fastapi.tiangolo.com/tutorial/dependencies/)として実装し、ルート間で再利用できるようにします。リクエストコンテキストの形状、したがってIDを抽出する方法は、選択した`auth`メソッドとREST APIまたはHTTP APIのどちらをデプロイしたかの両方に依存します。
+</OptionFilter>
 
 <OptionFilter when={{ auth: 'iam' }} description="IAM認証APIのID抽出">
 `IAM`認証の場合、API Gatewayリクエストコンテキストから抽出されたsubを使用してCognitoで呼び出し元を検索します。これには`boto3`が必要です。APIプロジェクトに追加します:
@@ -444,6 +504,7 @@ FastAPIジェネレーターは、選択した`iac`に基づいてCDKまたはTe
 
 <Infrastructure>
 <Fragment slot="cdk">
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Lambdaバリアント用のCDK使用">
 `common/constructs`フォルダーにAPIをデプロイするためのCDKコンストラクトがあります。これをCDKアプリケーションで使用できます:
 
 ```ts {6-8}
@@ -467,6 +528,47 @@ export class ExampleStack extends Stack {
 4. CloudWatchロググループ
 5. X-Rayトレーシング設定
 6. CloudWatchメトリクス名前空間
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="APIがECS上で実行される場合のCDK使用 — VPCを渡す">
+`defaultIntegrations`は、サービスが実行されるVPCを受け取り、その中にすべてを構築します: ECSサービス、その前の内部ロードバランサー、およびAPI Gatewayがそのロードバランサーに到達するVPCリンク。コンストラクトはVPCを作成しないため、スタック内でVPCを作成またはインポートします。
+
+```ts {10,13-15}
+import { MyApi } from '@my-scope/common-constructs';
+import { Stack } from 'aws-cdk-lib';
+import { Vpc } from 'aws-cdk-lib/aws-ec2';
+import { Construct } from 'constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    const vpc = new Vpc(this, 'Vpc', { natGateways: 1 });
+
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this, { vpc }).build(),
+    });
+  }
+}
+```
+
+既存のVPCを使用するには、`Vpc.fromLookup(this, 'Vpc', { vpcId: '<vpc-id>' })`で検索し、`vpc`として渡します。
+
+コンテナサービス自体を変更するには`service`を渡します — その`cpu`、`memoryLimitMiB`、`desiredCount`、`environment`、またはタスクロールに権限を与えるための`grantTaskRole`:
+
+```ts
+MyApi.defaultIntegrations(this, {
+  vpc,
+  service: {
+    cpu: 512,
+    memoryLimitMiB: 1024,
+    grantTaskRole: (taskRole) => myTable.grantReadWriteData(taskRole),
+  },
+}).build();
+```
+
+これにより、選択した`auth`メソッドに基づく認証を持つAWS API Gateway HTTP API、コンテナを実行するAmazon ECSサービス、その前の内部ロードバランサー、およびAPI Gatewayがそのロードバランサーに到達するVPCリンクがセットアップされます。
+</OptionFilter>
 
 <Snippet name="api/cors-configuration-cdk-note" />
 
@@ -502,6 +604,12 @@ Authorizerの結果は5分間キャッシュされ、`Authorization`ヘッダー
 </OptionFilter>
 </Fragment>
 <Fragment slot="terraform">
+<OptionFilter when={{ infra: 'http-ecs' }} description="TerraformはECSホスティング用に実装されていません">
+:::caution[CDKのみ]
+`http-ecs`はTerraform用に実装されていません。ジェネレーターはそう言うメッセージで失敗します。Terraformワークスペースには`rest-lambda`または`http-lambda`を選択してください。
+:::
+</OptionFilter>
+
 APIをデプロイするためのTerraformモジュールは、`common/terraform`フォルダーにあります。これをTerraform設定で使用できます。
 
 APIモジュールは、Lambda デプロイメントzipを共有S3アセットバケットにステージングします — 詳細については<Link path="/guides/terraform-project">Terraformインフラストラクチャガイド</Link>を参照してください。デプロイメントごとに`core/asset-bucket`モジュールを1回インスタンス化し、その`bucket_name`出力を`asset_bucket_name`入力を介してすべてのAPI / Lambdaモジュールに渡します:
@@ -730,15 +838,129 @@ IAMポリシーに使用できるAPIモジュールの主要な出力は次の�
 
 <NxCommands commands={['serve <project-name>']} />
 
+<OptionFilter not when={{ infra: 'http-ecs' }} description="Lambdaバリアント用のローカルサーバー">
 これにより、以下を備えたローカルFastAPI開発サーバーが起動します:
 
 - コード変更時の自動リロード
 - `/docs`または`/redoc`でのインタラクティブなAPIドキュメント
 - `/openapi.json`でのOpenAPIスキーマ
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="APIがECS上で実行される場合のローカルサーバー">
+これにより、イメージが実行するのと同じファイルである、コンテナのエントリーポイントが起動します:
+
+- `GET /health`、ロードバランサーに対して応答するのと同じように応答
+- `/docs`または`/redoc`でのインタラクティブなAPIドキュメント
+- `/openapi.json`でのOpenAPIスキーマ
+
+サーバーは`127.0.0.1`にバインドされるため、自分のマシン上でのみ応答します。何もリロードしません: コード変更を反映するには再起動してください。別のマシン、VM、またはコンテナから到達するには、`serve`ターゲットで`HOST=0.0.0.0`を設定します — これにより、マシンに到達できるものすべてが認証なしでAPIに到達できるようになります。
+</OptionFilter>
 
 :::note[プロジェクト名]
 Pythonプロジェクト名はアンダースコアを使用するため、`--name=MyApi`で生成されたAPIは`my_api`(または完全修飾名`<scope>.my_api`)としてアドレス指定されます。サーバーがリッスンするポートはプロジェクトごとに割り当てられます — プロジェクトの`project.json`の`serve`ターゲットから読み取ってください。
 :::
+
+<OptionFilter when={{ infra: 'http-ecs' }} description="ECSホスティングの仕組み、コスト、制限">
+## Running on Amazon ECS
+
+`infra`が`http-ecs`に設定されている場合、APIは、Lambda Web Adapterの背後のLambda関数ではなく、コンテナ内で長時間実行されるuvicornサーバーとして実行されます。リクエストは次のパスを取ります:
+
+1. 呼び出し元は、唯一のパブリックエントリーポイントであるAPI Gateway HTTP APIへのリクエストに署名します。すべてのルートは選択した`auth`のオーソライザーを持っているため、認証されていないリクエストはエッジで拒否されます。
+2. API Gatewayは、VPCへのプライベートパスであるVPCリンクを介してリクエストを転送します。
+3. VPCリンクは内部ロードバランサーに到達します。ロードバランサーにはパブリックアドレスがなく、唯一のインバウンドルールはリスナーポートでVPCリンクのセキュリティグループを許可します。
+4. ロードバランサーはリクエストをタスクに転送します。タスクの唯一のインバウンドルールは、コンテナポートでロードバランサーのセキュリティグループを許可するため、VPC内の他のものはタスクへの接続を開くことができません。
+
+タスクはプライベートサブネットで実行され、パブリックIPアドレスを取得することはありません。このパスのどこにも、アドレス範囲のインバウンドを許可するものはありません。
+
+デフォルトでは、サービス、ロードバランサー、VPCリンクは、VPCの`PRIVATE_WITH_EGRESS`サブネットに配置され、NATゲートウェイを介してAWSに到達します。`defaultIntegrations`に`vpcSubnets: { subnetType: SubnetType.PRIVATE_ISOLATED }`を渡すと、NATゲートウェイとその時間料金が削減されますが、分離されたサブネットには外部へのルートがないため、VPCはタスクが起動するために4つのVPCエンドポイントが必要になります: イメージをプルするための`ecr.api`と`ecr.dkr`のインターフェースエンドポイント、イメージレイヤーがS3オブジェクトであるためのS3ゲートウェイエンドポイント、および`awslogs`ドライバーが書き込めるようにするための`logs`のインターフェースエンドポイント。これらがないと、タスクはイメージをプルできず、ECSは理由を言わずにサーキットブレーカーでデプロイメントをロールバックします。
+
+VPCリンク、ロードバランサー、そのリスナー、ターゲットグループ、およびロードバランサーがアクセスログを書き込むバケットは、`common/constructs`の`core/api/ecs-http-endpoint.ts`という1つのコンストラクトによって作成され、ECS上でホストされるすべてのAPIが共有します。API独自のコンストラクトは、コンテナサービスに名前を付け、すべての操作をそのエンドポイントにルーティングします。
+
+### コンテナ内で実行されるもの
+
+`<module_name>/<api_name>_container/main.py`は、`main.py`からアプリをインポートするため、記述したすべての操作はLambda上とまったく同じように提供されます。独自に2つのものを追加します:
+
+- `GET /health`、ロードバランサーのターゲットグループとコンテナヘルスチェックが呼び出します。`include_in_schema=False`として宣言されているため、OpenAPI仕様から除外され、したがってAPI Gatewayルートと生成されたクライアントからも除外されます。また、リクエストメトリクスからも除外されるため、ターゲットグループの15秒ごとの呼び出しはAPIリクエストとしてカウントされません。
+- APIの独自のミドルウェアが収集するメトリクスを書き出すミドルウェア。Lambdaでは、ハンドラーが各呼び出しの最後にそれを行います。このサーバーはリクエスト間で存続するため、自分でフラッシュします。
+
+API Gatewayルートは依然としてOpenAPI仕様から取得されるため、追加した操作は`nx build`が仕様を再生成すると展開されます。
+
+### 可観測性
+
+ログとメトリクスは、Lambda上と同じように機能します: コンテナは独自のCloudWatchロググループに書き込み、メトリクスはCloudWatch Logsが抽出するための埋め込みメトリクス形式で書き込まれます。
+
+メトリクスについて1つ異なる点があり、ダッシュボードを読んだり独自のメトリクスを追加したりする前に知っておく価値があります。上記の<a href="#metrics">Metrics</a>セクションで`.init`からインポートするように指示されているオブジェクト`metrics`は、Powertoolsの`Metrics`であり、プロセス内のすべての`Metrics`オブジェクトは1つのメトリクスストアを共有します。Lambdaでは、1つの呼び出しが最初から最後までそのストアを所有します。uvicornサーバーは同時にリクエストを処理し、APIの独自のリクエストごとのメトリクスと追加したメトリクスの両方がその1つのストアに送られるため、同時に実行中の2つのリクエストは、メトリクスが1つのドキュメントに書き出され、最初に追加されたルートに帰属される可能性があります。もう一方のリクエストのドキュメントは、`route`ディメンションがまったくなく、最初のフラッシュ後に追加されたメトリクスのみを保持して出力される可能性があり、Powertoolsは発生時に`PowertoolsUserWarning: Dimension 'route' has already been added`をログに記録します。リクエストがめったに重複しない軽いトラフィックでは、これは表示されません。
+
+したがって、ECS上では、ルートごとの`RequestCount`と`Success`を概算として扱ってください。正確に1つのリクエストに帰属するメトリクスが必要な場合は、リクエスト内で作成した`EphemeralMetrics`に追加し、返す前にフラッシュします。これは独自のストアを保持します:
+
+```python
+from aws_lambda_powertools.metrics import EphemeralMetrics, MetricUnit
+
+@app.get("/items/{item_id}")
+def read_item(item_id: int):
+    request_metrics = EphemeralMetrics()
+    request_metrics.add_metric(name="ItemViewed", unit=MetricUnit.Count, value=1)
+    request_metrics.flush_metrics()
+    return {"item_id": item_id}
+```
+
+AWS X-Rayトレーシングはそうではありません。`@tracer.capture_method`はLambda外ではno-opであり、セグメントを受信するX-Rayデーモンもタスク内にありません。トレースが必要な場合は、コンテナサービスにサイドカーとして追加してください。
+
+API Gateway HTTP APIのアクセスログは、APIに到達するすべてのリクエストを記録します。ロードバランサーは、`EcsHttpEndpoint`コンストラクトが作成するバケットに独自のアクセスログを書き込みます。これは、どのタスクがリクエストを処理し、何を応答したかを確認できる場所です。
+
+### イメージビルドとスキャン
+
+コンテナジェネレーターは、APIにちなんで名付けられたイメージターゲットを提供します:
+
+- `<api-name>-container-docker`は、`architecture`オプションのCPUアーキテクチャ、`linux/arm64`または`linux/amd64`のイメージをビルドします。オプションはジェネレーターを実行するマシンのアーキテクチャにデフォルト設定され、`--architecture`で設定します。ターゲットは最初に一致するバンドルターゲット、`bundle-arm`または`bundle-x86`を実行するため、イメージにはそのアーキテクチャ用にビルドされたパッケージとその依存関係が保持されます。
+- `<api-name>-container-trivy`は、そのイメージの脆弱性をスキャンします。
+
+イメージのビルド方法については<Link path="/guides/py-container">Python Container Service</Link>を、デプロイ時の公開方法については<Link path="/guides/docker-bundling">Docker Bundling</Link>を参照してください。
+
+### デプロイと削除
+
+`deploy-sandbox`は<Link path="/guides/typescript-infrastructure#deploying-your-sandbox-stage">CloudFormation expressモード</Link>でデプロイします。これは、ECSサービスが安定状態に達するのを待つのではなく、各リソースの設定が適用されると戻ります。そのため、最初のタスクがまだ起動している間にターゲットが完了する可能性があり、タスクが15秒間隔で2回のヘルスチェックに合格するまで、ロードバランサーにはリクエストを送信するターゲットがなく、`503`を返します。デプロイが戻った後、約1分間それを予期してください。1〜2分待ってから再度呼び出してください。クリアされない`503`は、遅い起動ではなく実際の失敗です: タスクが正常にならない場合、サービスのデプロイメントサーキットブレーカーがロールバックします。
+
+ECSはコンテナ内で独自のヘルスチェックを実行します。30秒ごとに`GET /health`を呼び出し、タスク開始後の最初の30秒間の失敗はカウントされません。そのチェックが最初に報告されるまで、`aws ecs describe-tasks`はタスクに`UNKNOWN`の`healthStatus`を与え、合格すると`HEALTHY`に変わります。`UNKNOWN`は、チェックが失敗したのではなく、まだ報告されていないことを意味します。
+
+APIのURLはスタック出力ですが、推測する名前ではありません。`CfnOutput`はAPIコンストラクト内で作成され、何もその論理IDをオーバーライドしないため、CDKはコンストラクトのパスに8文字のハッシュを加えて出力キーを構築します: `new MyApi(this, 'MyApi', …)`として追加されたAPIは、`MyApiUrl`ではなく`MyApiMyApiUrl`とそのハッシュを出力します。`cdk deploy`は値を出力し、スクリプトはキー全体ではなくサフィックスでマッチする必要があります:
+
+```bash
+aws cloudformation describe-stacks --stack-name <stack-name> \
+  --query "Stacks[0].Outputs[?contains(OutputKey, 'Url')].OutputValue" --output text
+```
+
+`destroy-sandbox`は、HTTP APIのアクセスログループとそれを暗号化する顧客管理KMSキーを残します。どちらも削除ポリシーを設定しないため、CDKのデフォルトの`Retain`が適用され、CloudFormationはそれらを削除するのではなくスキップします。削除されたスタックはそのリソースを報告しなくなるため、スタックを削除する前にそれらをリストアップしてください:
+
+```bash
+aws cloudformation describe-stack-resources --stack-name <stack-name> \
+  --query "StackResources[?contains(LogicalResourceId, 'AccessLogs') && (ResourceType=='AWS::Logs::LogGroup' || ResourceType=='AWS::KMS::Key')].[ResourceType,PhysicalResourceId]" \
+  --output text
+```
+
+次に、`aws logs delete-log-group --log-group-name <log-group-name>`と`aws kms schedule-key-deletion --key-id <key-id> --pending-window-in-days 7`で削除します。7日間はKMSが受け入れる最短のウィンドウです。
+
+### 制限
+
+- **統合タイムアウト。** API Gateway HTTP APIは、統合を約30秒に制限します。それより長くかかる操作は、コンテナがどれだけ長く動作していても、ゲートウェイで失敗します。
+- **ストリーミングなし。** ストリーミング操作には`rest-lambda`インフラストラクチャが必要です。HTTP APIはレスポンスをストリーミングできません。
+- **ペイロードサイズ。** リクエストとレスポンスは、API Gatewayの10 MB制限に従います。
+- **すべての操作に対して1つのサービス。** `integrationPattern`は`shared`です: 1つのコンテナサービスがあり、すべてのルートがそれにルーティングされます。このインフラストラクチャでは、オプションは常に`shared`に解決され、`isolated`は警告とともに無視されます。
+
+### コスト
+
+ロードバランサーは、リクエストごとに支払い、アイドル時には何も支払わないLambdaと比較して、新しい固定コストです。データ転送前の、us-east-1での大まかな月額数値:
+
+| 項目 | おおよそ |
+| --- | --- |
+| 内部ロードバランサー | $16 + ロードバランサー容量ユニット |
+| Fargateタスク、0.25 vCPU / 0.5 GB | ARM64でタスクあたり$7、X86_64ではさらに多く、FargateはvCPUあたりおよびGBあたりより高いレートで請求します |
+| NATゲートウェイ、VPCに存在する場合 | $33 |
+| VPCリンク | 時間料金なし |
+| ロードバランサーのアクセスログ用S3ストレージ | 月あたりGBあたり数セント |
+
+したがって、1タスクサービスは、トラフィックがない状態でARM64で月額約$23かかり、渡すVPCにNATゲートウェイがある場合はさらに多くなります。アクセスログはトラフィックとともに増加します: `endpoint.accessLogsBucket`にライフサイクルルールを追加して期限切れにしてください。リージョンの現在の価格については、[Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/)および[AWS Fargate](https://aws.amazon.com/fargate/pricing/)の価格ページを確認してください。
+</OptionFilter>
 
 ## FastAPIの呼び出し
 

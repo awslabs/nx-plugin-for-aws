@@ -3,7 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import {
+  createTreeUsingTsSolutionSetup,
+  onHostArch,
+} from '../../utils/test.js';
 import { pyApiGenerator } from './generator.js';
 import { PyApiGeneratorSchema } from './schema';
 
@@ -49,5 +52,53 @@ describe('py#api generator', () => {
       tree.read('packages/test_api/project.json', 'utf-8'),
     );
     expect(projectConfig.metadata.apiType).toBe('fast-api');
+  });
+
+  it('should default the integration pattern to shared for http-ecs', async () => {
+    // What `py#api --name=TestApi --infra=http-ecs` gives on its own: neither
+    // the schema nor this wrapper fills `integrationPattern` in, so the FastAPI
+    // generator resolves it from the infra.
+    await pyApiGenerator(tree, {
+      name: 'TestApi',
+      directory: 'packages',
+      infra: 'http-ecs',
+      auth: 'iam',
+      iac: 'cdk',
+    });
+
+    expect(
+      tree.exists(
+        'packages/common/constructs/src/core/api/ecs-http-endpoint.ts',
+      ),
+    ).toBeTruthy();
+    expect(
+      tree.exists(
+        'packages/common/constructs/src/app/services/test-api-container.ts',
+      ),
+    ).toBeTruthy();
+    expect(
+      tree.read('packages/common/constructs/src/app/apis/test-api.ts', 'utf-8'),
+    ).toContain("pattern: 'shared'");
+  });
+
+  it('should forward the architecture to py#fast-api for http-ecs', async () => {
+    // Asked for the architecture this host is not.
+    await onHostArch('arm64', () =>
+      pyApiGenerator(tree, {
+        name: 'TestApi',
+        directory: 'packages',
+        infra: 'http-ecs',
+        auth: 'iam',
+        iac: 'cdk',
+        architecture: 'X86_64',
+      }),
+    );
+
+    expect(
+      tree.read(
+        'packages/common/constructs/src/app/services/test-api-container.ts',
+        'utf-8',
+      ),
+    ).toContain("architecture: 'X86_64',");
   });
 });

@@ -24,6 +24,7 @@ import {
 import {
   getRegion,
   invokeIamApiNoAuthDenied,
+  invokeRestApi,
   invokeTrpcApi,
 } from './deploy-invocations';
 
@@ -46,7 +47,7 @@ import {
  * balancer, target group health check and the container's own server — and the
  * unsigned one is the proof that the API is not open.
  *
- * Both calls go to the API Gateway URL, so neither says anything about how the
+ * Both calls go to an API Gateway URL, so neither says anything about how the
  * request reaches the task. Three read-only describe calls per API do: the
  * load balancer's scheme is `internal`, the tasks get no public IP, and the
  * service's security group has exactly one inbound rule, from the load
@@ -103,11 +104,13 @@ describe('smoke test - api-ecs-deploy', () => {
 
     // Nothing beyond `--infra` and `--auth` is passed: the integration pattern
     // defaults to `shared` for this infra, so the lane deploys what a user who
-    // passes `--infra=http-ecs` alone gets.
-    await runCLI(
-      `generate @aws/nx-plugin:ts#api --name=my-api --infra=http-ecs --auth=iam --no-interactive`,
-      opts,
-    );
+    // passes `--infra=http-ecs` alone gets. One API per framework.
+    for (const api of ['ts#api --name=my-api', 'py#api --name=py-api']) {
+      await runCLI(
+        `generate @aws/nx-plugin:${api} --infra=http-ecs --auth=iam --no-interactive`,
+        opts,
+      );
+    }
 
     writeFileSync(
       `${projectRoot}/aws-nx-plugin.config.mts`,
@@ -188,16 +191,25 @@ describe('smoke test - api-ecs-deploy', () => {
       await invokeTrpcApi(myApiUrl, 'tRPC ECS API');
       await invokeIamApiNoAuthDenied(myApiUrl, 'tRPC ECS API');
 
-      // Both calls above go to the API Gateway URL, so neither would notice
-      // an internet-facing load balancer, a public task IP or a wider
-      // security group. These describe calls would.
-      await assertEcsHostedApiPathIsPrivate({
-        label: 'MyApi',
-        loadBalancerArn: output('MyApiLoadBalancerArn'),
-        clusterArn: output('MyApiClusterArn'),
-        serviceName: output('MyApiServiceName'),
-        serviceSecurityGroupId: output('MyApiServiceSecurityGroupId'),
-      });
+      const pyApiUrl = output('PyApiUrl');
+      await invokeRestApi(pyApiUrl, 'FastAPI ECS API');
+      await invokeIamApiNoAuthDenied(pyApiUrl, 'FastAPI ECS API');
+
+      // Every call above goes to an API Gateway URL, so none would notice an
+      // internet-facing load balancer, a public task IP or a wider security
+      // group. These describe calls would.
+      for (const [label, name] of [
+        ['tRPC ECS API', 'MyApi'],
+        ['FastAPI ECS API', 'PyApi'],
+      ] as const) {
+        await assertEcsHostedApiPathIsPrivate({
+          label,
+          loadBalancerArn: output(`${name}LoadBalancerArn`),
+          clusterArn: output(`${name}ClusterArn`),
+          serviceName: output(`${name}ServiceName`),
+          serviceSecurityGroupId: output(`${name}ServiceSecurityGroupId`),
+        });
+      }
     } catch (e) {
       testError = e;
       throw e;
