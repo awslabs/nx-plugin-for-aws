@@ -71,11 +71,13 @@ ${contextProp}?: ReturnType<typeof ${hook}>\`
     }`,
   );
   // Handle non-empty context via rewrite (the context object may be single-prop
-  // from the first hook call, where += concatenates without comma)
+  // from the first hook call, where += concatenates without comma).
+  // Insert before the captured props: once formatted, the object may end with a
+  // trailing comma, and appending after it would produce a double comma.
   await applyGritQL(
     tree,
     mainTsxPath,
-    `\`context: { $cprops }\` => \`context: { $cprops, ${contextProp}: undefined }\` where {
+    `\`context: { $cprops }\` => \`context: { ${contextProp}: undefined, $cprops }\` where {
       $cprops <: within \`createRouter($_)\`,
       $cprops <: not some \`${contextProp}: $_\`
     }`,
@@ -106,7 +108,7 @@ ${contextProp}?: ReturnType<typeof ${hook}>\`
     mainTsxPath,
     `or {
       \`<RouterProvider $attrs context={{}} />\` => \`<RouterProvider $attrs context={{ ${contextProp} }} />\`,
-      \`<RouterProvider $attrs context={{ $cprops }} />\` => \`<RouterProvider $attrs context={{ $cprops, ${contextProp} }} />\` where {
+      \`<RouterProvider $attrs context={{ $cprops }} />\` => \`<RouterProvider $attrs context={{ ${contextProp}, $cprops }} />\` where {
         $cprops <: not some \`${contextProp}\`
       },
       \`<RouterProvider $attrs />\` => \`<RouterProvider $attrs context={{ ${contextProp} }} />\` where {

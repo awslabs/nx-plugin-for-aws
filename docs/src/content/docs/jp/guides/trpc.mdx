@@ -1037,6 +1037,27 @@ API Gateway HTTP APIのアクセスログは、APIに到達するすべてのリ
 
 イメージのビルド方法については<Link path="/guides/ts-container">TypeScript Container Service</Link>を、デプロイ時の公開方法については<Link path="/guides/docker-bundling">Docker Bundling</Link>を参照してください。
 
+### デプロイと削除
+
+`deploy-sandbox`は<Link path="/guides/typescript-infrastructure#deploying-your-sandbox-stage">CloudFormation expressモード</Link>でデプロイします。これは、ECSサービスが安定状態に達するのを待つのではなく、各リソースの構成が適用されると戻ります。そのため、最初のタスクがまだ起動している間にターゲットが終了する可能性があり、タスクが15秒間隔で2回のヘルスチェックに合格するまで、ロードバランサーにはリクエストを送信するターゲットがなく、`503`を返します。1〜2分待ってから再度呼び出してください。クリアされない`503`は、遅い起動ではなく実際の失敗です: タスクが正常にならない場合、サービスのデプロイメントサーキットブレーカーがロールバックします。
+
+APIのURLはスタック出力ですが、推測する名前ではありません。`CfnOutput`はAPIコンストラクト内で作成され、論理IDをオーバーライドするものはないため、CDKはコンストラクトのパスと8文字のハッシュから出力キーを構築します: `new MyApi(this, 'MyApi', …)`として追加されたAPIは、`MyApiUrl`ではなく`MyApiMyApiUrl`とそのハッシュを出力します。`cdk deploy`は値を出力し、スクリプトはキー全体ではなくサフィックスで一致する必要があります:
+
+```bash
+aws cloudformation describe-stacks --stack-name <stack-name> \
+  --query "Stacks[0].Outputs[?contains(OutputKey, 'Url')].OutputValue" --output text
+```
+
+`destroy-sandbox`は、HTTP APIのアクセスログループとそれを暗号化する顧客管理のKMSキーを残します。どちらも削除ポリシーを設定しないため、CDKのデフォルトの`Retain`が適用され、CloudFormationはそれらを削除するのではなくスキップします。スタックを削除する前にそれらをリストします。削除されたスタックはもはやそのリソースを報告しないためです:
+
+```bash
+aws cloudformation describe-stack-resources --stack-name <stack-name> \
+  --query "StackResources[?contains(LogicalResourceId, 'AccessLogs') && (ResourceType=='AWS::Logs::LogGroup' || ResourceType=='AWS::KMS::Key')].[ResourceType,PhysicalResourceId]" \
+  --output text
+```
+
+次に、`aws logs delete-log-group --log-group-name <log-group-name>`と`aws kms schedule-key-deletion --key-id <key-id> --pending-window-in-days 7`でそれらを削除します。7日間はKMSが受け入れる最短のウィンドウです。
+
 ### 制限
 
 - **統合タイムアウト。** API Gateway HTTP APIは、統合を約30秒に制限します。それより長くかかるプロシージャは、コンテナがどれだけ長く動作していても、ゲートウェイで失敗します。

@@ -2,8 +2,10 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { type Tree, updateJson } from '@nx/devkit';
+import { logger, type Tree, updateJson } from '@nx/devkit';
+import ts from 'typescript';
 import { tsReactWebsiteGenerator } from '../../ts/react-website/app/generator.js';
+import { tsReactWebsiteAuthGenerator } from '../../ts/react-website/cognito-auth/generator.js';
 import { declareDependencies } from '../../utils/declared-dependencies.js';
 import { expectHasMetricTags } from '../../utils/metrics-assertions.js';
 import {
@@ -99,6 +101,66 @@ export function Main() {
     const mainTsxContent = tree.read('apps/frontend/src/main.tsx', 'utf-8');
     // Create snapshot of modified main.tsx
     expect(mainTsxContent).toMatchSnapshot('main.tsx');
+  });
+
+  it('should add the query client and tRPC proxy to the TanStack Router context', async () => {
+    tree.write(
+      'apps/frontend/src/main.tsx',
+      `import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { RouterProvider, createRouter } from '@tanstack/react-router';
+import { routeTree } from './routeTree.gen';
+
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export type RouterProviderContext = {};
+
+const router = createRouter({
+  routeTree,
+  context: {}
+});
+
+const App = () => {
+  return <RouterProvider router={router} context={{}} />;
+};
+
+const root = document.getElementById('root');
+root &&
+  createRoot(root).render(
+    <React.StrictMode>
+      <App/>
+    </React.StrictMode>,
+  );
+`,
+    );
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      backendProjectName: 'backend',
+    });
+    const main = tree.read('apps/frontend/src/main.tsx', 'utf-8')!;
+    expect(main).toMatch(
+      /import \{ useQueryClient \} from ['"]@tanstack\/react-query['"]/,
+    );
+    expect(main).toMatch(
+      /import \{ useTestApi \} from ['"]\.\/hooks\/useTestApi['"]/,
+    );
+    expect(main).toContain('queryClient?: ReturnType<typeof useQueryClient>');
+    expect(main).toContain('testApi?: ReturnType<typeof useTestApi>');
+    expect(main).toContain('const queryClient = useQueryClient();');
+    expect(main).toContain('const testApi = useTestApi();');
+    const jsxContext = main.match(/context=\{\{([^}]*)\}\}/)![1];
+    expect(jsxContext).toMatch(/\bqueryClient\b/);
+    expect(jsxContext).toMatch(/\btestApi\b/);
+
+    // Re-running does not duplicate anything
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      backendProjectName: 'backend',
+    });
+    const again = tree.read('apps/frontend/src/main.tsx', 'utf-8')!;
+    expect(again.match(/const queryClient = useQueryClient\(\)/g)).toHaveLength(
+      1,
+    );
+    expect(again.match(/const testApi = useTestApi\(\)/g)).toHaveLength(1);
   });
 
   it('should add required dependencies', async () => {
@@ -537,5 +599,112 @@ describe('trpc react generator with real react and trpc projects', () => {
     expect(runtimeConfigContent).toContain('http://localhost:2022/');
     expect(runtimeConfigContent).toContain('runtimeConfig.apis.SecondApi');
     expect(runtimeConfigContent).toContain('http://localhost:2023/');
+  });
+  it('should keep main.tsx valid when several APIs and Cognito auth are connected to one website', async () => {
+    const apis = ['FirstApi', 'SecondApi', 'ThirdApi'];
+    for (const name of apis) {
+      await tsTrpcApiGenerator(tree, {
+        name,
+        auth: 'IAM',
+        infra: 'rest-lambda',
+        iac: 'cdk',
+      });
+    }
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      backendProjectName: 'first-api',
+    });
+    await tsReactWebsiteAuthGenerator(tree, {
+      project: 'frontend',
+      allowSignup: false,
+      cognitoDomain: 'frontend',
+      iac: 'cdk',
+    });
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      backendProjectName: 'second-api',
+    });
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      backendProjectName: 'third-api',
+    });
+    // Re-running a connection must not change anything
+    const before = tree.read('frontend/src/main.tsx', 'utf-8')!;
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      backendProjectName: 'second-api',
+    });
+    const main = tree.read('frontend/src/main.tsx', 'utf-8')!;
+    expect(main).toEqual(before);
+
+    // main.tsx must parse without syntax errors (the double comma was TS1136)
+    const { diagnostics } = ts.transpileModule(main, {
+      fileName: 'main.tsx',
+      reportDiagnostics: true,
+      compilerOptions: { jsx: ts.JsxEmit.ReactJSX },
+    });
+    expect(diagnostics?.map((d) => d.messageText)).toEqual([]);
+    expect(main).not.toMatch(/,\s*,/);
+
+    for (const prop of [
+      'firstApi',
+      'secondApi',
+      'thirdApi',
+      'queryClient',
+      'auth',
+      'runtimeConfig',
+    ]) {
+      expect(main.match(new RegExp(`\\b${prop}: undefined`, 'g'))).toHaveLength(
+        1,
+      );
+      expect(main.match(new RegExp(`\\b${prop}\\?:`, 'g'))).toHaveLength(1);
+    }
+    const jsxContext = main.match(/context=\{\{([^}]*)\}\}/)![1];
+    for (const prop of [
+      'firstApi',
+      'secondApi',
+      'thirdApi',
+      'queryClient',
+      'auth',
+      'runtimeConfig',
+    ]) {
+      expect(jsxContext.match(new RegExp(`\\b${prop}\\b`, 'g'))).toHaveLength(
+        1,
+      );
+    }
+  });
+  it('should keep main.tsx free of duplicate identifiers when an API is named Auth on a Cognito website', async () => {
+    await tsTrpcApiGenerator(tree, {
+      name: 'Auth',
+      auth: 'IAM',
+      infra: 'rest-lambda',
+      iac: 'cdk',
+    });
+    await tsReactWebsiteAuthGenerator(tree, {
+      project: 'frontend',
+      allowSignup: false,
+      cognitoDomain: 'frontend',
+      iac: 'cdk',
+    });
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      backendProjectName: 'auth',
+    });
+
+    const main = tree.read('frontend/src/main.tsx', 'utf-8')!;
+    // The Cognito hook stays the only `useAuth` in main.tsx
+    expect(main.match(/\buseAuth\b/g)!.length).toBeGreaterThan(0);
+    expect(main).not.toMatch(/from ['"]\.\/hooks\/useAuth['"]/);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('"Auth"'));
+    // The API's own hook and client provider are still generated
+    expect(tree.exists('frontend/src/hooks/useAuth.tsx')).toBeTruthy();
+    expect(main).toContain('AuthClientProvider');
+    expect(main.match(/import \{[^}]*\buseAuth\b[^}]*\}/g)).toHaveLength(1);
+    expect(main.match(/const auth = /g)).toHaveLength(1);
+    expect(main.match(/\bauth: undefined/g)).toHaveLength(1);
+    expect(main.match(/\bauth\?:/g)).toHaveLength(1);
+    // Cognito's own context entry is untouched
+    expect(main).toContain('auth?: ReturnType<typeof useAuth>');
   });
 });

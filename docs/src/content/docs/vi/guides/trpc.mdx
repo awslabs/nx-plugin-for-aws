@@ -1037,6 +1037,27 @@ Container generator vend các image target, được đặt tên theo API của 
 
 Xem <Link path="/guides/ts-container">TypeScript Container Service</Link> để biết cách image được xây dựng, và <Link path="/guides/docker-bundling">Docker Bundling</Link> để biết cách nó được xuất bản tại thời điểm triển khai.
 
+### Deploying and Tearing Down
+
+`deploy-sandbox` triển khai trong <Link path="/guides/typescript-infrastructure#deploying-your-sandbox-stage">CloudFormation express mode</Link>, trả về ngay khi cấu hình của mỗi resource được áp dụng thay vì chờ ECS service đạt trạng thái ổn định. Vì vậy, target có thể kết thúc trong khi task đầu tiên vẫn đang khởi động, và cho đến khi một task đã vượt qua hai health check cách nhau mười lăm giây, load balancer không có target để gửi request đến và trả lời `503`. Đợi một hoặc hai phút và gọi lại. Một `503` không bao giờ biến mất là một lỗi thực sự thay vì khởi động chậm: deployment circuit breaker của service roll back nó khi không có task nào trở nên healthy.
+
+URL của API là một stack output, nhưng không phải dưới tên bạn đoán. `CfnOutput` được tạo bên trong API construct của bạn và không có gì ghi đè logical ID của nó, vì vậy CDK xây dựng output key từ đường dẫn của construct cộng với một hash tám ký tự: một API được thêm dưới dạng `new MyApi(this, 'MyApi', …)` xuất ra `MyApiMyApiUrl` và hash đó, không phải `MyApiUrl`. `cdk deploy` in giá trị, và một script nên khớp với hậu tố thay vì toàn bộ key:
+
+```bash
+aws cloudformation describe-stacks --stack-name <stack-name> \
+  --query "Stacks[0].Outputs[?contains(OutputKey, 'Url')].OutputValue" --output text
+```
+
+`destroy-sandbox` để lại access log group của HTTP API và customer-managed KMS key mã hóa nó. Cả hai đều không đặt removal policy, vì vậy mặc định `Retain` của CDK áp dụng và CloudFormation bỏ qua chúng thay vì xóa chúng. Liệt kê chúng trước khi bạn tear down stack, vì một stack đã xóa không còn báo cáo các resource của nó:
+
+```bash
+aws cloudformation describe-stack-resources --stack-name <stack-name> \
+  --query "StackResources[?contains(LogicalResourceId, 'AccessLogs') && (ResourceType=='AWS::Logs::LogGroup' || ResourceType=='AWS::KMS::Key')].[ResourceType,PhysicalResourceId]" \
+  --output text
+```
+
+Sau đó xóa chúng bằng `aws logs delete-log-group --log-group-name <log-group-name>` và `aws kms schedule-key-deletion --key-id <key-id> --pending-window-in-days 7`, bảy ngày là khoảng thời gian ngắn nhất mà KMS chấp nhận.
+
 ### Limits
 
 - **Integration timeout.** API Gateway HTTP API giới hạn một integration ở khoảng 30 giây. Một procedure mất nhiều thời gian hơn thế sẽ thất bại tại gateway dù container tiếp tục hoạt động bao lâu.

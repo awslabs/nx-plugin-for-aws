@@ -30,7 +30,7 @@ Seus procedimentos são executados no AWS Lambda, então não há servidor para 
 </OptionFilter>
 
 <OptionFilter when={{ infra: 'http-ecs' }} description="ECS hosting">
-Seus procedimentos são executados como um servidor HTTP de longa duração em um contêiner no Amazon ECS, atrás de uma API Gateway HTTP API. Consulte <a href="#running-on-amazon-ecs">Running on Amazon ECS</a> para o que isso muda, incluindo por que o rastreamento X-Ray não produz rastreamentos lá.
+Seus procedimentos são executados como um servidor HTTP de longa duração em um contêiner no Amazon ECS, atrás de uma API Gateway HTTP API. Veja <a href="#running-on-amazon-ecs">Executando no Amazon ECS</a> para o que isso muda, incluindo por que o rastreamento X-Ray não produz rastreamentos lá.
 </OptionFilter>
 
 ## Uso
@@ -65,7 +65,7 @@ Ele precisa do provedor IaC CDK: o suporte ao Terraform ainda não está impleme
 
 `integrationPattern` é sempre `shared` aqui. Passar `--integrationPattern=isolated` junto com `http-ecs` não falha: o gerador avisa que a opção é ignorada e usa `shared`. Executando o gerador interativamente, ele pergunta por `integrationPattern` antes de `infra`, com `isolated` pré-selecionado, então esse aviso é o que você vê se deixar a pré-seleção sozinha e depois escolher `http-ecs`. No construtor de comandos nesta página, escolher `http-ecs` desabilita `isolated` e o limpa se foi selecionado, então o comando que ele escreve nunca carrega a flag.
 
-A opção `architecture` define se o contêiner é executado em `ARM64` ou `X86_64`. Omita-a para usar a arquitetura da máquina na qual você executa o gerador. Consulte <Link path="/guides/ts-container#cpu-architecture">CPU Architecture</Link> no guia de contêiner.
+A opção `architecture` define se o contêiner é executado em `ARM64` ou `X86_64`. Deixe-a de fora para usar a arquitetura da máquina em que você executa o gerador. Veja <Link path="/guides/ts-container#cpu-architecture">Arquitetura de CPU</Link> no guia de contêiner.
 :::
 </OptionFilter>
 
@@ -118,7 +118,7 @@ Com `infra` definido como `http-ecs`, a API é executada como um servidor HTTP e
       - .dockerignore Files left out of the image build context
 </FileTree>
 
-Seu roteador, procedimentos, esquema, middleware e cliente são os mesmos para todos os valores de `infra`.
+Seu roteador, procedimentos, esquema, middleware e cliente são os mesmos para cada valor de `infra`.
 </OptionFilter>
 
 ### Infraestrutura
@@ -347,8 +347,8 @@ export const echo = publicProcedure
 Para mais informações, consulte a [documentação do AWS Lambda Powertools Tracer](https://docs.powertools.aws.dev/lambda/typescript/latest/core/tracer/).
 
 <OptionFilter when={{ infra: 'http-ecs' }} description="X-Ray produces no traces on ECS">
-:::caution[No traces on ECS]
-As chamadas acima são executadas sem erro em um contêiner, mas não produzem rastreamentos. O Powertools desliga seu rastreador quando não está sendo executado no Lambda, então `getSegment()` retorna um subsegmento de espaço reservado que nunca é enviado para lugar nenhum. Consulte <a href="#observability">Observability</a> para o que você obtém e o que adicionar se precisar de rastreamentos.
+:::caution[Sem rastreamentos no ECS]
+As chamadas acima são executadas sem erro em um contêiner, mas não produzem rastreamentos. O Powertools desliga seu rastreador quando não está sendo executado no Lambda, então `getSegment()` retorna um subsegmento de espaço reservado que nunca é enviado para lugar nenhum. Veja <a href="#observability">Observabilidade</a> para o que você obtém e o que adicionar se precisar de rastreamentos.
 :::
 </OptionFilter>
 
@@ -736,7 +736,7 @@ O construto `UserIdentity` pode ser gerado usando o <Link path="/guides/react-we
 </OptionFilter>
 
 <OptionFilter when={{ infra: 'http-ecs' }} description="CDK usage when the API runs on ECS — pass the VPC">
-`defaultIntegrations` recebe a VPC na qual seu serviço é executado e constrói tudo dentro dela: o serviço ECS, o balanceador de carga interno na frente dele e o link VPC que o API Gateway alcança esse balanceador de carga. O construto nunca cria uma VPC, então você cria ou importa uma em sua pilha.
+`defaultIntegrations` recebe a VPC na qual seu serviço é executado e constrói tudo dentro dela: o serviço ECS, o balanceador de carga interno na frente dele e o VPC link que o API Gateway alcança esse balanceador de carga. O construto nunca cria uma VPC, então você cria ou importa uma em sua pilha.
 
 ```ts {10,13-15}
 import { MyApi } from '@my-scope/common-constructs';
@@ -780,14 +780,14 @@ Isso configura sua infraestrutura de API, incluindo uma API AWS API Gateway REST
 </OptionFilter>
 
 <OptionFilter when={{ infra: 'http-ecs' }} description="What the ECS variant deploys">
-Isso configura uma API AWS API Gateway HTTP com autenticação baseada no seu método `auth` escolhido, um serviço Amazon ECS executando seu contêiner, um balanceador de carga interno na frente dele e o link VPC que o API Gateway alcança esse balanceador de carga.
+Isso configura uma API AWS API Gateway HTTP com autenticação baseada no seu método `auth` escolhido, um serviço Amazon ECS executando seu contêiner, um balanceador de carga interno na frente dele e o VPC link que o API Gateway alcança esse balanceador de carga.
 </OptionFilter>
 
 <Snippet name="api/cors-configuration-cdk-note" />
 </Fragment>
 <Fragment slot="terraform">
 <OptionFilter when={{ infra: 'http-ecs' }} description="Terraform is not implemented for ECS hosting">
-:::caution[CDK only]
+:::caution[Somente CDK]
 `http-ecs` não está implementado para Terraform. O gerador falha com uma mensagem dizendo isso. Escolha `rest-lambda` ou `http-lambda` para um workspace Terraform.
 :::
 </OptionFilter>
@@ -997,66 +997,87 @@ As principais saídas do módulo de API que você pode usar para políticas IAM 
 <Snippet name="ts-bundle" />
 
 <OptionFilter when={{ infra: 'http-ecs' }} description="How ECS hosting works, what it costs and what it limits">
-## Running on Amazon ECS
+## Executando no Amazon ECS
 
 Com `infra` definido como `http-ecs`, seus procedimentos são executados como um servidor HTTP de longa duração em um contêiner em vez de em uma função Lambda. Uma solicitação segue este caminho:
 
 1. Um chamador assina uma solicitação para a API Gateway HTTP API, que é o único ponto de entrada público. Cada rota carrega o autorizador para o `auth` que você escolheu, então uma solicitação não autenticada é rejeitada na borda.
-2. O API Gateway encaminha a solicitação através de um link VPC, que é seu caminho privado para sua VPC.
-3. O link VPC alcança um balanceador de carga interno. O balanceador de carga não tem endereço público, e sua única regra de entrada permite o grupo de segurança do link VPC na porta do ouvinte.
+2. O API Gateway encaminha a solicitação através de um VPC link, que é seu caminho privado para sua VPC.
+3. O VPC link alcança um balanceador de carga interno. O balanceador de carga não tem endereço público, e sua única regra de entrada permite o grupo de segurança do VPC link na porta do ouvinte.
 4. O balanceador de carga encaminha a solicitação para uma tarefa. A única regra de entrada das tarefas permite o grupo de segurança do balanceador de carga na porta do contêiner, então nada mais na VPC pode abrir uma conexão para elas.
 
 As tarefas são executadas em sub-redes privadas e nunca obtêm um endereço IP público. Nada neste caminho permite um intervalo de endereços de entrada.
 
-Por padrão, o serviço, o balanceador de carga e o link VPC vão nas sub-redes `PRIVATE_WITH_EGRESS` da VPC, que alcançam a AWS através de um gateway NAT. Passar `vpcSubnets: { subnetType: SubnetType.PRIVATE_ISOLATED }` para `defaultIntegrations` remove o gateway NAT e sua cobrança horária, mas sub-redes isoladas não têm rota de saída, então a VPC precisa de quatro endpoints VPC para que as tarefas iniciem: endpoints de interface para `ecr.api` e `ecr.dkr` para puxar a imagem, um endpoint de gateway S3 porque as camadas da imagem são objetos S3, e um endpoint de interface para `logs` para que o driver `awslogs` possa escrever. Sem eles, uma tarefa não pode puxar sua imagem e o ECS reverte a implantação no disjuntor sem dizer por quê.
+Por padrão, o serviço, o balanceador de carga e o VPC link vão nas sub-redes `PRIVATE_WITH_EGRESS` da VPC, que alcançam a AWS através de um gateway NAT. Passar `vpcSubnets: { subnetType: SubnetType.PRIVATE_ISOLATED }` para `defaultIntegrations` remove o gateway NAT e sua cobrança horária, mas sub-redes isoladas não têm rota de saída, então a VPC precisa de quatro endpoints VPC para que as tarefas iniciem: endpoints de interface para `ecr.api` e `ecr.dkr` para puxar a imagem, um endpoint de gateway S3 porque as camadas da imagem são objetos S3, e um endpoint de interface para `logs` para que o driver `awslogs` possa escrever. Sem eles, uma tarefa não pode puxar sua imagem e o ECS reverte a implantação no disjuntor sem dizer por quê.
 
-O link VPC, o balanceador de carga, seu ouvinte, o grupo de destino e o bucket no qual o balanceador de carga escreve seus logs de acesso são criados por um construto, `core/api/ecs-http-endpoint.ts` em `common/constructs`, que toda API hospedada no ECS compartilha. O construto da sua própria API nomeia seu serviço de contêiner e roteia cada operação para esse endpoint.
+O VPC link, o balanceador de carga, seu ouvinte, o grupo de destino e o bucket no qual o balanceador de carga escreve seus logs de acesso são criados por um construto, `core/api/ecs-http-endpoint.ts` em `common/constructs`, que toda API hospedada no ECS compartilha. O próprio construto da sua API nomeia seu serviço de contêiner e roteia cada operação para esse endpoint.
 
-### What Runs in the Container
+### O Que É Executado no Contêiner
 
 `src/<api-name>-container/server.ts` é um servidor `node:http` com dois trabalhos. `GET /health` responde `{"status":"ok"}`, que é o que o grupo de destino do balanceador de carga e a verificação de integridade do contêiner chamam. Todas as outras solicitações vão para o [adaptador autônomo tRPC](https://trpc.io/docs/server/adapters/standalone), que as resolve contra seu roteador.
 
-Não há evento API Gateway no contêiner, então o contexto do procedimento não carrega nenhum campo `event`, `context` ou `info`: para `http-ecs`, o `IMiddlewareContext` vendido nomeia apenas o que o middleware coloca lá. O autorizador ainda decide se uma solicitação alcança o contêiner, mas suas reivindicações não chegam com a solicitação, então os exemplos de middleware de identidade acima não se aplicam. Para ler a identidade do chamador em um procedimento, mapeie o contexto do autorizador em um cabeçalho de solicitação em seu construto de API e leia esse cabeçalho.
+Não há evento API Gateway no contêiner, então o contexto do procedimento não carrega nenhum campo `event`, `context` ou `info`: para `http-ecs`, o `IMiddlewareContext` fornecido nomeia apenas o que o middleware coloca lá. O autorizador ainda decide se uma solicitação alcança o contêiner, mas suas reivindicações não chegam com a solicitação, então os exemplos de middleware de identidade acima não se aplicam. Para ler a identidade do chamador em um procedimento, mapeie o contexto do autorizador em um cabeçalho de solicitação em seu construto de API e leia esse cabeçalho.
 
-### Observability
+### Observabilidade
 
 Logs e métricas funcionam como no Lambda: o contêiner escreve em seu próprio grupo de logs CloudWatch, e o plugin de métricas publica as métricas de cada solicitação no formato de métrica incorporada para o CloudWatch Logs extrair.
 
-O plugin de métricas constrói um objeto de métricas para cada solicitação e o entrega aos seus procedimentos como `opts.ctx.metrics`, então uma métrica que uma solicitação adiciona nunca é publicada com outra. Isso importa mais aqui do que no Lambda, onde uma invocação possui as métricas do início ao fim; este servidor lida com solicitações ao mesmo tempo. Adicione suas próprias métricas através de `opts.ctx.metrics` em vez de um objeto `Metrics` próprio, que compartilharia um armazenamento em todas as solicitações no processo.
+O plugin de métricas constrói um objeto de métricas para cada solicitação e o entrega aos seus procedimentos como `opts.ctx.metrics`, então uma métrica que uma solicitação adiciona nunca é publicada com outra. Isso importa mais aqui do que no Lambda, onde uma invocação possui as métricas do início ao fim; este servidor lida com solicitações ao mesmo tempo. Adicione suas próprias métricas através de `opts.ctx.metrics` em vez de um objeto `Metrics` próprio, que compartilharia um armazenamento em cada solicitação no processo.
 
 O rastreamento AWS X-Ray não funciona. O Powertools desliga seu rastreador fora do Lambda, e não há daemon X-Ray na tarefa para receber segmentos, então as chamadas `opts.ctx.tracer` são executadas sem erro e não produzem rastreamentos. Adicione um daemon como um sidecar em seu serviço de contêiner se precisar deles.
 
 O log de acesso da API Gateway HTTP API registra cada solicitação que alcança a API. O balanceador de carga escreve seus próprios logs de acesso em um bucket que o construto `EcsHttpEndpoint` cria, que é onde você pode ver qual tarefa atendeu uma solicitação e o que ela respondeu.
 
-### Image Build and Scanning
+### Construção e Varredura de Imagem
 
-O gerador de contêiner vende os alvos de imagem, nomeados após sua API:
+O gerador de contêiner fornece os alvos de imagem, nomeados após sua API:
 
 - `<api-name>-container-docker` constrói uma imagem linux/arm64, executando `bundle` primeiro para que a imagem contenha o servidor empacotado.
-- `<api-name>-container-trivy` verifica essa imagem em busca de vulnerabilidades.
+- `<api-name>-container-trivy` varre essa imagem em busca de vulnerabilidades.
 
-Consulte <Link path="/guides/ts-container">TypeScript Container Service</Link> para como a imagem é construída, e <Link path="/guides/docker-bundling">Docker Bundling</Link> para como ela é publicada no momento da implantação.
+Veja <Link path="/guides/ts-container">Serviço de Contêiner TypeScript</Link> para como a imagem é construída, e <Link path="/guides/docker-bundling">Docker Bundling</Link> para como ela é publicada no momento da implantação.
 
-### Limits
+### Implantando e Desmontando
 
-- **Integration timeout.** As APIs HTTP do API Gateway limitam uma integração em cerca de 30 segundos. Um procedimento que leva mais tempo do que isso falha no gateway, não importa quanto tempo o contêiner continue trabalhando.
-- **No streaming.** As assinaturas tRPC precisam da infraestrutura `rest-lambda`. Uma API HTTP não pode transmitir uma resposta.
-- **Payload size.** Solicitações e respostas seguem o limite de 10 MB do API Gateway.
-- **One service for every operation.** `integrationPattern` é `shared`: há um serviço de contêiner, e cada rota é roteada para ele. A opção sempre resolve para `shared` para esta infraestrutura, e `isolated` é ignorado com um aviso.
+`deploy-sandbox` implanta no <Link path="/guides/typescript-infrastructure#deploying-your-sandbox-stage">modo expresso do CloudFormation</Link>, que retorna assim que a configuração de cada recurso é aplicada em vez de esperar que o serviço ECS atinja um estado estável. Então o alvo pode terminar enquanto a primeira tarefa ainda está iniciando, e até que uma tarefa tenha passado duas verificações de integridade com quinze segundos de intervalo, o balanceador de carga não tem destino para enviar uma solicitação e responde `503`. Aguarde um ou dois minutos e chame novamente. Um `503` que nunca limpa é uma falha real em vez de um início lento: o disjuntor de implantação do serviço o reverte quando nenhuma tarefa se torna saudável.
 
-### Cost
+A URL da API é uma saída da pilha, mas não sob o nome que você adivinharia. O `CfnOutput` é criado dentro do seu construto de API e nada substitui seu ID lógico, então o CDK constrói a chave de saída a partir do caminho do construto mais um hash de oito caracteres: uma API adicionada como `new MyApi(this, 'MyApi', …)` produz `MyApiMyApiUrl` e esse hash, não `MyApiUrl`. `cdk deploy` imprime o valor, e um script deve corresponder ao sufixo em vez da chave inteira:
 
-O balanceador de carga é o novo custo fixo em comparação com o Lambda, onde você paga por solicitação e nada quando ocioso. Valores mensais aproximados em us-east-1, antes da transferência de dados:
+```bash
+aws cloudformation describe-stacks --stack-name <stack-name> \
+  --query "Stacks[0].Outputs[?contains(OutputKey, 'Url')].OutputValue" --output text
+```
+
+`destroy-sandbox` deixa para trás o grupo de logs de acesso da API HTTP e a chave KMS gerenciada pelo cliente que o criptografa. Nenhum deles define uma política de remoção, então o padrão `Retain` do CDK se aplica e o CloudFormation os ignora em vez de excluí-los. Liste-os antes de desmontar a pilha, já que uma pilha excluída não relata mais seus recursos:
+
+```bash
+aws cloudformation describe-stack-resources --stack-name <stack-name> \
+  --query "StackResources[?contains(LogicalResourceId, 'AccessLogs') && (ResourceType=='AWS::Logs::LogGroup' || ResourceType=='AWS::KMS::Key')].[ResourceType,PhysicalResourceId]" \
+  --output text
+```
+
+Em seguida, remova-os com `aws logs delete-log-group --log-group-name <log-group-name>` e `aws kms schedule-key-deletion --key-id <key-id> --pending-window-in-days 7`, sendo sete dias a janela mais curta que o KMS aceita.
+
+### Limites
+
+- **Tempo limite de integração.** APIs Gateway HTTP limitam uma integração em cerca de 30 segundos. Um procedimento que leva mais tempo do que isso falha no gateway, não importa quanto tempo o contêiner continue trabalhando.
+- **Sem streaming.** Assinaturas tRPC precisam da infraestrutura `rest-lambda`. Uma API HTTP não pode transmitir uma resposta.
+- **Tamanho do payload.** Solicitações e respostas seguem o limite de 10 MB do API Gateway.
+- **Um serviço para cada operação.** `integrationPattern` é `shared`: há um serviço de contêiner, e cada rota é roteada para ele. A opção sempre resolve para `shared` para esta infraestrutura, e `isolated` é ignorado com um aviso.
+
+### Custo
+
+O balanceador de carga é o novo custo fixo comparado com Lambda, onde você paga por solicitação e nada quando ocioso. Valores mensais aproximados em us-east-1, antes da transferência de dados:
 
 | Item | Aproximadamente |
 | --- | --- |
 | Balanceador de carga interno | $16 mais unidades de capacidade do balanceador de carga |
 | Tarefa Fargate, 0.25 vCPU / 0.5 GB arm64 | $7 por tarefa |
 | Gateway NAT, se sua VPC tiver um | $33 |
-| Link VPC | sem cobrança horária |
+| VPC link | sem cobrança horária |
 | Armazenamento S3 para os logs de acesso do balanceador de carga | centavos por GB por mês |
 
-Então, um serviço de uma tarefa custa aproximadamente $23 por mês antes de qualquer tráfego, e mais se a VPC que você passa tiver um gateway NAT. Os logs de acesso crescem com o tráfego: adicione uma regra de ciclo de vida a `endpoint.accessLogsBucket` para expirá-los. Verifique as páginas de preços do [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) e [AWS Fargate](https://aws.amazon.com/fargate/pricing/) para preços atuais em sua Região.
+Então um serviço de uma tarefa custa aproximadamente $23 por mês antes de qualquer tráfego, e mais se a VPC que você passar tiver um gateway NAT. Os logs de acesso crescem com o tráfego: adicione uma regra de ciclo de vida a `endpoint.accessLogsBucket` para expirá-los. Verifique as páginas de preços do [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) e [AWS Fargate](https://aws.amazon.com/fargate/pricing/) para preços atuais em sua Região.
 </OptionFilter>
 
 ## Servidor tRPC Local
@@ -1070,7 +1091,7 @@ O ponto de entrada para o servidor local é `src/local-server.ts`.
 </OptionFilter>
 
 <OptionFilter when={{ infra: 'http-ecs' }} description="Local server entry point when the API runs on ECS">
-O ponto de entrada para o servidor local é `src/<api-name>-container/index.ts`, o mesmo arquivo que o contêiner executa. Ele escuta no endereço em `HOST`, que tem como padrão `127.0.0.1`, então o servidor local aceita conexões apenas da sua própria máquina. A imagem define `HOST=0.0.0.0` para que o servidor escute na própria interface de rede da tarefa, onde o grupo de segurança da tarefa decide quem pode se conectar.
+O ponto de entrada para o servidor local é `src/<api-name>-container/index.ts`, o mesmo arquivo que o contêiner executa. Ele escuta no endereço em `HOST`, que tem como padrão `127.0.0.1`, então o servidor local aceita conexões apenas de sua própria máquina. A imagem define `HOST=0.0.0.0` para que o servidor escute na própria interface de rede da tarefa, onde o grupo de segurança da tarefa decide quem pode se conectar.
 
 Verifique se o servidor está ativo com sua rota de integridade, que retorna status 200 e `{"status":"ok"}`:
 

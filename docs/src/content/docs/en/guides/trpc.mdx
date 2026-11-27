@@ -1037,6 +1037,27 @@ The container generator vends the image targets, named after your API:
 
 See <Link path="/guides/ts-container">TypeScript Container Service</Link> for how the image is built, and <Link path="/guides/docker-bundling">Docker Bundling</Link> for how it is published at deploy time.
 
+### Deploying and Tearing Down
+
+`deploy-sandbox` deploys in <Link path="/guides/typescript-infrastructure#deploying-your-sandbox-stage">CloudFormation express mode</Link>, which returns once each resource's configuration is applied rather than waiting for the ECS service to reach a steady state. So the target can finish while the first task is still starting, and until a task has passed two health checks fifteen seconds apart the load balancer has no target to send a request to and answers `503`. Wait a minute or two and call again. A `503` that never clears is a real failure rather than a slow start: the service's deployment circuit breaker rolls it back when no task becomes healthy.
+
+The API's URL is a stack output, but not under the name you would guess. The `CfnOutput` is created inside your API construct and nothing overrides its logical ID, so CDK builds the output key from the construct's path plus an eight-character hash: an API added as `new MyApi(this, 'MyApi', …)` outputs `MyApiMyApiUrl` and that hash, not `MyApiUrl`. `cdk deploy` prints the value, and a script should match on the suffix rather than the whole key:
+
+```bash
+aws cloudformation describe-stacks --stack-name <stack-name> \
+  --query "Stacks[0].Outputs[?contains(OutputKey, 'Url')].OutputValue" --output text
+```
+
+`destroy-sandbox` leaves the HTTP API's access log group and the customer-managed KMS key that encrypts it behind. Neither sets a removal policy, so CDK's default of `Retain` applies and CloudFormation skips them rather than deleting them. List them before you tear the stack down, since a deleted stack no longer reports its resources:
+
+```bash
+aws cloudformation describe-stack-resources --stack-name <stack-name> \
+  --query "StackResources[?contains(LogicalResourceId, 'AccessLogs') && (ResourceType=='AWS::Logs::LogGroup' || ResourceType=='AWS::KMS::Key')].[ResourceType,PhysicalResourceId]" \
+  --output text
+```
+
+Then remove them with `aws logs delete-log-group --log-group-name <log-group-name>` and `aws kms schedule-key-deletion --key-id <key-id> --pending-window-in-days 7`, seven days being the shortest window KMS accepts.
+
 ### Limits
 
 - **Integration timeout.** API Gateway HTTP APIs cap an integration at about 30 seconds. A procedure that takes longer than that fails at the gateway however long the container keeps working.
