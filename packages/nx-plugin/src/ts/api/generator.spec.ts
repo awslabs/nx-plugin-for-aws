@@ -2,8 +2,11 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import type { Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { readProjectConfiguration, type Tree } from '@nx/devkit';
+import {
+  createTreeUsingTsSolutionSetup,
+  onHostArch,
+} from '../../utils/test.js';
 import { tsApiGenerator } from './generator.js';
 import { TsApiGeneratorSchema } from './schema';
 
@@ -100,5 +103,88 @@ describe('ts#api generator', () => {
         iac: 'cdk',
       }),
     ).rejects.toThrow(/Unsupported infra 'http-lambda' for Smithy/);
+  });
+
+  it('should reject smithy framework with http-ecs infra', async () => {
+    await expect(
+      tsApiGenerator(tree, {
+        name: 'TestApi',
+        framework: 'smithy',
+        directory: 'packages',
+        infra: 'http-ecs',
+        integrationPattern: 'shared',
+        auth: 'iam',
+        iac: 'cdk',
+      }),
+    ).rejects.toThrow(
+      /infra 'http-ecs' is not implemented for the smithy framework/,
+    );
+  });
+
+  it('should delegate http-ecs to ts#trpc-api', async () => {
+    await tsApiGenerator(tree, {
+      name: 'TestApi',
+      framework: 'trpc',
+      directory: 'packages',
+      infra: 'http-ecs',
+      integrationPattern: 'shared',
+      auth: 'iam',
+      iac: 'cdk',
+    });
+
+    expect(
+      tree.exists('packages/test-api/src/test-api-container/index.ts'),
+    ).toBeTruthy();
+    expect(
+      tree.exists(
+        'packages/common/constructs/src/app/services/test-api-container.ts',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('should default the integration pattern to shared for http-ecs', async () => {
+    // What `ts#api --name=TestApi --infra=http-ecs` gives on its own: neither
+    // the schema nor this wrapper fills `integrationPattern` in, so the tRPC
+    // generator resolves it from the infra.
+    await tsApiGenerator(tree, {
+      name: 'TestApi',
+      framework: 'trpc',
+      directory: 'packages',
+      infra: 'http-ecs',
+      auth: 'iam',
+      iac: 'cdk',
+    });
+
+    const projectConfig = readProjectConfiguration(tree, '@proj/test-api');
+    expect(
+      (projectConfig.metadata as Record<string, unknown>).integrationPattern,
+    ).toBe('shared');
+    expect(
+      tree.exists(
+        'packages/common/constructs/src/core/api/ecs-http-endpoint.ts',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('should forward the architecture to ts#trpc-api for http-ecs', async () => {
+    // Asked for the architecture this host is not.
+    await onHostArch('arm64', () =>
+      tsApiGenerator(tree, {
+        name: 'TestApi',
+        framework: 'trpc',
+        directory: 'packages',
+        infra: 'http-ecs',
+        auth: 'iam',
+        iac: 'cdk',
+        architecture: 'X86_64',
+      }),
+    );
+
+    expect(
+      tree.read(
+        'packages/common/constructs/src/app/services/test-api-container.ts',
+        'utf-8',
+      ),
+    ).toContain("architecture: 'X86_64',");
   });
 });

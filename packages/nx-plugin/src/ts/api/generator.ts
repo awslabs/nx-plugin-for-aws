@@ -30,9 +30,15 @@ export async function tsApiGenerator(
         directory: options.directory,
         subDirectory: options.subDirectory,
         iac: options.iac,
+        architecture: options.architecture,
         preferInstallDependencies: options.preferInstallDependencies,
       });
     case 'smithy':
+      if (options.infra === 'http-ecs') {
+        throw new Error(
+          `infra 'http-ecs' is not implemented for the smithy framework. Use the trpc framework, or choose rest-lambda.`,
+        );
+      }
       return tsSmithyApiGenerator(tree, {
         name: options.name,
         namespace: options.namespace,

@@ -79,6 +79,17 @@ export const runSmokeTest = async (
     ),
   );
 
+  // The APIs the matrix generates with `--infra=http-ecs` go in the second CDK
+  // app, which every lane builds (synth plus checkov) and no lane deploys. The
+  // template says why.
+  writeFileSync(
+    `${opts.cwd}/packages/infra-with-stages/src/stacks/application-stack.ts`,
+    readFileSync(
+      join(__dirname, '../files/application-stack-ecs.ts.template'),
+      'utf-8',
+    ),
+  );
+
   // Since the smoke tests don't run in a git repo, we need to exclude some patterns for the license sync
   writeFileSync(
     `${opts.cwd}/aws-nx-plugin.config.mts`,

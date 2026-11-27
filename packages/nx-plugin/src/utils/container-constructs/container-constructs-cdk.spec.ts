@@ -465,6 +465,11 @@ describe('EcsService synth', () => {
       expect(service.Properties.DesiredCount).toBe(1);
     });
 
+    it('should set no health check grace period by default', () => {
+      const [[, service]] = out.ofType('AWS::ECS::Service');
+      expect(service.Properties.HealthCheckGracePeriodSeconds).toBeUndefined();
+    });
+
     it('should create a cluster with Container Insights on', () => {
       const clusters = out.ofType('AWS::ECS::Cluster');
       expect(clusters).toHaveLength(1);
@@ -755,6 +760,18 @@ describe('EcsService synth', () => {
       // CDK's default timeout.
       Timeout: 5,
     });
+  });
+
+  it('should pass the health check grace period to the service', () => {
+    const { stack } = newService({
+      healthCheckGracePeriod: cdkLib.Duration.minutes(2),
+    });
+    const { resources } = synth(stack);
+
+    const [service] = Object.values(resources).filter(
+      (r) => r.Type === 'AWS::ECS::Service',
+    );
+    expect(service.Properties.HealthCheckGracePeriodSeconds).toBe(120);
   });
 
   it('should use a public image URI as is, with no asset', () => {

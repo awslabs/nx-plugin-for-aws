@@ -1,0 +1,323 @@
+import { Construct } from 'constructs';
+<%_ if (auth === 'custom') { _%>
+import * as url from 'url';
+<%_ } _%>
+import { Duration } from 'aws-cdk-lib';
+import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
+import { IVpc, SubnetSelection } from 'aws-cdk-lib/aws-ec2';
+import {
+  CfnApi,
+  CorsHttpMethod,
+} from 'aws-cdk-lib/aws-apigatewayv2';
+import {
+  <%_ if (auth === 'iam') { _%>
+  HttpIamAuthorizer,
+  <%_ } else if (auth === 'cognito') { _%>
+  HttpUserPoolAuthorizer,
+  <%_ } else if (auth === 'custom') { _%>
+  HttpLambdaAuthorizer,
+  HttpLambdaResponseType,
+  <%_ } _%>
+} from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+<%_ if (auth === 'custom') { _%>
+import { Code, Function, Runtime, Tracing } from 'aws-cdk-lib/aws-lambda';
+<%_ } _%>
+<%_ if (auth === 'cognito') { _%>
+import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
+<%_ } _%>
+<%_ if (auth === 'iam') { _%>
+import { Grant, IGrantable } from 'aws-cdk-lib/aws-iam';
+<%_ } _%>
+import {
+  ApiIntegrations,
+  HttpApiIntegration,
+  IntegrationBuilder,
+} from '../../core/api/utils<% if (esm) { %>.js<% } %>';
+import { EcsHttpEndpoint } from '../../core/api/ecs-http-endpoint<% if (esm) { %>.js<% } %>';
+import { findCloudFrontDomainNames } from '../../core/cloudfront<% if (esm) { %>.js<% } %>';
+<%_ /* Alias the core class only when this API's name would shadow it. */ _%>
+<%_ const coreHttpApi = apiNameClassName === 'HttpApi' ? 'CoreHttpApi' : 'HttpApi'; _%>
+import { HttpApi<% if (coreHttpApi !== 'HttpApi') { %> as <%= coreHttpApi %><% } %> } from '../../core/api/http-api<% if (esm) { %>.js<% } %>';
+import {
+  <%= ecs.serviceClassName %>,
+  <%= ecs.serviceClassName %>Props,
+} from '../services/<%- ecs.serviceFileKebabCase %><% if (esm) { %>.js<% } %>';
+<%_ if (backend.type === 'trpc') { _%>
+import { Procedures, routerToOperations } from '../../core/api/trpc-utils<% if (esm) { %>.js<% } %>';
+import { AppRouter, appRouter } from '<%= backend.projectAlias %>';
+
+// String union type for all API operation names
+type Operations = Procedures<AppRouter>;
+<%_ } else { _%>
+import {
+  OPERATION_DETAILS,
+  Operations,
+} from '../../generated/<%- apiNameKebabCase %>/metadata.gen.js';
+<%_ } _%>
+<%_ const operations = backend.type === 'trpc' ? 'routerToOperations(appRouter)' : 'OPERATION_DETAILS'; _%>
+
+/** Port the container listens on, which the target group sends requests to. */
+const CONTAINER_PORT = <%= ecs.containerPort %>;
+
+/**
+ * Where the API's container service runs. The construct never creates a VPC;
+ * you create or import one in your stack and pass it in.
+ */
+export interface <%= apiNameClassName %>BackendProps {
+  /**
+   * VPC holding the load balancer and the container service.
+   */
+  readonly vpc: IVpc;
+  /**
+   * Subnets for the load balancer, the VPC link and the tasks. They must be
+   * private: nothing in this API is reachable from the internet except the
+   * API Gateway HTTP API.
+   *
+   * @default { subnetType: SubnetType.PRIVATE_WITH_EGRESS }
+   */
+  readonly vpcSubnets?: SubnetSelection;
+  /**
+   * Overrides for the container service, for example `cpu`, `memoryLimitMiB`,
+   * `desiredCount`, `environment` or `grantTaskRole`.
+   *
+   * @default a health check grace period of two minutes, and the service's own
+   * defaults otherwise
+   */
+  readonly service?: Omit<
+    <%= ecs.serviceClassName %>Props,
+    'vpc' | 'vpcSubnets'
+  >;
+}
+
+/**
+ * The container service behind the API, and the load balancer and VPC link
+ * that API Gateway reaches it through.
+ */
+export interface <%= apiNameClassName %>Backend {
+  /** The ECS service running the API. */
+  readonly service: <%= ecs.serviceClassName %>;
+  /** The load balancer, VPC link and target group in front of the service. */
+  readonly endpoint: EcsHttpEndpoint;
+}
+
+/**
+ * Properties for creating a <%= apiNameClassName %> construct
+ *
+ * @template TIntegrations - Map of operation names to their integrations
+ */
+export interface <%= apiNameClassName %>Props<
+  TIntegrations extends ApiIntegrations<Operations, HttpApiIntegration>,
+> {
+  /**
+   * Map of operation names to their API Gateway integrations
+   */
+  integrations: TIntegrations;
+  <%_ if (auth === 'cognito') { _%>
+  /**
+   * Identity details for Cognito Authentication
+   */
+  identity: {
+    userPool: IUserPool;
+    userPoolClient: IUserPoolClient;
+  };
+  <%_ } _%>
+}
+
+/**
+ * A CDK construct that creates and configures an AWS API Gateway HTTP API in
+ * front of the <%= apiNameClassName %> container service on Amazon ECS.
+ *
+ * The HTTP API is the only public entry point, and every route carries the
+ * API's authorizer. It reaches the service through a VPC link and an internal
+ * load balancer, so neither the load balancer nor the tasks are reachable from
+ * the internet.
+ *
+ * @template TIntegrations - Map of operation names to their integrations
+ */
+export class <%= apiNameClassName %><
+  TIntegrations extends ApiIntegrations<Operations, HttpApiIntegration>,
+> extends <%= coreHttpApi %><Operations, TIntegrations> {
+  /**
+   * Creates the API's container service, the load balancer and VPC link that
+   * API Gateway reaches it through, and a single integration which every
+   * operation is routed to.
+   *
+   * @param scope - The CDK construct scope
+   * @param props - The VPC the service runs in
+   * @returns An IntegrationBuilder with the load-balancer integration
+   */
+  public static defaultIntegrations = (
+    scope: Construct,
+    props: <%= apiNameClassName %>BackendProps,
+  ) => {
+    return IntegrationBuilder.http({
+      pattern: 'shared',
+      operations: <%- operations %>,
+      defaultIntegrationOptions: props,
+      buildDefaultIntegration: (
+        _op,
+        options: <%= apiNameClassName %>BackendProps,
+      ) => {
+        const backend = <%= apiNameClassName %>.createBackend(scope, options);
+        return {
+          ...backend,
+          integration: backend.endpoint.integration,
+        };
+      },
+    });
+  };
+
+  /**
+   * Creates the container service and the endpoint API Gateway reaches it
+   * through. The endpoint allows exactly the two connections the request path
+   * needs: the VPC link to the load balancer's listener, and the load balancer
+   * to the tasks' container port.
+   */
+  private static createBackend(
+    scope: Construct,
+    props: <%= apiNameClassName %>BackendProps,
+  ): <%= apiNameClassName %>Backend {
+    const parent = new Construct(scope, '<%= apiNameClassName %>Backend');
+
+    const service = new <%= ecs.serviceClassName %>(parent, 'Service', {
+      // ECS replaces a task whose health check fails. Without a grace period
+      // it can do so while the task is still starting up.
+      healthCheckGracePeriod: Duration.minutes(2),
+      ...props.service,
+      vpc: props.vpc,
+      vpcSubnets: props.vpcSubnets,
+    });
+
+    const endpoint = new EcsHttpEndpoint(parent, 'Endpoint', {
+      vpc: props.vpc,
+      vpcSubnets: props.vpcSubnets,
+      service: service.service,
+      containerPort: props.service?.containerPort ?? CONTAINER_PORT,
+      healthCheckPath: '<%- ecs.healthCheckPath %>',
+    });
+
+    return { service, endpoint };
+  }
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props: <%= apiNameClassName %>Props<TIntegrations>,
+  ) {
+    <%_ if (auth === 'custom') { _%>
+    const authorizerFunction = new Function(scope, '<%= apiNameClassName %>AuthorizerFunction', {
+      <%_ if (['trpc', 'smithy'].includes(backend.type)) { _%>
+      runtime: <%- nodeRuntime %>,
+      handler: 'index.handler',
+      code: Code.fromAsset(
+        url.fileURLToPath(
+          new URL(
+            '../../../../../../<%- backend.authorizerBundleOutputDir %>',
+            <% if (esm) { %>import.meta.url<% } else { %>require('url').pathToFileURL(__filename).href<% } %>,
+          ),
+        ),
+      ),
+      <%_ } else if (backend.type === 'fastapi') { _%>
+      runtime: <%- pythonRuntime %>,
+      handler: '<%- backend.moduleName %>.authorizer.handler',
+      code: Code.fromAsset(
+        url.fileURLToPath(
+          new URL(
+            '../../../../../../<%- backend.bundleOutputDir %>',
+            <% if (esm) { %>import.meta.url<% } else { %>require('url').pathToFileURL(__filename).href<% } %>,
+          ),
+        ),
+      ),
+      <%_ } _%>
+      timeout: Duration.seconds(10),
+      tracing: Tracing.ACTIVE,
+    });
+    <%_ } _%>
+
+    super(scope, id, {
+      apiName: '<%= apiNameClassName %>',
+      corsPreflight: {
+        allowOrigins: ['*'],
+        allowMethods: [CorsHttpMethod.ANY],
+        allowHeaders: [
+          'authorization',
+          'content-type',
+          'x-amz-content-sha256',
+          'x-amz-date',
+          'x-amz-security-token',
+        ],
+      },
+      <%_ if (auth === 'iam') { _%>
+      defaultAuthorizer: new HttpIamAuthorizer(),
+      <%_ } else if (auth === 'cognito') { _%>
+      defaultAuthorizer: new HttpUserPoolAuthorizer('<%= apiNameClassName %>Authorizer', props.identity.userPool, {
+        userPoolClients: [props.identity.userPoolClient]
+      }),
+      <%_ } else if (auth === 'custom') { _%>
+      defaultAuthorizer: new HttpLambdaAuthorizer('<%= apiNameClassName %>LambdaAuthorizer', authorizerFunction, {
+        responseTypes: [HttpLambdaResponseType.SIMPLE],
+      }),
+      <%_ } _%>
+      operations: <%- operations %>,
+      ...props,
+    });
+  }
+
+  /**
+   * Restricts CORS to the provided origins
+   *
+   * Configures the provided CloudFront distribution domains or origin strings
+   * as the only permitted CORS origins in the API gateway.
+   * Any custom domain names (aliases) configured on a CloudFront distribution are
+   * included automatically alongside its default `*.cloudfront.net` domain.
+   *
+   * @param origins - The origin strings, CloudFront distributions, or objects containing a CloudFront distribution to grant CORS from
+   */
+  public restrictCorsTo(
+    ...origins: (string | Distribution | { cloudFrontDistribution: Distribution })[]
+  ) {
+    const allowedOrigins = origins.flatMap((origin) =>
+      typeof origin === 'string'
+        ? [origin]
+        : findCloudFrontDomainNames(
+            'cloudFrontDistribution' in origin
+              ? origin.cloudFrontDistribution
+              : origin,
+          ).map((domain) => `https://${domain}`),
+    );
+
+    const cfnApi = this.api.node.defaultChild;
+    if (!(cfnApi instanceof CfnApi)) {
+      throw new Error(
+        'Unable to configure CORS: API default child is not a CfnApi instance',
+      );
+    }
+
+    cfnApi.corsConfiguration = {
+      allowOrigins: allowedOrigins,
+      allowMethods: [CorsHttpMethod.ANY],
+      allowHeaders: [
+        'authorization',
+        'content-type',
+        'x-amz-content-sha256',
+        'x-amz-date',
+        'x-amz-security-token',
+      ],
+    };
+  }
+  <%_ if (auth === 'iam') { _%>
+
+  /**
+   * Grants IAM permissions to invoke any method on this API.
+   *
+   * @param grantee - The IAM principal to grant permissions to
+   */
+  public grantInvokeAccess(grantee: IGrantable) {
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['execute-api:Invoke'],
+      resourceArns: [this.api.arnForExecuteApi('*', '/*', '*')],
+    });
+  }
+  <%_ } _%>
+}

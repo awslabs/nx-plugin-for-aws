@@ -324,7 +324,7 @@ function lambdaFunctionBlueprints(
   return Object.fromEntries(types.map((type) => [type, blueprint]));
 }
 
-/** The API blueprint: a Lambda behind API Gateway, with a WAF on REST stages. */
+/** The API blueprint: a Lambda or container service behind API Gateway, with a WAF on REST stages. */
 function apiBlueprints(...types: string[]): Record<string, Blueprint> {
   const blueprint: Blueprint = {
     resources: [
@@ -355,6 +355,41 @@ function apiBlueprints(...types: string[]): Record<string, Blueprint> {
         when: { infra: 'http-lambda' },
       },
       {
+        id: 'apigw-http-ecs',
+        label: 'API Gateway',
+        detail: 'HTTP API',
+        icon: 'api-gateway',
+        column: 1,
+        row: 0,
+        when: { infra: 'http-ecs' },
+      },
+      {
+        id: 'alb',
+        label: 'Load Balancer',
+        detail: 'Internal, in your VPC',
+        column: 2,
+        row: 0,
+        when: { infra: 'http-ecs' },
+      },
+      {
+        id: 'ecs',
+        label: 'ECS',
+        detail: 'Fargate service',
+        icon: 'ecs',
+        column: 3,
+        row: 0,
+        when: { infra: 'http-ecs' },
+      },
+      {
+        id: 'ecr',
+        label: 'ECR',
+        detail: 'Container image',
+        icon: 'ecr',
+        column: 3,
+        row: 1,
+        when: { infra: 'http-ecs' },
+      },
+      {
         id: 'lambda',
         label: 'Lambda',
         detail: 'Router',
@@ -372,7 +407,17 @@ function apiBlueprints(...types: string[]): Record<string, Blueprint> {
         when: { infra: 'none' },
       },
     ],
-    path: ['waf', 'apigw-rest', 'apigw-http', 'lambda', 'local'],
+    path: [
+      'waf',
+      'apigw-rest',
+      'apigw-http',
+      'apigw-http-ecs',
+      'alb',
+      'lambda',
+      'ecs',
+      'local',
+    ],
+    links: [{ from: 'ecr', to: 'ecs' }],
     caller: { label: 'Client' },
   };
   return Object.fromEntries(types.map((type) => [type, blueprint]));

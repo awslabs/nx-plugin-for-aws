@@ -1,0 +1,256 @@
+import { CfnResource, Duration, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import {
+  HttpRouteIntegration,
+  VpcLink,
+} from 'aws-cdk-lib/aws-apigatewayv2';
+import { HttpAlbIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import {
+  IVpc,
+  Port,
+  SecurityGroup,
+  SubnetSelection,
+  SubnetType,
+} from 'aws-cdk-lib/aws-ec2';
+import { FargateService } from 'aws-cdk-lib/aws-ecs';
+import {
+  ApplicationListener,
+  ApplicationLoadBalancer,
+  ApplicationProtocol,
+  ApplicationTargetGroup,
+} from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import { PolicyStatement, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
+import {
+  BlockPublicAccess,
+  Bucket,
+  BucketEncryption,
+  ObjectOwnership,
+} from 'aws-cdk-lib/aws-s3';
+import { Construct } from 'constructs';
+import { suppressRules } from '../checkov<% if (esm) { %>.js<% } %>';
+
+/** Port the internal load balancer's listener accepts requests on. */
+const LISTENER_PORT = 80;
+
+/**
+ * Properties for an {@link EcsHttpEndpoint}.
+ */
+export interface EcsHttpEndpointProps {
+  /**
+   * VPC holding the load balancer and the VPC link. It must be the VPC the
+   * service runs in.
+   */
+  readonly vpc: IVpc;
+  /**
+   * Subnets for the load balancer and the VPC link. They must be private:
+   * nothing here is reachable from the internet.
+   *
+   * @default { subnetType: SubnetType.PRIVATE_WITH_EGRESS }
+   */
+  readonly vpcSubnets?: SubnetSelection;
+  /**
+   * The Fargate service to send requests to, registered as IP targets.
+   */
+  readonly service: FargateService;
+  /**
+   * Port the server listens on inside the container.
+   */
+  readonly containerPort: number;
+  /**
+   * Path the target group health check calls, which must answer 200.
+   */
+  readonly healthCheckPath: string;
+}
+
+/**
+ * The path API Gateway reaches a private container service through: a VPC
+ * link, an internal load balancer, and a target group holding the service's
+ * tasks.
+ *
+ * Every API that hosts its operations on Amazon ECS uses this construct, so
+ * the load balancer, the VPC link and the security-group rules between them
+ * are defined in one place.
+ *
+ * Exactly two connections are allowed: the VPC link to the load balancer's
+ * listener, and the load balancer to the tasks' container port. Neither the
+ * load balancer nor the tasks are reachable from the internet, and no rule
+ * names an address range.
+ *
+ * The load balancer writes its access logs to a bucket this construct creates,
+ * so a request can be traced to the task that served it.
+ */
+export class EcsHttpEndpoint extends Construct {
+  /** The internal load balancer in front of the service. */
+  public readonly loadBalancer: ApplicationLoadBalancer;
+  /** The load balancer's listener, which API Gateway integrates with. */
+  public readonly listener: ApplicationListener;
+  /** The target group holding the service's tasks. */
+  public readonly targetGroup: ApplicationTargetGroup;
+  /** API Gateway's path into the VPC. */
+  public readonly vpcLink: VpcLink;
+  /** The integration an HTTP API route uses to reach the service. */
+  public readonly integration: HttpRouteIntegration;
+  /**
+   * Bucket the load balancer writes its access logs to. Add lifecycle rules
+   * here if you want the logs expired or moved to a cheaper storage class.
+   */
+  public readonly accessLogsBucket: Bucket;
+
+  constructor(scope: Construct, id: string, props: EcsHttpEndpointProps) {
+    super(scope, id);
+    const vpcSubnets = props.vpcSubnets ?? {
+      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+    };
+
+    // Named so the load balancer's only inbound rule can reference it.
+    const vpcLinkSecurityGroup = new SecurityGroup(
+      this,
+      'VpcLinkSecurityGroup',
+      {
+        vpc: props.vpc,
+        description:
+          'API Gateway VPC link. Reaches the internal load balancer only.',
+        // The load balancer's listener is the only thing the VPC link talks to,
+        // so the one egress rule below is written by hand instead.
+        allowAllOutbound: false,
+      },
+    );
+    this.vpcLink = new VpcLink(this, 'VpcLink', {
+      vpc: props.vpc,
+      subnets: vpcSubnets,
+      securityGroups: [vpcLinkSecurityGroup],
+    });
+
+    // Bucket holding the load balancer's access logs. They name the target that
+    // served each request and its status code, which is what the HTTP API's own
+    // stage log cannot tell you when one task starts failing health checks.
+    this.accessLogsBucket = new Bucket(this, 'AccessLogsBucket', {
+      enforceSSL: true,
+      autoDeleteObjects: true,
+      removalPolicy: RemovalPolicy.DESTROY,
+      // SSE-S3 is the only server-side encryption a load balancer can write
+      // access logs through: delivery fails against an SSE-KMS bucket.
+      encryption: BucketEncryption.S3_MANAGED,
+      // Log delivery writes objects the bucket owner already owns, so ACLs
+      // have no part to play here and are switched off.
+      objectOwnership: ObjectOwnership.BUCKET_OWNER_ENFORCED,
+      publicReadAccess: false,
+      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+    });
+    suppressRules(
+      this.accessLogsBucket,
+      ['CKV_AWS_21'],
+      'Access log bucket does not need versioning enabled',
+    );
+    suppressRules(
+      this.accessLogsBucket,
+      ['CKV_AWS_18'],
+      'Access log bucket does not need its own S3 server access logs',
+    );
+
+    this.loadBalancer = new ApplicationLoadBalancer(this, 'LoadBalancer', {
+      vpc: props.vpc,
+      vpcSubnets,
+      // Only API Gateway reaches this load balancer, through the VPC link.
+      internetFacing: false,
+      // Headers that do not parse are dropped rather than passed to the
+      // container.
+      dropInvalidHeaderFields: true,
+    });
+    // Turning the logs on, rather than calling `loadBalancer.logAccessLogs`:
+    // that method grants the Region's legacy Elastic Load Balancing account, so
+    // it needs the stack's Region to be known while the template is built and
+    // fails on a Region-agnostic stack — the shape a CDK unit test uses. The
+    // log delivery service principal below is what Elastic Load Balancing
+    // documents today, and it is accepted in every Region.
+    this.accessLogsBucket.addToResourcePolicy(
+      new PolicyStatement({
+        actions: ['s3:PutObject'],
+        principals: [
+          new ServicePrincipal(
+            'logdelivery.elasticloadbalancing.amazonaws.com',
+          ),
+        ],
+        resources: [
+          this.accessLogsBucket.arnForObjects(
+            `AWSLogs/${Stack.of(this).account}/*`,
+          ),
+        ],
+        // Only a load balancer in this account and Region may write here.
+        // Elastic Load Balancing documents this condition as the best
+        // practice to go with the account-scoped resource path above.
+        conditions: {
+          ArnLike: {
+            'aws:SourceArn': Stack.of(this).formatArn({
+              service: 'elasticloadbalancing',
+              resource: 'loadbalancer',
+              resourceName: '*',
+            }),
+          },
+        },
+      }),
+    );
+    this.loadBalancer.setAttribute('access_logs.s3.enabled', 'true');
+    this.loadBalancer.setAttribute(
+      'access_logs.s3.bucket',
+      this.accessLogsBucket.bucketName,
+    );
+    // The load balancer is rejected if the policy is not in place by the time
+    // it is created.
+    const cfnLoadBalancer = this.loadBalancer.node.defaultChild;
+    const cfnBucketPolicy = this.accessLogsBucket.policy?.node.defaultChild;
+    if (
+      CfnResource.isCfnResource(cfnLoadBalancer) &&
+      CfnResource.isCfnResource(cfnBucketPolicy)
+    ) {
+      cfnLoadBalancer.addResourceDependency(cfnBucketPolicy);
+    }
+
+    this.listener = this.loadBalancer.addListener('Listener', {
+      port: LISTENER_PORT,
+      protocol: ApplicationProtocol.HTTP,
+      // `open` defaults to true, which would allow 0.0.0.0/0 on the listener
+      // port. The VPC link's security group below is the only source allowed.
+      open: false,
+    });
+    this.listener.connections.allowDefaultPortFrom(
+      vpcLinkSecurityGroup,
+      'API Gateway VPC link to the load balancer',
+    );
+    // `allowDefaultPortFrom` writes the load balancer's inbound rule only, so
+    // the VPC link's matching egress rule is added here. It is the group's only
+    // egress rule.
+    vpcLinkSecurityGroup.connections.allowTo(
+      this.loadBalancer,
+      Port.tcp(LISTENER_PORT),
+      'API Gateway VPC link to the load balancer',
+    );
+    suppressRules(
+      this.listener,
+      ['CKV_AWS_2', 'CKV_AWS_103'],
+      'TLS terminates at API Gateway; this listener is reachable only from the VPC link inside the VPC',
+    );
+
+    // Registering the service as a target adds the tasks' only inbound rule:
+    // the load balancer's security group on the container port.
+    this.targetGroup = this.listener.addTargets('Targets', {
+      port: props.containerPort,
+      protocol: ApplicationProtocol.HTTP,
+      targets: [props.service],
+      healthCheck: {
+        path: props.healthCheckPath,
+        healthyHttpCodes: '200',
+        interval: Duration.seconds(15),
+        timeout: Duration.seconds(5),
+        healthyThresholdCount: 2,
+        unhealthyThresholdCount: 3,
+      },
+      deregistrationDelay: Duration.seconds(30),
+    });
+
+    this.integration = new HttpAlbIntegration(
+      'AlbIntegration',
+      this.listener,
+      { vpcLink: this.vpcLink },
+    );
+  }
+}
