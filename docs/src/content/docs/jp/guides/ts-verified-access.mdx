@@ -1,0 +1,103 @@
+---
+title: Verified Access
+description: プライベートREST APIの前にAWS Verified Accessのドアを配置する
+generator: ts#verified-access
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+Verified Accessジェネレーターは、REST APIをVPCにプライベートにし、独自のドメイン上で[AWS Verified Access](https://docs.aws.amazon.com/verified-access/latest/ug/what-is-verified-access.html)エンドポイント（ドア）をその前に配置します。APIはパブリックエンドポイントを持たなくなります。ユーザーはCognito User Poolを使用してドアでサインインし、ドアはリクエストがAPIに到達する前に[Cedar](https://docs.aws.amazon.com/verified-access/latest/ug/auth-policies.html)ポリシーを適用します。APIは依然として独自の認可をチェックします。
+
+<Link path="guides/react-website#hosting-through-api-gateway">API経由でホストされる</Link>ウェブサイトと組み合わせることで、ウェブサイトとAPIの両方をドアから提供し、どちらもパブリックエンドポイントを持たないようにします。
+
+## 使用方法
+
+まず、例えば<Link path="guides/ts-smithy-api">`ts#smithy-api`</Link>を使用してREST APIを生成し、ワークスペースがUser Poolを持つようにウェブサイトに<Link path="guides/react-website-auth">認証</Link>を追加します。その後、次を実行します：
+
+<RunGenerator generator="ts#verified-access" requiredParameters={{ apiProject: 'my-api' }} />
+
+### オプション
+
+<GeneratorParameters generator="ts#verified-access" />
+
+## ジェネレーター出力
+
+ジェネレーターは共有コンストラクトにコンストラクトを追加します。CDKのみをサポートします。
+
+<FileTree>
+
+- packages/common/constructs/src/core
+  - verified-access.ts ドア、そのトラストプロバイダー、Web ACL、DNSレコード、および転送先のプライベートカスタムドメイン
+
+</FileTree>
+
+## インフラストラクチャの使用
+
+APIの後に、スタックにドアを追加します。プライベートAPIに到達するために、既存のVPCを検索するなど、あなたのVPCが必要です：
+
+```diff lang="ts" title="packages/infra/src/stacks/application-stack.ts"
++import { Vpc } from 'aws-cdk-lib/aws-ec2';
++import { HostedZone } from 'aws-cdk-lib/aws-route53';
+ import {
+   MyApi,
+   MyWebsite,
+   UserIdentity,
++  VerifiedAccess,
+ } from '@my-scope/common-constructs';
+
+     const identity = new UserIdentity(this, 'Identity');
+     const api = new MyApi(this, 'MyApi', {
+       integrations: MyApi.defaultIntegrations(this).build(),
+     });
+     api.grantInvokeAccess(identity.identityPool.authenticatedRole);
++    new VerifiedAccess(this, 'Door', {
++      api,
++      identity,
++      vpc: Vpc.fromLookup(this, 'Vpc', { vpcId: 'vpc-0123456789abcdef0' }),
++      hostedZone: HostedZone.fromHostedZoneAttributes(this, 'Zone', {
++        hostedZoneId: 'Z0123456789EXAMPLE',
++        zoneName: 'example.com',
++      }),
++      recordName: 'app',
++    });
+```
+
+ドアはAPIをexecute-apiエンドポイント（`door.executeApiEndpoint`）にプライベートにし、それを経由しない呼び出しを拒否します。ドア自体は何も許可しないため、APIの独自の権限付与が誰が何を呼び出せるかを決定します。<Link path="guides/react-website#runtime-configuration">ランタイム設定</Link>のAPIのエントリを`https://app.example.com/prod/`に向け、サインインがそこに戻ることを許可します。
+
+VPCには、execute-apiエンドポイントが使用できる少なくとも1つのアベイラビリティーゾーンにサブネットが必要です。その中で、ドアは次を作成します：
+
+- `endpoint`を渡さない限り、VPCのアドレス範囲からのHTTPSを許可するセキュリティグループを持つexecute-apiインターフェースエンドポイント
+- Verified Accessエンドポイント用のセキュリティグループ。ポート443でexecute-apiエンドポイントへのアクセスが許可されます
+
+また、次も作成します：
+
+- `app.example.com`の証明書。ホストゾーンで検証されます
+- 独自のCognitoクライアントと、User Pool上のOIDCトラストプロバイダー
+- アクセスログとリージョナルWeb ACLを持つVerified Accessインスタンス、グループ、エンドポイント
+- エンドポイントを指す`app.example.com`のCNAMEレコード
+- エンドポイントを経由して到達される、`app.example.com`上のAPIのステージ用のプライベートカスタムドメイン
+
+### VPCの選択
+
+`vpc`は必須です：`Vpc.fromLookup`からの既存のVPC、またはスタックが作成するVPCです。すでにexecute-apiエンドポイントがある場合は、それを`endpoint`として渡すと、ドアは別のエンドポイントを作成する代わりに、ポート443で独自のセキュリティグループをそれに許可します。ドアが作成するエンドポイントはプライベートDNSがオフになっているため、VPCからAPI Gatewayへの他の呼び出しは変更されません。
+
+デフォルトでは、ドアはUser Poolがメールアドレスを検証した人を許可します。それを変更するには、Cedarの`policyDocument`を渡し、ユーザーのクレームを`context.cognito`として参照します。
+
+これは<Link path="guides/react-website#hosting-through-api-gateway">API経由でホストされる</Link>ウェブサイトと連携し、ドアはAPIと共にウェブサイトを提供します。それぞれが独自のステートメントをスタックに追加し、順序は問いません。
+
+### 注意点
+
+- ホストゾーンは、ACMが証明書を検証し、ブラウザがドアのドメインを解決できるように、親から委任されたパブリックゾーンである必要があります。
+- 最初のデプロイには約20分かかり、そのほとんどはVerified Accessエンドポイントの作成です。
+- Verified Accessは、使用されているかどうかに関係なく、各アプリケーションエンドポイントに対して時間単位で課金され、トラフィックのGB単位でも課金されます。[AWS Verified Accessの料金](https://aws.amazon.com/verified-access/pricing/)を参照してください。
+- 各ドアはVerified Accessインスタンスであり、インスタンスは[アカウントクォータ](https://docs.aws.amazon.com/verified-access/latest/ug/verified-access-quotas.html)にカウントされます。
+- User PoolはデフォルトでMFAを要求するため、ユーザーはドアでの最初のサインイン時にそれを設定します。
+- デフォルトポリシーは、User Poolがメールアドレスを検証していないユーザーを拒否します。
+- プライベートAPIはVPCエンドポイント経由でのみ到達可能であるため、ウェブサイトの`serve`ターゲットはデプロイされたAPIを呼び出すことができません。APIのローカルサーバーを実行する<Link path="guides/react-website#dev-target">`dev`ターゲット</Link>を使用してください。
+- URLの`#fragment`はサーバーに送信されないため、ドアのサインインを通じて失われます。パスとクエリは保持されます。
+- プライベートAPIは、ドアが作成するプライベートカスタムドメイン名にのみマッピングできます。そのため、ドアは、パブリックカスタムドメイン名または独自のベースパスマッピングを持つAPIを、合成時に拒否します。
+- User Poolはスタックが削除されても保持され、削除保護が有効になっています。後で手動で削除してください。
+- `UserIdentity`、APIのコンストラクト、またはウェブサイトの`useSigV4`フックが古いバージョンのプラグインによって生成された場合、ジェネレーターは停止してそれを指定します。`nx migrate @aws/nx-plugin`を実行し、マイグレーションを適用してから、ジェネレーターを再度実行してください。

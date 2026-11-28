@@ -1,0 +1,103 @@
+---
+title: Verified Access
+description: Placer une porte AWS Verified Access devant une API REST privée
+generator: ts#verified-access
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+Le générateur Verified Access rend une API REST privée à un VPC, et place un point de terminaison [AWS Verified Access](https://docs.aws.amazon.com/verified-access/latest/ug/what-is-verified-access.html) (la porte) devant elle, sur un domaine qui vous appartient. L'API n'a alors plus de point de terminaison public. Les utilisateurs se connectent à la porte avec votre Cognito User Pool, et la porte applique une politique [Cedar](https://docs.aws.amazon.com/verified-access/latest/ug/auth-policies.html) avant que toute requête n'atteigne l'API, qui vérifie toujours sa propre autorisation.
+
+Avec un site web <Link path="guides/react-website#hosting-through-api-gateway">hébergé via l'API</Link>, cela sert à la fois le site web et l'API depuis la porte, sans point de terminaison public pour aucun des deux.
+
+## Utilisation
+
+Générez d'abord une API REST, par exemple avec <Link path="guides/ts-smithy-api">`ts#smithy-api`</Link>, et ajoutez l'<Link path="guides/react-website-auth">authentification</Link> à votre site web pour que l'espace de travail ait un User Pool. Ensuite, exécutez :
+
+<RunGenerator generator="ts#verified-access" requiredParameters={{ apiProject: 'my-api' }} />
+
+### Options
+
+<GeneratorParameters generator="ts#verified-access" />
+
+## Sortie du générateur
+
+Le générateur ajoute une construction à vos constructions partagées. Il prend en charge CDK uniquement.
+
+<FileTree>
+
+- packages/common/constructs/src/core
+  - verified-access.ts La porte, son fournisseur de confiance, Web ACL et enregistrement DNS, et le domaine personnalisé privé vers lequel elle redirige
+
+</FileTree>
+
+## Utilisation de l'infrastructure
+
+Ajoutez la porte à votre pile, après l'API. Elle a besoin d'un VPC qui vous appartient pour atteindre l'API privée, comme un VPC existant que vous recherchez :
+
+```diff lang="ts" title="packages/infra/src/stacks/application-stack.ts"
++import { Vpc } from 'aws-cdk-lib/aws-ec2';
++import { HostedZone } from 'aws-cdk-lib/aws-route53';
+ import {
+   MyApi,
+   MyWebsite,
+   UserIdentity,
++  VerifiedAccess,
+ } from '@my-scope/common-constructs';
+
+     const identity = new UserIdentity(this, 'Identity');
+     const api = new MyApi(this, 'MyApi', {
+       integrations: MyApi.defaultIntegrations(this).build(),
+     });
+     api.grantInvokeAccess(identity.identityPool.authenticatedRole);
++    new VerifiedAccess(this, 'Door', {
++      api,
++      identity,
++      vpc: Vpc.fromLookup(this, 'Vpc', { vpcId: 'vpc-0123456789abcdef0' }),
++      hostedZone: HostedZone.fromHostedZoneAttributes(this, 'Zone', {
++        hostedZoneId: 'Z0123456789EXAMPLE',
++        zoneName: 'example.com',
++      }),
++      recordName: 'app',
++    });
+```
+
+La porte rend l'API privée à un point de terminaison execute-api (`door.executeApiEndpoint`), et refuse tout appel qui ne passe pas par elle. Elle n'autorise rien elle-même, donc les autorisations propres de l'API décident toujours qui peut appeler quoi. Elle pointe l'entrée de l'API dans la <Link path="guides/react-website#runtime-configuration">configuration d'exécution</Link> vers `https://app.example.com/prod/`, et autorise la connexion à y retourner.
+
+Le VPC a besoin d'un sous-réseau dans au moins une zone de disponibilité que le point de terminaison execute-api peut utiliser. Dans celui-ci, la porte crée :
+
+- sauf si vous passez un `endpoint`, un point de terminaison d'interface execute-api, avec un groupe de sécurité qui admet HTTPS depuis la plage d'adresses du VPC ;
+- un groupe de sécurité pour le point de terminaison Verified Access, autorisé vers le point de terminaison execute-api sur le port 443.
+
+Elle crée également :
+
+- un certificat pour `app.example.com`, validé dans la zone hébergée ;
+- un client Cognito qui lui est propre, et un fournisseur de confiance OIDC sur votre User Pool ;
+- une instance, un groupe et un point de terminaison Verified Access, avec des journaux d'accès et un Web ACL régional ;
+- un enregistrement CNAME pour `app.example.com`, pointant vers le point de terminaison ;
+- un domaine personnalisé privé pour l'étape de l'API sur `app.example.com`, atteint via le point de terminaison.
+
+### Choisir le VPC
+
+`vpc` est requis : un VPC existant depuis `Vpc.fromLookup`, ou un que votre pile crée. S'il a déjà un point de terminaison execute-api, passez-le comme `endpoint`, et la porte autorise son propre groupe de sécurité vers celui-ci sur le port 443 au lieu d'en créer un autre. Un point de terminaison que la porte crée a le DNS privé désactivé, donc les autres appels à API Gateway depuis le VPC restent inchangés.
+
+Par défaut, la porte admet toute personne dont l'adresse e-mail a été vérifiée par le User Pool. Passez un `policyDocument` Cedar pour changer cela, en faisant référence aux revendications de l'utilisateur comme `context.cognito`.
+
+Cela fonctionne avec un site web <Link path="guides/react-website#hosting-through-api-gateway">hébergé via l'API</Link>, que la porte sert alors avec l'API. Chacun ajoute sa propre déclaration à la pile, dans n'importe quel ordre.
+
+### Pièges
+
+- La zone hébergée doit être une zone publique déléguée depuis son parent, afin qu'ACM puisse valider le certificat et que les navigateurs puissent résoudre le domaine de la porte.
+- Le premier déploiement prend environ 20 minutes, dont la majeure partie pour créer le point de terminaison Verified Access.
+- Verified Access est facturé par heure pour chaque point de terminaison d'application, ainsi que par Go de trafic, qu'il soit utilisé ou non. Voir [Tarification AWS Verified Access](https://aws.amazon.com/verified-access/pricing/).
+- Chaque porte est une instance Verified Access, et les instances comptent dans un [quota de compte](https://docs.aws.amazon.com/verified-access/latest/ug/verified-access-quotas.html).
+- Le User Pool exige MFA par défaut, donc les utilisateurs le configurent lors de leur première connexion à la porte.
+- La politique par défaut refuse les utilisateurs dont l'adresse e-mail n'a pas été vérifiée par le User Pool.
+- Une API privée n'est accessible que via son point de terminaison VPC, donc la cible `serve` du site web ne peut pas appeler l'API déployée. Utilisez sa <Link path="guides/react-website#dev-target">cible `dev`</Link>, qui exécute le serveur local de l'API.
+- Le `#fragment` d'une URL n'est pas envoyé au serveur, il est donc perdu lors de la connexion via la porte. Le chemin et la requête sont conservés.
+- Une API privée ne peut être mappée qu'à un nom de domaine personnalisé privé, que la porte crée. Donc la porte refuse, lors de la synthèse, une API avec un nom de domaine personnalisé public ou un mappage de chemin de base qui lui est propre.
+- Les User Pools sont conservés lorsque la pile est supprimée, et ont la protection contre la suppression activée. Supprimez-les manuellement par la suite.
+- Si `UserIdentity`, la construction de votre API ou le hook `useSigV4` du site web a été généré par une version plus ancienne du plugin, le générateur s'arrête et le nomme. Exécutez `nx migrate @aws/nx-plugin`, appliquez les migrations, et exécutez à nouveau le générateur.

@@ -1,0 +1,103 @@
+---
+title: Verified Access
+description: Metti una porta AWS Verified Access davanti a una REST API privata
+generator: ts#verified-access
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+Il generatore Verified Access rende una REST API privata a un VPC e mette un endpoint [AWS Verified Access](https://docs.aws.amazon.com/verified-access/latest/ug/what-is-verified-access.html) (la porta) davanti ad essa, su un dominio di tua proprietà. L'API non ha quindi alcun endpoint pubblico. Gli utenti accedono alla porta con il tuo Cognito User Pool e la porta applica una policy [Cedar](https://docs.aws.amazon.com/verified-access/latest/ug/auth-policies.html) prima che qualsiasi richiesta raggiunga l'API, che controlla comunque la propria autorizzazione.
+
+Insieme a un sito web <Link path="guides/react-website#hosting-through-api-gateway">ospitato tramite l'API</Link>, questo serve sia il sito web che l'API dalla porta, senza endpoint pubblico per nessuno dei due.
+
+## Utilizzo
+
+Genera prima una REST API, ad esempio con <Link path="guides/ts-smithy-api">`ts#smithy-api`</Link>, e aggiungi l'<Link path="guides/react-website-auth">autenticazione</Link> al tuo sito web in modo che il workspace abbia un User Pool. Quindi esegui:
+
+<RunGenerator generator="ts#verified-access" requiredParameters={{ apiProject: 'my-api' }} />
+
+### Opzioni
+
+<GeneratorParameters generator="ts#verified-access" />
+
+## Output del generatore
+
+Il generatore aggiunge un costrutto ai tuoi costrutti condivisi. Supporta solo CDK.
+
+<FileTree>
+
+- packages/common/constructs/src/core
+  - verified-access.ts La porta, il suo trust provider, Web ACL e record DNS, e il dominio personalizzato privato a cui inoltra
+
+</FileTree>
+
+## Utilizzo dell'infrastruttura
+
+Aggiungi la porta al tuo stack, dopo l'API. Ha bisogno di un tuo VPC da cui raggiungere l'API privata, come uno esistente che cerchi:
+
+```diff lang="ts" title="packages/infra/src/stacks/application-stack.ts"
++import { Vpc } from 'aws-cdk-lib/aws-ec2';
++import { HostedZone } from 'aws-cdk-lib/aws-route53';
+ import {
+   MyApi,
+   MyWebsite,
+   UserIdentity,
++  VerifiedAccess,
+ } from '@my-scope/common-constructs';
+
+     const identity = new UserIdentity(this, 'Identity');
+     const api = new MyApi(this, 'MyApi', {
+       integrations: MyApi.defaultIntegrations(this).build(),
+     });
+     api.grantInvokeAccess(identity.identityPool.authenticatedRole);
++    new VerifiedAccess(this, 'Door', {
++      api,
++      identity,
++      vpc: Vpc.fromLookup(this, 'Vpc', { vpcId: 'vpc-0123456789abcdef0' }),
++      hostedZone: HostedZone.fromHostedZoneAttributes(this, 'Zone', {
++        hostedZoneId: 'Z0123456789EXAMPLE',
++        zoneName: 'example.com',
++      }),
++      recordName: 'app',
++    });
+```
+
+La porta rende l'API privata a un endpoint execute-api (`door.executeApiEndpoint`) e nega qualsiasi chiamata non effettuata attraverso di essa. Non consente nulla di per sé, quindi le concessioni proprie dell'API decidono ancora chi può chiamare cosa. Punta la voce dell'API nella <Link path="guides/react-website#runtime-configuration">configurazione runtime</Link> a `https://app.example.com/prod/` e consente al sign-in di tornare lì.
+
+Il VPC ha bisogno di una subnet in almeno una Availability Zone che l'endpoint execute-api possa utilizzare. In essa, la porta crea:
+
+- a meno che tu non passi un `endpoint`, un endpoint di interfaccia execute-api, con un security group che ammette HTTPS dall'intervallo di indirizzi del VPC;
+- un security group per l'endpoint Verified Access, consentito all'endpoint execute-api sulla porta 443.
+
+Crea anche:
+
+- un certificato per `app.example.com`, validato nella hosted zone;
+- un client Cognito proprio e un trust provider OIDC sul tuo User Pool;
+- un'istanza, un gruppo e un endpoint Verified Access, con log di accesso e un Web ACL regionale;
+- un record CNAME per `app.example.com`, che punta all'endpoint;
+- un dominio personalizzato privato per lo stage dell'API su `app.example.com`, raggiunto attraverso l'endpoint.
+
+### Scelta del VPC
+
+`vpc` è obbligatorio: un VPC esistente da `Vpc.fromLookup`, o uno che il tuo stack crea. Se ha già un endpoint execute-api, passalo come `endpoint`, e la porta consente il proprio security group ad esso sulla porta 443 invece di crearne un altro. Un endpoint che la porta crea ha il DNS privato disattivato, quindi altre chiamate ad API Gateway dal VPC rimangono invariate.
+
+Per impostazione predefinita, la porta ammette chiunque il cui indirizzo email sia stato verificato dal User Pool. Passa un `policyDocument` Cedar per cambiarlo, facendo riferimento ai claim dell'utente come `context.cognito`.
+
+Questo funziona con un sito web <Link path="guides/react-website#hosting-through-api-gateway">ospitato tramite l'API</Link>, che la porta serve quindi con l'API. Ciascuno aggiunge la propria istruzione allo stack, in qualsiasi ordine.
+
+### Insidie
+
+- La hosted zone deve essere una zona pubblica delegata dal suo genitore, in modo che ACM possa validare il certificato e i browser possano risolvere il dominio della porta.
+- Il primo deploy richiede circa 20 minuti, la maggior parte dei quali per creare l'endpoint Verified Access.
+- Verified Access viene addebitato per ora per ogni endpoint dell'applicazione, oltre che per GB di traffico, che venga utilizzato o meno. Vedi [Prezzi di AWS Verified Access](https://aws.amazon.com/verified-access/pricing/).
+- Ogni porta è un'istanza Verified Access e le istanze contano contro una [quota dell'account](https://docs.aws.amazon.com/verified-access/latest/ug/verified-access-quotas.html).
+- Il User Pool richiede MFA per impostazione predefinita, quindi gli utenti lo configurano al loro primo accesso alla porta.
+- La policy predefinita rifiuta gli utenti il cui indirizzo email non è stato verificato dal User Pool.
+- Un'API privata è raggiungibile solo attraverso il suo endpoint VPC, quindi il target `serve` del sito web non può chiamare l'API distribuita. Usa il suo <Link path="guides/react-website#dev-target">target `dev`</Link>, che esegue il server locale dell'API.
+- Il `#fragment` di un URL non viene inviato al server, quindi viene perso attraverso il sign-in della porta. Il percorso e la query vengono mantenuti.
+- Un'API privata può essere mappata solo a un nome di dominio personalizzato privato, che la porta crea. Quindi la porta rifiuta, al synth, un'API con un nome di dominio personalizzato pubblico o un proprio mapping del percorso base.
+- I User Pool vengono conservati quando lo stack viene eliminato e hanno la protezione dall'eliminazione attiva. Eliminali manualmente in seguito.
+- Se `UserIdentity`, il costrutto della tua API o l'hook `useSigV4` del sito web è stato generato da una versione precedente del plugin, il generatore si ferma e lo nomina. Esegui `nx migrate @aws/nx-plugin`, applica le migrazioni ed esegui nuovamente il generatore.

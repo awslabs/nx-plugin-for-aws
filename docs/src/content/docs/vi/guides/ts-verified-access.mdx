@@ -1,0 +1,103 @@
+---
+title: Verified Access
+description: Đặt cửa AWS Verified Access phía trước REST API riêng tư
+generator: ts#verified-access
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+Generator Verified Access làm cho REST API trở thành riêng tư đối với VPC, và đặt một endpoint [AWS Verified Access](https://docs.aws.amazon.com/verified-access/latest/ug/what-is-verified-access.html) (cửa) phía trước nó, trên domain của riêng bạn. API sau đó không có endpoint công khai. Người dùng đăng nhập tại cửa với Cognito User Pool của bạn, và cửa áp dụng chính sách [Cedar](https://docs.aws.amazon.com/verified-access/latest/ug/auth-policies.html) trước khi bất kỳ yêu cầu nào đến API, API vẫn kiểm tra quyền của riêng nó.
+
+Cùng với website <Link path="guides/react-website#hosting-through-api-gateway">được lưu trữ thông qua API</Link>, điều này phục vụ cả website và API từ cửa, không có endpoint công khai cho cả hai.
+
+## Cách sử dụng
+
+Tạo REST API trước, ví dụ với <Link path="guides/ts-smithy-api">`ts#smithy-api`</Link>, và thêm <Link path="guides/react-website-auth">xác thực</Link> vào website của bạn để workspace có User Pool. Sau đó chạy:
+
+<RunGenerator generator="ts#verified-access" requiredParameters={{ apiProject: 'my-api' }} />
+
+### Tùy chọn
+
+<GeneratorParameters generator="ts#verified-access" />
+
+## Đầu ra của Generator
+
+Generator thêm một construct vào shared constructs của bạn. Nó chỉ hỗ trợ CDK.
+
+<FileTree>
+
+- packages/common/constructs/src/core
+  - verified-access.ts Cửa, trust provider của nó, Web ACL và DNS record, và custom domain riêng tư mà nó chuyển tiếp đến
+
+</FileTree>
+
+## Cách sử dụng Infrastructure
+
+Thêm cửa vào stack của bạn, sau API. Nó cần VPC của bạn để tiếp cận API riêng tư, chẳng hạn như một VPC hiện có mà bạn tra cứu:
+
+```diff lang="ts" title="packages/infra/src/stacks/application-stack.ts"
++import { Vpc } from 'aws-cdk-lib/aws-ec2';
++import { HostedZone } from 'aws-cdk-lib/aws-route53';
+ import {
+   MyApi,
+   MyWebsite,
+   UserIdentity,
++  VerifiedAccess,
+ } from '@my-scope/common-constructs';
+
+     const identity = new UserIdentity(this, 'Identity');
+     const api = new MyApi(this, 'MyApi', {
+       integrations: MyApi.defaultIntegrations(this).build(),
+     });
+     api.grantInvokeAccess(identity.identityPool.authenticatedRole);
++    new VerifiedAccess(this, 'Door', {
++      api,
++      identity,
++      vpc: Vpc.fromLookup(this, 'Vpc', { vpcId: 'vpc-0123456789abcdef0' }),
++      hostedZone: HostedZone.fromHostedZoneAttributes(this, 'Zone', {
++        hostedZoneId: 'Z0123456789EXAMPLE',
++        zoneName: 'example.com',
++      }),
++      recordName: 'app',
++    });
+```
+
+Cửa làm cho API trở thành riêng tư đối với execute-api endpoint (`door.executeApiEndpoint`), và từ chối bất kỳ cuộc gọi nào không được thực hiện thông qua nó. Nó không cho phép gì cả, vì vậy các grant của chính API vẫn quyết định ai có thể gọi cái gì. Nó trỏ mục API trong <Link path="guides/react-website#runtime-configuration">cấu hình runtime</Link> tại `https://app.example.com/prod/`, và cho phép đăng nhập quay lại đó.
+
+VPC cần một subnet trong ít nhất một Availability Zone mà execute-api endpoint có thể sử dụng. Trong đó, cửa tạo ra:
+
+- trừ khi bạn truyền một `endpoint`, một execute-api interface endpoint, với security group cho phép HTTPS từ dải địa chỉ của VPC;
+- một security group cho Verified Access endpoint, được phép đến execute-api endpoint trên cổng 443.
+
+Nó cũng tạo ra:
+
+- một certificate cho `app.example.com`, được xác thực trong hosted zone;
+- một Cognito client của riêng nó, và một OIDC trust provider trên User Pool của bạn;
+- một Verified Access instance, group và endpoint, với access logs và regional Web ACL;
+- một CNAME record cho `app.example.com`, trỏ đến endpoint;
+- một custom domain riêng tư cho stage của API trên `app.example.com`, được tiếp cận thông qua endpoint.
+
+### Chọn VPC
+
+`vpc` là bắt buộc: một VPC hiện có từ `Vpc.fromLookup`, hoặc một VPC mà stack của bạn tạo ra. Nếu nó đã có execute-api endpoint, truyền nó dưới dạng `endpoint`, và cửa cho phép security group của riêng nó đến nó trên cổng 443 thay vì tạo một cái khác. Một endpoint mà cửa tạo ra có private DNS tắt, vì vậy các cuộc gọi khác đến API Gateway từ VPC không thay đổi.
+
+Theo mặc định, cửa cho phép bất kỳ ai có địa chỉ email mà User Pool đã xác minh. Truyền Cedar `policyDocument` để thay đổi điều đó, tham chiếu đến claims của người dùng dưới dạng `context.cognito`.
+
+Điều này hoạt động với website <Link path="guides/react-website#hosting-through-api-gateway">được lưu trữ thông qua API</Link>, mà cửa sau đó phục vụ cùng với API. Mỗi cái thêm statement của riêng nó vào stack, theo bất kỳ thứ tự nào.
+
+### Lưu ý
+
+- Hosted zone phải là public zone được ủy quyền từ parent của nó, để ACM có thể xác thực certificate và trình duyệt có thể phân giải domain của cửa.
+- Lần deploy đầu tiên mất khoảng 20 phút, phần lớn là tạo Verified Access endpoint.
+- Verified Access được tính phí theo giờ cho mỗi application endpoint, cũng như theo GB lưu lượng, cho dù nó có được sử dụng hay không. Xem [AWS Verified Access pricing](https://aws.amazon.com/verified-access/pricing/).
+- Mỗi cửa là một Verified Access instance, và các instance được tính vào [account quota](https://docs.aws.amazon.com/verified-access/latest/ug/verified-access-quotas.html).
+- User Pool yêu cầu MFA theo mặc định, vì vậy người dùng thiết lập nó tại lần đăng nhập đầu tiên tại cửa.
+- Chính sách mặc định từ chối người dùng có địa chỉ email mà User Pool chưa xác minh.
+- API riêng tư chỉ có thể tiếp cận được thông qua VPC endpoint của nó, vì vậy target `serve` của website không thể gọi API đã deploy. Sử dụng <Link path="guides/react-website#dev-target">target `dev`</Link> của nó, chạy local server của API.
+- `#fragment` của URL không được gửi đến server, vì vậy nó bị mất qua đăng nhập của cửa. Path và query được giữ lại.
+- API riêng tư chỉ có thể được ánh xạ đến private custom domain name, mà cửa tạo ra. Vì vậy cửa từ chối, tại synth, một API có public custom domain name hoặc base path mapping của riêng nó.
+- User Pools được giữ lại khi stack bị xóa, và có deletion protection bật. Xóa chúng bằng tay sau đó.
+- Nếu `UserIdentity`, construct của API hoặc hook `useSigV4` của website được tạo bởi phiên bản cũ hơn của plugin, generator dừng lại và đặt tên cho nó. Chạy `nx migrate @aws/nx-plugin`, áp dụng các migration, và chạy lại generator.
