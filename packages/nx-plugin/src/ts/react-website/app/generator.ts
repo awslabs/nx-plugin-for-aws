@@ -62,6 +62,7 @@ import { withVersions } from '../../../utils/versions.js';
 import {
   addWebsiteInfra,
   WEBSITE_CONSTRUCTS_PY_DEPENDENCIES,
+  type WebsiteHosting,
 } from '../../../utils/website-constructs/website-constructs.js';
 import {
   configureTsProject,
@@ -69,6 +70,11 @@ import {
   TS_PROJECT_DEPENDENCIES,
 } from '../../lib/ts-project-utils.js';
 import { VITEST_DEPENDENCIES } from '../../lib/vitest.js';
+import {
+  applyApiGatewayBasePath,
+  assertHostingFilesCurrent,
+  assertRestApiProject,
+} from './api-gateway-hosting.js';
 // typescript factory imports removed — now using GritQL for vite config transforms
 import type {
   TsReactWebsiteGeneratorSchema,
@@ -82,6 +88,7 @@ export interface TsReactWebsiteMetadata extends IacMetadata {
   readonly infra: WebsiteInfraOption;
   readonly tailwind: boolean;
   readonly tanstackRouter: boolean;
+  readonly hosting?: WebsiteHosting;
 }
 
 // Each entry names the branch it belongs to, so the same declaration drives both
@@ -263,6 +270,21 @@ export async function tsReactWebsiteGenerator(
   // Configure load-runtime-config target based on IaC provider (only when infra is not none)
   const iac = infra !== 'none' ? await resolveIac(tree, schema.iac) : undefined;
 
+  const hosting: WebsiteHosting = schema.hosting ?? 'cloudfront';
+  if (hosting === 'api-gateway') {
+    if (iac !== 'cdk') {
+      throw new Error(
+        'Hosting a website through API Gateway is only supported with CDK',
+      );
+    }
+    assertRestApiProject(tree, schema.apiProject);
+    await assertHostingFilesCurrent(
+      tree,
+      websiteContentPath,
+      schema.apiProject as string,
+    );
+  }
+
   if (iac === 'cdk') {
     targets['load-runtime-config'] = {
       executor: 'nx:run-commands',
@@ -341,6 +363,7 @@ export async function tsReactWebsiteGenerator(
     // Undefined when no infrastructure was generated, so neither provider's
     // packages were added.
     ...(iac ? { iac } : {}),
+    ...(hosting === 'api-gateway' ? { hosting } : {}),
   };
   addGeneratorMetadata(
     tree,
@@ -379,6 +402,7 @@ export async function tsReactWebsiteGenerator(
       websiteContentPath: joinPathFragments('dist', websiteContentPath),
       websiteNameKebabCase,
       websiteNameClassName,
+      hosting,
     });
   }
 
@@ -589,6 +613,10 @@ export async function tsReactWebsiteGenerator(
       viteConfigPath,
       'or { `defineConfig(() => ({ $props }))` where { $props <: not contains `define`, $props += `define: { global: {} }` }, `defineConfig({ $props })` where { $props <: not contains `define`, $props += `define: { global: {} }` } }',
     );
+  }
+
+  if (hosting === 'api-gateway') {
+    await applyApiGatewayBasePath(tree, libraryRoot);
   }
 
   updateJson(

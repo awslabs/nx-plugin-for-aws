@@ -485,6 +485,61 @@ module "my_website" {
 
 Bạn cũng sẽ cần tạo các bản ghi DNS (ví dụ trong Route 53) trỏ tên miền của bạn đến CloudFront distribution.
 
+### Hosting thông qua API Gateway
+
+Thay vì CloudFront, bạn có thể phục vụ website của mình thông qua các routes của một REST API hiện có, trên origin của chính API, không có CloudFront distribution và không có cross-origin requests. Điều này chỉ được hỗ trợ với CDK.
+
+Tạo API trước (với <Link path="guides/ts-smithy-api">`ts#smithy-api`</Link>, hoặc với <Link path="guides/trpc">`ts#trpc-api`</Link> hoặc <Link path="guides/fastapi">`py#fast-api`</Link> sử dụng cơ sở hạ tầng REST), sau đó tạo website của bạn với `hosting` được đặt thành `api-gateway`:
+
+<RunGenerator generator="ts#react-website" requiredParameters={{ name: 'my-website', hosting: 'api-gateway', apiProject: 'my-api' }} />
+
+Website construct được tạo sau đó mở rộng `ApiGatewayStaticWebsite`, thêm các routes này vào API:
+
+- `GET /` và bất kỳ đường dẫn nào không có phần mở rộng file trả về `index.html`, vì vậy các routes của ứng dụng của bạn tải trực tiếp.
+- `GET /runtime-config.json` trả về <Link path="guides/react-website#runtime-configuration">runtime configuration</Link>.
+- `GET /assets/{proxy+}` trả về các file được đặt tên theo hash của nội dung của chúng, được cache trong một năm.
+- Bất kỳ đường dẫn nào khác có phần mở rộng file trả về file đó từ bundle.
+
+Các routes này không cần authorization, trong khi các operations của API giữ nguyên của chúng. Đối với một API có IAM authorization, resource policy cho phép bất kỳ ai mọi `GET` ngoại trừ các IAM operations của chính API, vẫn cần một IAM grant. Web ACL của API cũng bao gồm website.
+
+Website được build với Vite `base` tương đối (`./`), và `basepath` của router đến từ `<base href>` của trang. Construct triển khai một bản sao của `index.html` cho mỗi đường dẫn mà API được truy cập, chẳng hạn như `/prod/` trên execute-api URL hoặc base path của custom domain, và phục vụ mỗi request bản sao cho domain của nó. Vì vậy một build phục vụ mọi URL của API.
+
+Truyền API của bạn cho website:
+
+```diff lang="ts" title="packages/infra/src/stacks/application-stack.ts"
+     const identity = new UserIdentity(this, 'Identity');
+     const api = new MyApi(this, 'MyApi', {
+       integrations: MyApi.defaultIntegrations(this).build(),
+     });
+     api.grantInvokeAccess(identity.identityPool.authenticatedRole);
+-    new MyWebsite(this, 'MyWebsite');
++    new MyWebsite(this, 'MyWebsite', { api });
+```
+
+Web client của User Pool cho phép mọi URL mà website được phục vụ làm callback, vì vậy sign-in quay trở lại URL mà nó bắt đầu.
+
+#### Custom domains
+
+Website cũng được phục vụ từ mỗi custom domain ánh xạ API, cho dù bạn đặt `domainName` của API, gọi `addDomainName`, hoặc ánh xạ nó với một `DomainName` của riêng bạn, trước hoặc sau website construct. Trên mỗi domain, nó được phục vụ dưới base path của mapping: tại `https://app.example.com` cho một base path trống, hoặc tại `https://example.com/app/` cho `app`. Execute-api URL vẫn tiếp tục phục vụ nó.
+
+- `url` luôn là execute-api URL, chẳng hạn như `https://<api-id>.execute-api.<region>.amazonaws.com/prod/`. Nó tồn tại cho mọi API và không phụ thuộc vào domains nào bạn thêm. Stack output `WebsiteUrl` đặt tên cho nó.
+- `urls` liệt kê mọi URL mà website được phục vụ: execute-api URL đầu tiên, sau đó mỗi custom domain được sắp xếp theo tên miền và base path. Stack output `WebsiteUrls` liệt kê chúng, được phân tách bằng dấu cách.
+
+Construct không bao giờ chọn một domain hơn domain khác. Nếu bạn muốn một canonical domain, hãy tự đặt tên cho nó, ví dụ trong một output của riêng bạn:
+
+```ts
+new CfnOutput(this, 'AppUrl', { value: 'https://app.example.com' });
+```
+
+#### Pitfalls
+
+- Website được triển khai chạy dưới một đường dẫn như `/prod/`, trong khi local dev server chạy ở root. Liên kết thông qua router hoặc với các URL tương đối: một liên kết bắt đầu bằng `/` hoạt động locally và bị lỗi khi được triển khai.
+- Runtime configuration đặt tên một URL cho API, mà website gọi từ bất kỳ URL nào nó được tải. API cho phép mọi origin theo mặc định. Nếu bạn hạn chế CORS origins của nó với `restrictCorsTo`, hãy bao gồm origin của mỗi `urls` của website.
+- Giữ `<base href="%BASE_URL%" />` trong `index.html`. Construct ghi đường dẫn của website ở đó trong mỗi bản sao nó triển khai, và build tải mọi thứ tương đối với nó.
+- Construct từ chối synthesise cho một API có operation `GET` tại `/` hoặc tại một top-level path parameter như `/{id}`, điều này sẽ chiếm các đường dẫn mà website được phục vụ.
+- Chuyển một website hiện có từ CloudFront thay thế CloudFront website construct của nó chỉ khi bạn chưa thay đổi nó. Nếu không, generator dừng lại: di chuyển các thay đổi của bạn sang một bên, xóa construct, và chạy lại generator.
+- Nếu `RuntimeConfig`, `CognitoAuth`, `UserIdentity` hoặc construct của API của bạn được tạo bởi một phiên bản cũ hơn của plugin, generator dừng lại và đặt tên cho nó. Chạy `nx migrate @aws/nx-plugin`, áp dụng các migrations, và chạy lại generator.
+
 ## Runtime Configuration
 
 Cấu hình từ cơ sở hạ tầng của bạn được cung cấp cho website của bạn qua <Link path="guides/runtime-config">Runtime Configuration</Link>. Điều này cho phép website của bạn truy cập các chi tiết như API URLs mà không được biết cho đến khi ứng dụng của bạn được triển khai.

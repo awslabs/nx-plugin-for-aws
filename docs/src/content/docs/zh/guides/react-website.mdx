@@ -485,6 +485,61 @@ module "my_website" {
 
 您还需要创建 DNS 记录（例如在 Route 53 中）将您的域名指向 CloudFront 分配。
 
+### 通过 API Gateway 托管
+
+除了 CloudFront，您还可以通过现有 REST API 的路由在 API 自己的源上提供网站服务，无需 CloudFront 分配，也无需跨源请求。这仅支持 CDK。
+
+首先生成 API（使用 <Link path="guides/ts-smithy-api">`ts#smithy-api`</Link>，或使用 REST 基础设施的 <Link path="guides/trpc">`ts#trpc-api`</Link> 或 <Link path="guides/fastapi">`py#fast-api`</Link>），然后将 `hosting` 设置为 `api-gateway` 生成您的网站：
+
+<RunGenerator generator="ts#react-website" requiredParameters={{ name: 'my-website', hosting: 'api-gateway', apiProject: 'my-api' }} />
+
+生成的网站构造随后扩展 `ApiGatewayStaticWebsite`，它将这些路由添加到 API：
+
+- `GET /` 和任何没有文件扩展名的路径返回 `index.html`，因此您的应用程序的路由可以直接加载。
+- `GET /runtime-config.json` 返回<Link path="guides/react-website#runtime-configuration">运行时配置</Link>。
+- `GET /assets/{proxy+}` 返回以其内容哈希命名的文件，缓存一年。
+- 任何其他带有文件扩展名的路径从包中返回该文件。
+
+这些路由不需要授权，而 API 的操作保留其授权。对于具有 IAM 授权的 API，资源策略允许任何人执行除 API 自己的 IAM 操作之外的所有 `GET`，这些操作仍然需要 IAM 授权。API 的 Web ACL 也覆盖网站。
+
+网站使用相对的 Vite `base`（`./`）构建，路由器的 `basepath` 来自页面的 `<base href>`。该构造为 API 到达的每个路径部署 `index.html` 的副本，例如 execute-api URL 上的 `/prod/` 或自定义域的基本路径，并为每个请求提供其域的副本。因此，一次构建可以服务 API 的每个 URL。
+
+将您的 API 传递给网站：
+
+```diff lang="ts" title="packages/infra/src/stacks/application-stack.ts"
+     const identity = new UserIdentity(this, 'Identity');
+     const api = new MyApi(this, 'MyApi', {
+       integrations: MyApi.defaultIntegrations(this).build(),
+     });
+     api.grantInvokeAccess(identity.identityPool.authenticatedRole);
+-    new MyWebsite(this, 'MyWebsite');
++    new MyWebsite(this, 'MyWebsite', { api });
+```
+
+User Pool 的 Web 客户端允许网站提供服务的每个 URL 作为回调，因此登录会返回到它开始的 URL。
+
+#### 自定义域名
+
+网站还从映射 API 的每个自定义域提供服务，无论您是设置 API 的 `domainName`、调用 `addDomainName`，还是在网站构造之前或之后使用您自己的 `DomainName` 映射它。在每个域上，它在映射的基本路径下提供服务：对于空基本路径，在 `https://app.example.com`，或对于 `app`，在 `https://example.com/app/`。execute-api URL 也继续提供服务。
+
+- `url` 始终是 execute-api URL，例如 `https://<api-id>.execute-api.<region>.amazonaws.com/prod/`。它对每个 API 都存在，不依赖于您添加的域。堆栈输出 `WebsiteUrl` 命名它。
+- `urls` 列出网站提供服务的每个 URL：首先是 execute-api URL，然后是按域名和基本路径排序的每个自定义域。堆栈输出 `WebsiteUrls` 列出它们，用空格分隔。
+
+该构造从不选择一个域而不是另一个域。如果您想要一个规范域，请自己命名它，例如在您自己的输出中：
+
+```ts
+new CfnOutput(this, 'AppUrl', { value: 'https://app.example.com' });
+```
+
+#### 陷阱
+
+- 部署的网站在诸如 `/prod/` 之类的路径下运行，而本地开发服务器在根目录运行。通过路由器或使用相对 URL 链接：以 `/` 开头的链接在本地有效，但一旦部署就会中断。
+- 运行时配置为 API 命名一个 URL，网站从加载它的任何 URL 调用该 URL。API 默认允许每个源。如果您使用 `restrictCorsTo` 限制其 CORS 源，请包含网站的每个 `urls` 的源。
+- 在 `index.html` 中保留 `<base href="%BASE_URL%" />`。该构造在它部署的每个副本中写入网站的路径，构建相对于它加载所有内容。
+- 该构造拒绝为在 `/` 或顶级路径参数（如 `/{id}`）处具有 `GET` 操作的 API 合成，这会占用网站提供服务的路径。
+- 从 CloudFront 切换现有网站仅在您未更改它时才替换其 CloudFront 网站构造。否则生成器停止：将您的更改移到一边，删除构造，然后再次运行生成器。
+- 如果 `RuntimeConfig`、`CognitoAuth`、`UserIdentity` 或您的 API 的构造是由旧版本的插件生成的，生成器会停止并命名它。运行 `nx migrate @aws/nx-plugin`，应用迁移，然后再次运行生成器。
+
 ## 运行时配置
 
 来自基础设施的配置通过<Link path="guides/runtime-config">运行时配置</Link>提供给您的网站。这允许您的网站访问诸如 API URL 之类的详细信息，这些信息在应用程序部署之前是未知的。

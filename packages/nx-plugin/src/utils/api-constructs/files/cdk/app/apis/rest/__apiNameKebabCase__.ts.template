@@ -25,9 +25,20 @@ import {
   <%_ if (auth === 'custom') { _%>
   TokenAuthorizer,
   <%_ } _%>
+  CfnRestApi,
   RestApiProps as ApiGatewayRestApiProps,
 } from 'aws-cdk-lib/aws-apigateway';
-import { Aspects, Duration<%_ if (backend.type === 'fastapi') { _%>, Stack<%_ } _%> } from 'aws-cdk-lib';
+import {
+  Aspects,
+  Duration,
+  <%_ if (backend.type === 'fastapi' || auth === 'iam') { _%>
+  Stack,
+  <%_ } _%>
+  <%_ if (auth === 'iam') { _%>
+  Token,
+  TokenComparison,
+  <%_ } _%>
+} from 'aws-cdk-lib';
 import {
   PolicyDocument,
   PolicyStatement,
@@ -292,6 +303,11 @@ export class <%= apiNameClassName %><
       ...props,
     });
     Aspects.of(this).add(new AddCorsPreflightAspect(() => this.allowedOrigins));
+    // A resource policy takes effect only in a new deployment, so the deployment's ID
+    // covers it, as it stands at synth
+    this.api.latestDeployment?.addToLogicalId({
+      policy: (this.api.node.defaultChild as CfnRestApi).policy,
+    });
   }
 
   /**
@@ -341,20 +357,33 @@ export class <%= apiNameClassName %><
     // Here we grant grantee permission to call the api.
     // Machine to machine fine-grained access can be defined here using more specific principals (eg roles or
     // users) and resources (eg which api paths may be invoked by which principal) if required.
-    this.api.addToResourcePolicy(
-      new PolicyStatement({
-        effect: Effect.ALLOW,
-        principals: [grantee.grantPrincipal],
-        actions: ['execute-api:Invoke'],
-        resources: ['execute-api:/*'],
-      }),
-    );
-
-    Grant.addToPrincipal({
+    const grant = Grant.addToPrincipal({
       grantee,
       actions: ['execute-api:Invoke'],
       resourceArns: [this.api.arnForExecuteApi('*', '/*', '*')],
     });
+
+    // The principal's own policy is enough when it is known to be in this account: the
+    // same account, or the same unresolved account token as this stack's. A principal whose
+    // policy cannot be changed, or whose account may differ (another token, say from a
+    // parameter), also needs the resource policy.
+    const { principalAccount } = grantee.grantPrincipal;
+    const stackAccount = Stack.of(this).account;
+    const sameAccount =
+      !!principalAccount &&
+      (principalAccount === stackAccount ||
+        Token.compareStrings(principalAccount, stackAccount) ===
+          TokenComparison.SAME);
+    if (!grant.success || !sameAccount) {
+      this.api.addToResourcePolicy(
+        new PolicyStatement({
+          effect: Effect.ALLOW,
+          principals: [grantee.grantPrincipal],
+          actions: ['execute-api:Invoke'],
+          resources: ['execute-api:/*'],
+        }),
+      );
+    }
   }
   <%_ } _%>
 }

@@ -485,6 +485,61 @@ module "my_website" {
 
 Dovrai anche creare record DNS (ad esempio in Route 53) che puntano il tuo dominio alla distribuzione CloudFront.
 
+### Hosting tramite API Gateway
+
+Invece di CloudFront, puoi servire il tuo sito web attraverso le route di un'API REST esistente, sull'origine propria dell'API, senza distribuzione CloudFront e senza richieste cross-origin. Questo è supportato solo con CDK.
+
+Genera prima l'API (con <Link path="guides/ts-smithy-api">`ts#smithy-api`</Link>, o con <Link path="guides/trpc">`ts#trpc-api`</Link> o <Link path="guides/fastapi">`py#fast-api`</Link> utilizzando l'infrastruttura REST), quindi genera il tuo sito web con `hosting` impostato su `api-gateway`:
+
+<RunGenerator generator="ts#react-website" requiredParameters={{ name: 'my-website', hosting: 'api-gateway', apiProject: 'my-api' }} />
+
+Il costrutto del sito web generato estende quindi `ApiGatewayStaticWebsite`, che aggiunge queste route all'API:
+
+- `GET /` e qualsiasi percorso senza estensione di file restituiscono `index.html`, quindi le route della tua app si caricano direttamente.
+- `GET /runtime-config.json` restituisce la <Link path="guides/react-website#runtime-configuration">configurazione runtime</Link>.
+- `GET /assets/{proxy+}` restituisce i file denominati dall'hash del loro contenuto, memorizzati nella cache per un anno.
+- Qualsiasi altro percorso con un'estensione di file restituisce quel file dal bundle.
+
+Queste route non necessitano di autorizzazione, mentre le operazioni dell'API mantengono le loro. Per un'API con autorizzazione IAM, la policy delle risorse consente a chiunque ogni `GET` tranne le operazioni IAM proprie dell'API, che necessitano ancora di una concessione IAM. Il Web ACL dell'API copre anche il sito web.
+
+Il sito web è costruito con un `base` Vite relativo (`./`), e il `basepath` del router proviene dal `<base href>` della pagina. Il costrutto distribuisce una copia di `index.html` per ogni percorso in cui l'API è raggiungibile, come `/prod/` sull'URL execute-api o il percorso base di un dominio personalizzato, e serve a ogni richiesta la copia per il suo dominio. Quindi una build serve ogni URL dell'API.
+
+Passa la tua API al sito web:
+
+```diff lang="ts" title="packages/infra/src/stacks/application-stack.ts"
+     const identity = new UserIdentity(this, 'Identity');
+     const api = new MyApi(this, 'MyApi', {
+       integrations: MyApi.defaultIntegrations(this).build(),
+     });
+     api.grantInvokeAccess(identity.identityPool.authenticatedRole);
+-    new MyWebsite(this, 'MyWebsite');
++    new MyWebsite(this, 'MyWebsite', { api });
+```
+
+Il client web del User Pool consente ogni URL in cui il sito web è servito come callback, quindi il sign-in ritorna all'URL da cui è partito.
+
+#### Domini personalizzati
+
+Il sito web è servito anche da ogni dominio personalizzato che mappa l'API, sia che tu imposti il `domainName` dell'API, chiami `addDomainName`, o lo mappi con un `DomainName` tuo, prima o dopo il costrutto del sito web. Su ogni dominio è servito sotto il percorso base del mapping: a `https://app.example.com` per un percorso base vuoto, o a `https://example.com/app/` per `app`. L'URL execute-api continua a servirlo anche.
+
+- `url` è sempre l'URL execute-api, come `https://<api-id>.execute-api.<region>.amazonaws.com/prod/`. Esiste per ogni API e non dipende da quali domini aggiungi. L'output dello stack `WebsiteUrl` lo nomina.
+- `urls` elenca ogni URL in cui il sito web è servito: l'URL execute-api per primo, poi ogni dominio personalizzato ordinato per nome di dominio e percorso base. L'output dello stack `WebsiteUrls` li elenca, separati da spazi.
+
+Il costrutto non sceglie mai un dominio rispetto a un altro. Se vuoi un dominio canonico, nominalo tu stesso, ad esempio in un output tuo:
+
+```ts
+new CfnOutput(this, 'AppUrl', { value: 'https://app.example.com' });
+```
+
+#### Insidie
+
+- Il sito web distribuito viene eseguito sotto un percorso come `/prod/`, mentre il server di sviluppo locale viene eseguito alla radice. Collega tramite il router o con URL relativi: un link che inizia con `/` funziona localmente e si rompe una volta distribuito.
+- La configurazione runtime nomina un URL per l'API, che il sito web chiama da qualsiasi URL da cui è stato caricato. L'API consente ogni origine di default. Se limiti le sue origini CORS con `restrictCorsTo`, includi l'origine di ciascuno degli `urls` del sito web.
+- Mantieni `<base href="%BASE_URL%" />` in `index.html`. Il costrutto scrive il percorso del sito web lì in ogni copia che distribuisce, e la build carica tutto relativamente ad esso.
+- Il costrutto rifiuta di sintetizzare per un'API con un'operazione `GET` a `/` o a un parametro di percorso di primo livello come `/{id}`, che prenderebbe i percorsi da cui il sito web è servito.
+- Passare un sito web esistente da CloudFront sostituisce il suo costrutto del sito web CloudFront solo se non lo hai modificato. Altrimenti il generatore si ferma: sposta le tue modifiche da parte, elimina il costrutto ed esegui nuovamente il generatore.
+- Se `RuntimeConfig`, `CognitoAuth`, `UserIdentity` o il costrutto della tua API è stato generato da una versione precedente del plugin, il generatore si ferma e lo nomina. Esegui `nx migrate @aws/nx-plugin`, applica le migrazioni ed esegui nuovamente il generatore.
+
 ## Configurazione runtime
 
 La configurazione dalla tua infrastruttura viene fornita al tuo sito web tramite <Link path="guides/runtime-config">Configurazione runtime</Link>. Questo consente al tuo sito web di accedere a dettagli come gli URL delle API che non sono noti fino a quando la tua applicazione non viene distribuita.

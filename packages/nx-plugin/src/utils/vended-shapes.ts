@@ -21,6 +21,14 @@ export const USER_IDENTITY_CALLBACK_URLS: VendedShape = {
   ],
 };
 
+/** A REST API construct's grant naming a same-account grantee in its own policy alone */
+export const REST_API_SAME_ACCOUNT_GRANT: VendedShape = {
+  current: '`Token.compareStrings($_, $_)`',
+  old: [
+    'method_definition(name=$name, body=$body) where { $name <: `grantInvokeAccess`, $body <: contains `this.api.addToResourcePolicy($_)` }',
+  ],
+};
+
 /** useSigV4 signing for API Gateway behind a custom domain */
 export const SIGV4_CUSTOM_DOMAINS: VendedShape = {
   current: '`signingScope(input)`',
