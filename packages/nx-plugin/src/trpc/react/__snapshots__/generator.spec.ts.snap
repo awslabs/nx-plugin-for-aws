@@ -514,15 +514,30 @@ export const useSigV4 = (): SigV4Client => {
     return new AwsClient(credential);
   }, [cognitoProps, user?.id_token, user?.profile.sub, withCachedCredentials]);
 
+  // aws4fetch infers the service and region from an AWS hostname. Behind a custom
+  // domain it can infer neither, so name API Gateway in the identity pool's region.
+  const signingScope = useCallback(
+    (input: RequestInfo | URL | AwsSignInput) => {
+      const { hostname } = new URL(
+        input instanceof Request ? input.url : input.toString(),
+        window.location.href,
+      );
+      return !cognitoProps || hostname.endsWith('.amazonaws.com')
+        ? {}
+        : { service: 'execute-api', region: cognitoProps.region };
+    },
+    [cognitoProps],
+  );
+
   const sigv4Fetch: typeof globalThis.fetch = useCallback(
     async (input: RequestInfo | URL, init?: RequestInit | undefined) => {
       if (skipSigning) {
         return nativeFetch(input, init);
       }
       const awsClient = await getAwsClient();
-      return awsClient.fetch(input, init);
+      return awsClient.fetch(input, { ...init, aws: signingScope(input) });
     },
-    [skipSigning, getAwsClient],
+    [skipSigning, getAwsClient, signingScope],
   );
 
   const sign = useCallback(
@@ -531,9 +546,12 @@ export const useSigV4 = (): SigV4Client => {
         return new Request(input.toString(), init ?? undefined);
       }
       const awsClient = await getAwsClient();
-      return awsClient.sign(input, init);
+      return awsClient.sign(input, {
+        ...init,
+        aws: { ...signingScope(input), ...init?.aws },
+      });
     },
-    [skipSigning, getAwsClient],
+    [skipSigning, getAwsClient, signingScope],
   );
 
   return { fetch: sigv4Fetch, sign };

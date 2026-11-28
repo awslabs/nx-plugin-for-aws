@@ -359,6 +359,50 @@ export function Main() {
       ).toBeTruthy();
     });
 
+    it('should sign for API Gateway behind a custom domain, and let aws4fetch infer AWS hosts', async () => {
+      await smithyReactConnectionGenerator(tree, {
+        frontendProjectName: 'frontend',
+        smithyModelOrBackendProjectName: 'api-model',
+      });
+
+      const hook =
+        tree.read('apps/frontend/src/hooks/useSigV4.tsx', 'utf-8') ?? '';
+      const body =
+        hook.match(
+          /const signingScope = useCallback\(\n\s*(\(input[\s\S]+?\n {4}\}),\n/,
+        )?.[1] ?? '';
+      expect(body).toContain('execute-api');
+      const signingScope = (cognitoProps: unknown, input: string) =>
+        new Function(
+          'cognitoProps',
+          'window',
+          `return (${body.replace(/: RequestInfo \| URL \| AwsSignInput/, '')});`,
+        )(cognitoProps, {
+          location: { href: 'https://app.example.com/prod/' },
+        })(input);
+
+      const cognitoProps = { region: 'ap-southeast-2' };
+      expect(
+        signingScope(cognitoProps, 'https://app.example.com/prod/echo'),
+      ).toEqual({ service: 'execute-api', region: 'ap-southeast-2' });
+      expect(signingScope(cognitoProps, 'echo')).toEqual({
+        service: 'execute-api',
+        region: 'ap-southeast-2',
+      });
+      expect(
+        signingScope(
+          cognitoProps,
+          'https://abc.execute-api.us-east-1.amazonaws.com/prod/echo',
+        ),
+      ).toEqual({});
+      expect(
+        signingScope(
+          cognitoProps,
+          'https://bedrock-agentcore.us-west-2.amazonaws.com/runtimes/x',
+        ),
+      ).toEqual({});
+    });
+
     it('should handle IAM auth option', async () => {
       await smithyReactConnectionGenerator(tree, {
         frontendProjectName: 'frontend',

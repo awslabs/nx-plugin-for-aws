@@ -135,6 +135,90 @@ describe('cognito-auth generator', () => {
     ).toMatchSnapshot('user-identity');
   });
 
+  it('should return from sign-in to the app base path, or the bare origin at the root', async () => {
+    tree.write(
+      'packages/test-project/src/main.tsx',
+      `const App = () => <RouterProvider router={router} />;
+      export const Main = () => <App/>;`,
+    );
+    await tsReactWebsiteAuthGenerator(tree, options);
+
+    const component = tree
+      .read('packages/test-project/src/components/CognitoAuth/index.tsx')
+      .toString();
+    const expression =
+      component.match(/redirect_uri:([\s\S]+?),\n\s*response_type/)?.[1] ?? '';
+    expect(expression).toContain('BASE_URL');
+    const redirectUri = (baseUrl: string, pageBase = baseUrl) =>
+      new Function(
+        'window',
+        'meta',
+        'document',
+        `return (${expression.replaceAll('import.meta', 'meta')});`,
+      )(
+        { location: { origin: 'https://example.com' } },
+        { env: { BASE_URL: baseUrl } },
+        { baseURI: `https://example.com${pageBase}` },
+      );
+
+    // Matches the callback URLs registered for CloudFront and local dev servers
+    expect(redirectUri('/')).toBe('https://example.com');
+    expect(redirectUri('/prod/')).toBe('https://example.com/prod/');
+    // A relative base resolves against the page's <base href>
+    expect(redirectUri('./', '/prod/')).toBe('https://example.com/prod/');
+    expect(redirectUri('./', '/')).toBe('https://example.com');
+  });
+
+  it('should keep the page the user opened through sign-in', async () => {
+    tree.write(
+      'packages/test-project/src/main.tsx',
+      `const App = () => <RouterProvider router={router} />;
+      export const Main = () => <App/>;`,
+    );
+    await tsReactWebsiteAuthGenerator(tree, options);
+
+    const component = tree
+      .read('packages/test-project/src/components/CognitoAuth/index.tsx')
+      .toString();
+    expect(component).toContain('auth.signinRedirect({ state:');
+
+    const callback =
+      component.match(
+        /onSigninCallback: (\(user\) => \{[\s\S]+?\n {4}\}),/,
+      )?.[1] ?? '';
+    expect(callback).toContain('replaceState');
+    const landOn = (state: unknown, baseUrl = '/', viteBase = baseUrl) => {
+      const replaceState = vi.fn();
+      new Function(
+        'window',
+        'meta',
+        'document',
+        `return (${callback.replaceAll('import.meta', 'meta')});`,
+      )(
+        {
+          history: { replaceState },
+          location: { origin: 'https://example.com', pathname: baseUrl },
+        },
+        { env: { BASE_URL: viteBase } },
+        { baseURI: `https://example.com${baseUrl}` },
+      )({ state });
+      return replaceState.mock.calls[0][2];
+    };
+
+    expect(landOn('/settings?tab=2#top')).toBe('/settings?tab=2#top');
+    expect(landOn('/prod/guide/a', '/prod/')).toBe('/prod/guide/a');
+    // Never another origin, nor a path outside the app
+    expect(landOn('//evil.example.com/x')).toBe('/');
+    expect(landOn('/other/page', '/prod/')).toBe('/prod/');
+    // Resolved before it is checked: '..' cannot climb out, nor '\\' reach a host
+    expect(landOn('/prod/../x', '/prod/')).toBe('/prod/');
+    expect(landOn('/\\evil.example.com')).toBe('/');
+    expect(landOn(undefined, '/prod/')).toBe('/prod/');
+    // A relative base resolves against the page's <base href>
+    expect(landOn('/prod/guide/a', '/prod/', './')).toBe('/prod/guide/a');
+    expect(landOn('/other/page', '/prod/', './')).toBe('/prod/');
+  });
+
   it('should update main.tsx when RuntimeConfigProvider exists', async () => {
     // Setup main.tsx with RuntimeConfigProvider
     tree.write(

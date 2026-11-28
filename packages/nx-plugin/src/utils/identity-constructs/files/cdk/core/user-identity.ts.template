@@ -9,6 +9,7 @@ import {
   Lazy,
   RemovalPolicy,
   Stack,
+  Token,
 } from 'aws-cdk-lib';
 import {
   AccountRecovery,
@@ -320,16 +321,55 @@ export class UserIdentity extends Construct {
       managedLoginVersion: ManagedLoginVersion.NEWER_MANAGED_LOGIN,
     });
 
+  private readonly additionalCallbackUrls: string[] = [];
+
+  /**
+   * Permits the web client's sign-in and sign-out to redirect to the given URL,
+   * in addition to the local dev servers and any CloudFront distributions in the stack.
+   *
+   * @param url - The full URL the app redirects to, such as a website served from a custom domain
+   */
+  public addCallbackUrl(url: string) {
+    if (!Token.isUnresolved(url)) {
+      const { protocol, hostname } = new URL(url);
+      const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(hostname);
+      if (protocol !== 'https:' && !(protocol === 'http:' && loopback)) {
+        throw new Error(
+          `Callback URL ${url} must use https, or http on a loopback host`,
+        );
+      }
+    }
+    this.additionalCallbackUrls.push(url);
+  }
+
   private createUserPoolClient = (userPool: UserPool) => {
     const lazilyComputedCallbackUrls = Lazy.list({
       produce: () =>
-        LOCAL_CALLBACK_URLS.concat(
-          Stack.of(this)
-            .node.findAll()
-            .filter((child): child is Distribution => child instanceof Distribution)
-            .flatMap(findCloudFrontDomainNames)
-            .map((domain) => `https://${domain}`)
-        ),
+        [
+          ...new Set(
+            LOCAL_CALLBACK_URLS.concat(this.additionalCallbackUrls)
+              .concat(
+                Stack.of(this)
+                  .node.findAll()
+                  .filter((child): child is Distribution => child instanceof Distribution)
+                  .flatMap(findCloudFrontDomainNames)
+                  .map((domain) => `https://${domain}`)
+              )
+              // Websites served other than by CloudFront, such as through an API
+              .concat(
+                Stack.of(this)
+                  .node.findAll()
+                  // Under a key only the plugin's constructs set, so no other construct's property is read
+                  .flatMap(
+                    (child) =>
+                      (child as unknown as Record<symbol, unknown>)[
+                        Symbol.for('@aws/nx-plugin/sign-in-callback-urls')
+                      ],
+                  )
+                  .filter((url): url is string => typeof url === 'string')
+              ),
+          ),
+        ],
     });
 
     return userPool.addClient(WEB_CLIENT_ID, {

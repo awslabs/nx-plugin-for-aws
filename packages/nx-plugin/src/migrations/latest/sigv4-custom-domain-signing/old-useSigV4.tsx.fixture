@@ -1,0 +1,107 @@
+import { AwsClient } from 'aws4fetch';
+import { fromCognitoIdentityPool } from '@aws-sdk/credential-provider-cognito-identity';
+import { useCallback, useRef } from 'react';
+import { useAuth } from 'react-oidc-context';
+import { useRuntimeConfig } from './useRuntimeConfig';
+import {
+  AwsCredentialIdentity,
+  AwsCredentialIdentityProvider,
+} from '@smithy/types';
+
+// Capture the native fetch before any monkey-patching can occur.
+const nativeFetch = globalThis.fetch.bind(globalThis);
+
+// Credential expiration grace time before considering credentials as expired
+const CREDENTIAL_EXPIRY_OFFSET_MILLIS = 30 * 1000;
+
+type AwsSignInput = Parameters<AwsClient['sign']>[0];
+type AwsSignInit = Parameters<AwsClient['sign']>[1];
+
+export interface SigV4Client {
+  /** A SigV4-signing fetch drop-in replacement. */
+  fetch: typeof globalThis.fetch;
+  /** Signs a request. Same parameters as AwsClient.sign(). Returns an unsigned Request when signing is skipped. */
+  sign: AwsClient['sign'];
+}
+
+export const useSigV4 = (): SigV4Client => {
+  const { cognitoProps } = useRuntimeConfig();
+  const auth = useAuth();
+  const user = auth?.user;
+
+  const cachedCredentials = useRef<{ [key: string]: AwsCredentialIdentity }>(
+    {},
+  );
+
+  const skipSigning = !cognitoProps && import.meta.env.MODE === 'local-dev';
+
+  const withCachedCredentials = useCallback(
+    async (
+      provider: AwsCredentialIdentityProvider,
+      ...cacheKeys: string[]
+    ): Promise<AwsCredentialIdentity> => {
+      const key = `sigv4/${cacheKeys.join('/')}`;
+      const cachedCreds = cachedCredentials.current[key];
+      if (
+        cachedCreds &&
+        cachedCreds.expiration &&
+        cachedCreds.expiration.getTime() >
+          Date.now() + CREDENTIAL_EXPIRY_OFFSET_MILLIS
+      ) {
+        return cachedCreds;
+      }
+      const credentials = await provider();
+      cachedCredentials.current[key] = credentials;
+      return credentials;
+    },
+    [],
+  );
+
+  const getAwsClient = useCallback(async (): Promise<AwsClient> => {
+    if (!cognitoProps) {
+      throw new Error('cognitoProps is undefined!');
+    }
+    if (!user?.id_token) {
+      throw new Error('user.id_token is undefined!');
+    }
+
+    const credentialsFromCognitoIdentityPool = fromCognitoIdentityPool({
+      clientConfig: { region: cognitoProps.region },
+      identityPoolId: cognitoProps.identityPoolId,
+      logins: {
+        [`cognito-idp.${cognitoProps.region}.amazonaws.com/${cognitoProps.userPoolId}`]:
+          user.id_token,
+      },
+    });
+    const credential = await withCachedCredentials(
+      credentialsFromCognitoIdentityPool,
+      cognitoProps.identityPoolId,
+      user.profile.sub,
+    );
+    return new AwsClient(credential);
+  }, [cognitoProps, user?.id_token, user?.profile.sub, withCachedCredentials]);
+
+  const sigv4Fetch: typeof globalThis.fetch = useCallback(
+    async (input: RequestInfo | URL, init?: RequestInit | undefined) => {
+      if (skipSigning) {
+        return nativeFetch(input, init);
+      }
+      const awsClient = await getAwsClient();
+      return awsClient.fetch(input, init);
+    },
+    [skipSigning, getAwsClient],
+  );
+
+  const sign = useCallback(
+    async (input: AwsSignInput, init?: AwsSignInit): Promise<Request> => {
+      if (skipSigning) {
+        return new Request(input.toString(), init ?? undefined);
+      }
+      const awsClient = await getAwsClient();
+      return awsClient.sign(input, init);
+    },
+    [skipSigning, getAwsClient],
+  );
+
+  return { fetch: sigv4Fetch, sign };
+};

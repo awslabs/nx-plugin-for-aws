@@ -58,12 +58,13 @@ describe('runtime-config generator', () => {
     expect(
       tree.exists('packages/test-app/src/components/RuntimeConfig/index.tsx'),
     ).toBeTruthy();
+    const component = tree
+      .read('packages/test-app/src/components/RuntimeConfig/index.tsx')
+      ?.toString();
+    // Fetched relative to the app's base path, so it also works under a path prefix
+    expect(component).toContain('import.meta.env.BASE_URL}runtime-config.json');
     // Snapshot the generated RuntimeConfig component
-    expect(
-      tree
-        .read('packages/test-app/src/components/RuntimeConfig/index.tsx')
-        ?.toString(),
-    ).toMatchSnapshot('runtime-config-component.tsx');
+    expect(component).toMatchSnapshot('runtime-config-component.tsx');
   });
 
   it('should modify main.tsx correctly', async () => {
